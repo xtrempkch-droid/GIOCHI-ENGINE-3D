@@ -116,17 +116,48 @@ multiarch preso a `noble` colide em `libcrypt-dev` (amd64 *Breaks* arm64). Extra
 `scripts/install-arm64-deps.sh`, que deriva a suite do `/etc/os-release`, com os dois jobs
 de índices coincidentes fixados em `ubuntu-24.04`.
 
-**Estado no GitHub (execuções reais, commit `79e8106`):**
+**Estado no GitHub (execuções reais, até `6b074b0`):**
 
 | Workflow | Jobs | Resultado |
 |---|---|---|
 | `ci.yml` | gates, ffi, cross-check, smoke | ✅ verde |
 | `cross-compile.yml` | check, link (`ubuntu-24.04`) | ✅ verde, link ARM64 real |
-| `release.yml` | build-x86_64, build-aarch64, publish | ✅ verde; `v0.1.1` publicada com os dois arquivos |
+| `release.yml` | build-x86_64, build-aarch64, publish | ✅ verde; execução `42384430385` a partir da tag `v0.1.1` |
 
 Validação: a matriz completa de CI espelhada num contentor `ubuntu:24.04` limpo — fmt,
 clippy, build, 209 testes, doc, header, FFI (C + Python), demo, os cinco exemplos e o
 `mini_game.lua` — **16/16 passos**, 0 falhas.
+
+## Verificação do artefato `v0.1.1` (2026-11-07)
+
+O workflow cria a release em **rascunho** de propósito (ver `CONTRIBUTING.md`,
+"Releasing"): os arquivos só são publicados depois de alguém os executar. O ensaio
+abaixo foi feito exatamente para essa revisão, a partir do `.zip` que o
+`upload-artifact` gerou na execução `42384430385` — não de uma build local:
+
+```
+giochi-engine-x86_64-unknown-linux-gnu.tar.gz   8 578 531 bytes
+giochi-engine-aarch64-unknown-linux-gnu.tar.gz  8 430 137 bytes (artefato)
+```
+
+Conteúdo do tarball x86_64: `giochi-demo`, `include/giochi.h`, `lib/libgiochi.{so,a}`,
+`lua/mini_game.lua`, os oito documentos, `README`/`LICENSE`/`CHANGELOG`/`PROGRESS` e
+`assets/` com **os dois formatos** (`player.png`/`player.bmp`, `checker.png`/`checker.bmp`).
+
+Executado depois de extrair, com `SDL_VIDEODRIVER=dummy`:
+
+| Verificação | Resultado |
+|---|---|
+| `giochi.h` diz a versão | `For version \`0.1.1\` this returns \`0x0000_0101\`` |
+| Símbolos `giochi_*` exportados em `libgiochi.so` | 57 |
+| `giochi-demo --verify` | 1 textura viva, áudio ativo |
+| `giochi-demo lua lua/mini_game.lua --auto --frames=60` | 0 texturas vivas no fim |
+| `c_smoke` compilado contra o `include/` e o `lib/` do tarball | `OK (abi 1, engine 0.1.1)` |
+| Os mesmos três, **apagando os PNG** (só BMP, como no console) | todos passam |
+
+O último item é o que valida a ADR-036 de ponta a ponta: o artefato publicado continua
+a funcionar num alvo sem decoder PNG.
+
 
 ## Validação em hardware real (2026-11-07)
 
