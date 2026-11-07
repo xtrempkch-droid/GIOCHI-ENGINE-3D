@@ -9,6 +9,11 @@ is never relaxed.
 The header `giochi-engine-capi/include/giochi.h` is generated from this contract
 by `cbindgen` (phase 7) and must match it exactly.
 
+Implementation progress: phase 0 delivered the value types and the two version
+queries; phase 1 delivered the platform layer behind `giochi_engine_init`
+(`Platform`, `Window`, `Time`, `GameLoop`). The `extern "C"` functions themselves
+land in phase 7.
+
 ---
 
 ## 1. Scope
@@ -311,6 +316,21 @@ int32_t giochi_engine_is_running(void);   /* 1/0                  (phase 5) */
   textures, sounds, music and scenes first for deterministic behaviour.
 * `giochi_engine_run` pumps events, runs fixed-timestep updates and renders until
   `Escape`, the window close button or `giochi_engine_request_quit`.
+
+**Video driver negotiation** (implemented in phase 1, in Rust, as
+`Platform::new`):
+
+| Situation | Behaviour |
+|---|---|
+| `SDL_VIDEODRIVER` set by the caller | Used verbatim. Never replaced, never retried. |
+| `SDL_VIDEODRIVER` unset | Engine selects `kmsdrm`. |
+| Engine-selected `kmsdrm` cannot start | Warning logged, retried with SDL's default desktop driver. |
+| Initialisation fails in every case | `GIOCHI_ERROR_PLATFORM`; the message names the driver, SDL's error, the DRM devices present and the hints below. |
+
+The engine never rewrites `SDL_VIDEODRIVER` when the caller set it, so a
+production deployment can pin `kmsdrm` and let the engine fail loudly rather than
+fall back. Hints honoured by the KMSDRM backend: `SDL_KMSDRM_REQUIRE_DRM_MASTER`,
+`SDL_KMSDRM_DEVICE_INDEX`, `SDL_VIDEO_EGL_DRIVER`, `SDL_VIDEO_GL_DRIVER`.
 
 ### 5.3 Textures
 

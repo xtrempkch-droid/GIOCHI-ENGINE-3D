@@ -50,7 +50,21 @@ An optional sysroot that provides ARM64 audio/udev headers can be supplied with
 without ALSA/udev; that is enough to validate that the engine compiles for ARM64,
 but a production build should use a complete sysroot.
 
-## `cross`
+## KMSDRM in a cross build
+
+SDL2 is configured with `SDL_KMSDRM=ON`, and `SDL_KMSDRM_SHARED=ON` makes it load
+`libdrm`, `libgbm` and `libEGL` at **runtime** through `dlopen`. That is why the
+cross-check links without ARM64 copies of those libraries, and why the generated
+objects are genuinely ARM64:
+
+```text
+$ file target/aarch64-unknown-linux-gnu/debug/build/sdl2-sys-*/out/build/CMakeFiles/SDL2.dir/src/video/kmsdrm/SDL_kmsdrmdyn.c.o
+ELF 64-bit LSB relocatable, ARM aarch64, version 1 (SYSV), not stripped
+```
+
+The consequence for deployment: the target root filesystem must provide
+`libdrm.so.2`, `libgbm.so.1` and `libEGL.so.1`. For a fully static link, provide an
+ARM64 sysroot that ships those libraries and rebuild.
 
 `Cross.toml` configures `cross` for the same target, installing the ARM64
 `libasound2-dev`/`libudev-dev` packages inside the container. It is an

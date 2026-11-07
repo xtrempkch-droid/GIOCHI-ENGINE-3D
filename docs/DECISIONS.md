@@ -19,6 +19,8 @@ add a new ADR that states what it replaces.
 | 012 | ABI v1 is singleton-based (no context pointers) | Accepted |
 | 013 | Wrapper structs keep a `_reserved` tail | Accepted |
 | 014 | CMake 4 policy workaround for bundled SDL2 | Accepted |
+| 015 | KMSDRM is auto-selected, with a loud desktop fallback | Accepted |
+| 016 | `Platform` owns an `Rc`'d SDL context | Accepted |
 
 ---
 
@@ -260,3 +262,55 @@ and it keeps `cargo build` a one-command operation on modern distros.
 
 **Consequences.** If SDL2 is ever built outside cargo (e.g. a distro package), the
 variable is harmless. Revisit when `sdl2-sys` bumps its CMake minimum.
+
+---
+
+## ADR-015 — KMSDRM is auto-selected, with a loud desktop fallback
+
+**Context.** The production target boots straight into the engine and must use
+SDL2's `kmsdrm` backend, but developers work on desktops where a compositor holds
+DRM master and KMSDRM cannot start. Unconditionally defaulting to KMSDRM makes
+`cargo run` fail on every development machine; never defaulting to it means the
+console build quietly runs on the wrong driver.
+
+**Decision.** Negotiation happens once, in `Platform::new`:
+
+1. `SDL_VIDEODRIVER` already set → use it, never touch it
+   (`VideoDriverChoice::Explicit`).
+2. Not set → select `kmsdrm` (`VideoDriverChoice::AutoKmsdrm`).
+3. Auto-selected `kmsdrm` fails to initialise → log a warning, unset the variable
+   and retry with SDL's default desktop driver
+   (`VideoDriverChoice::AutoFallback`).
+4. An *explicit* driver that fails is never retried. The error names the driver,
+   SDL's message, the DRM devices present and the relevant hints, and points at
+   `SDL_VIDEODRIVER`.
+
+**Why the fallback is not "silent".** It only ever happens when the engine, not
+the user, chose the driver, it is logged at `warn`, and the resolved choice is
+observable through `Platform::video_driver_choice()`. A console build that must
+fail hard can check that value or set `SDL_VIDEODRIVER` explicitly.
+
+**Consequences.** `cargo run -p giochi-demo` works on a desktop and still prefers
+KMSDRM on a console. Consumers that switch on the choice can tell the two apart.
+
+---
+
+## ADR-016 — `Platform` owns an `Rc`'d SDL context
+
+**Context.** SDL2 requires `SDL_Quit` to run after every window is destroyed, and
+the `sdl2` crate ties subsystem lifetimes to the `Sdl` handle. A `Window` that only
+borrowed the platform would force a lifetime parameter — forbidden on public
+functions and structs.
+
+**Decision.** `Platform` owns `Rc<SdlContext>` (the `Sdl`, video, timer and event
+subsystems). `Window` holds a clone of that `Rc`, so a window may outlive the
+`Platform` handle that created it. The field is private; no `Rc` is observable from
+the public API.
+
+**Why not a lifetime parameter.** `Window<'a>` would violate ADR-006 and would
+infect every user signature. Why not `Arc`: the engine is single-threaded
+(ADR-010), so atomics would be pure overhead.
+
+**Consequences.** Field declaration order matters in `Window`: the SDL window drops
+before the `Rc` releases the video subsystem. That ordering is documented on the
+struct and is the reason the field is named `_context` and declared last.

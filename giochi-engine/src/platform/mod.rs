@@ -7,5 +7,9 @@
 pub mod sdl;
 pub mod window;
 
-pub use sdl::{init_sdl, sdl_version, SDL_VIDEODRIVER_ENV};
+pub use sdl::{
+    has_drm_device, quit_signal, sdl_version, Platform, QuitSignal, VideoDriverChoice,
+    DRM_DIRECTORY, HINT_KMSDRM_DEVICE_INDEX, HINT_KMSDRM_REQUIRE_DRM_MASTER, HINT_VIDEO_EGL_DRIVER,
+    HINT_VIDEO_GL_DRIVER, KMSDRM_VIDEO_DRIVER, SDL_VIDEODRIVER_ENV,
+};
 pub use window::{Window, WindowConfig};

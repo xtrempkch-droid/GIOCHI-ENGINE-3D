@@ -9,4 +9,4 @@ pub mod time;
 
 pub use engine::{Engine, EngineConfig, ENGINE_TITLE_CAPACITY};
 pub use game_loop::{GameLoop, FIXED_TIMESTEP, MAX_FRAME_TIME};
-pub use time::Time;
+pub use time::{FrameClock, Time};

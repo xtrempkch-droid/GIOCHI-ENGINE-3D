@@ -4,9 +4,10 @@ A **2D** game engine in Rust on top of SDL2, designed from day one to be consume
 from any language through a C ABI. Primary target: `aarch64-unknown-linux-gnu`
 (Linux consoles with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 
-> **Status: phase 0 (bootstrap).** The workspace, the module tree, the C ABI
-> contract and every value type exist and compile. Behaviour is filled in phase by
-> phase — see [PROGRESS.md](PROGRESS.md).
+> **Status: phase 1 (platform + game loop).** The workspace, the C ABI contract,
+> every value type, the SDL2 platform layer, the window wrapper and the
+> fixed-timestep loop exist. Rendering lands in phase 2 — see
+> [PROGRESS.md](PROGRESS.md).
 
 ## Why "C-shaped" Rust?
 
@@ -46,7 +47,27 @@ from source, so no system SDL2 is required.
 
 ```bash
 cargo build --workspace
-cargo run -p giochi-demo      # prints: giochi-engine bootstrap OK
+cargo run -p giochi-demo      # opens a 1280x720 window; ESC or close quits
+```
+
+The demo accepts `--frames N` to run a fixed number of frames and exit, which is
+handy for smoke tests:
+
+```bash
+cargo run -p giochi-demo -- --frames 60
+```
+
+### Video driver
+
+On a Linux console the engine selects SDL2's `kmsdrm` driver automatically, but
+only when `SDL_VIDEODRIVER` is unset — an explicit value is never overwritten. If
+the auto-selected KMSDRM backend cannot start (a desktop compositor holds DRM
+master, `/dev/dri` is unavailable, …) the engine logs a warning and falls back to
+the desktop driver. Pin the driver to make that failure loud instead:
+
+```bash
+SDL_VIDEODRIVER=kmsdrm ./target/debug/giochi-demo   # production console
+SDL_VIDEODRIVER=x11    ./target/debug/giochi-demo   # development desktop
 ```
 
 All quality gates:
