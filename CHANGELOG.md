@@ -16,6 +16,11 @@ rather than a rewrite. Runs on `x86_64-unknown-linux-gnu` and
 `aarch64-unknown-linux-gnu`; auto-selects KMSDRM on a bare Linux console and
 falls back to the desktop driver elsewhere.
 
+### Verified on the real runners
+
+`ci.yml`, `cross-compile.yml` and `release.yml` are green on GitHub, including the
+ARM64 link and the packaged `v0.1.0` draft release with both archives.
+
 ### Fixed — CI on the runner, after the workflows started working
 
 - `ubuntu-latest` moved from 24.04 to 26.04, and the ARM64 multiarch recipe broke with

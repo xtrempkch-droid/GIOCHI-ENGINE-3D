@@ -116,6 +116,14 @@ multiarch preso a `noble` colide em `libcrypt-dev` (amd64 *Breaks* arm64). Extra
 `scripts/install-arm64-deps.sh`, que deriva a suite do `/etc/os-release`, com os dois jobs
 de índices coincidentes fixados em `ubuntu-24.04`.
 
+**Estado no GitHub (execuções reais, commit `79e8106`):**
+
+| Workflow | Jobs | Resultado |
+|---|---|---|
+| `ci.yml` | gates, ffi, cross-check, smoke | ✅ verde |
+| `cross-compile.yml` | check, link (`ubuntu-24.04`) | ✅ verde, link ARM64 real |
+| `release.yml` | build-x86_64, build-aarch64, publish | ✅ verde, rascunho `v0.1.0` com os dois arquivos |
+
 Validação: a matriz completa de CI espelhada num contentor `ubuntu:24.04` limpo — fmt,
 clippy, build, 209 testes, doc, header, FFI (C + Python), demo, os cinco exemplos e o
 `mini_game.lua` — **16/16 passos**, 0 falhas.

@@ -121,7 +121,9 @@ jobs:
       - name: Prepare release notes
         run: |
           {
-            echo "Binaries built from \`${{ github.ref_name }}\`."
+            # The same expression the tag uses: a manual dispatch carries its tag in
+            # `inputs.tag`, and `ref_name` would be the branch name ("main") there.
+            echo "Binaries built from \`${{ github.event.inputs.tag || github.ref_name }}\`."
             echo
             echo "| Target | Asset |"
             echo "|---|---|"

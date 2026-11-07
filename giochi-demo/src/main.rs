@@ -8,6 +8,7 @@
 //! cargo run -p giochi-demo                    # interactive, ESC quits
 //! cargo run -p giochi-demo -- --frames 120    # deterministic run for smoke tests
 //! cargo run -p giochi-demo -- lua game.lua    # run a Lua script (phase 8)
+//! giochi-demo --frames 3 --quadro out.bmp     # capture a frame as BMP
 //! ```
 //!
 //! The scene is deliberately small: a textured sprite you can move with WASD or the
@@ -50,6 +51,13 @@ struct Options {
     verify: bool,
     /// `lua <script> [args...]`: run a script instead of the built-in demo.
     lua: Option<Vec<String>>,
+    /// `--quadro <arquivo.bmp>`: capture the last rendered frame.
+    ///
+    /// Exists for the device: "abriu" and "desenhou" are different claims, and
+    /// without a capture there is no way to tell them apart over SSH. Works with
+    /// the software renderer; with GLES read-back returns the swapped buffer, so
+    /// the capture is taken before `present` (see `capture`).
+    quadro: Option<String>,
 }
 
 impl Options {
@@ -68,6 +76,10 @@ impl Options {
                 options.frames = args.next().and_then(|value| value.parse().ok());
             } else if arg == "--verify" {
                 options.verify = true;
+            } else if arg == "--quadro" {
+                options.quadro = args.next();
+            } else if let Some(value) = arg.strip_prefix("--quadro=") {
+                options.quadro = Some(value.to_string());
             }
         }
 
@@ -75,8 +87,26 @@ impl Options {
     }
 }
 
+/// Resolves an asset path.
+///
+/// The first candidate is relative to the working directory, which is what an
+/// installed build needs: `CARGO_MANIFEST_DIR` is a **host** path frozen at compile
+/// time, so a cross-compiled binary looks for `/home/.../giochi-demo/../assets/...`
+/// on the device and fails with a path that does not exist there. Measured on the
+/// R35S: `failed to load texture '/home/charles/.../assets/player.png'`.
+///
+/// The manifest directory stays as the fallback so `cargo run` keeps working from
+/// any directory.
 fn asset(name: &str) -> String {
-    format!("{}/../assets/{name}", env!("CARGO_MANIFEST_DIR"))
+    let relative = format!("assets/{name}");
+    if std::path::Path::new(&relative).exists() {
+        return relative;
+    }
+    let from_manifest = format!("{}/../assets/{name}", env!("CARGO_MANIFEST_DIR"));
+    if std::path::Path::new(&from_manifest).exists() {
+        return from_manifest;
+    }
+    relative
 }
 
 fn run(options: Options) -> Result<(), String> {
@@ -96,7 +126,28 @@ fn run(options: Options) -> Result<(), String> {
         engine.set_frame_limit(limit);
     }
 
-    engine.run_current().map_err(|error| error.to_string())?;
+    if let Some(caminho) = options.quadro.as_deref() {
+        // `run_current` presenteia cada quadro; a captura precisa do buffer antes
+        // do swap, então o laço é manual: desenha, lê, e só então segue.
+        let limite = options.frames.unwrap_or(3).max(1);
+        for _ in 0..limite {
+            engine.step(1.0 / 60.0).map_err(|error| error.to_string())?;
+        }
+        let (largura, altura) = engine.render().size();
+        let pixels = engine
+            .render()
+            .read_pixels(giochi_engine::Rect::new(
+                0.0,
+                0.0,
+                largura as f32,
+                altura as f32,
+            ))
+            .map_err(|error| error.to_string())?;
+        escrever_bmp(caminho, largura, altura, &pixels)?;
+        println!("quadro: {caminho} ({largura}x{altura})");
+    } else {
+        engine.run_current().map_err(|error| error.to_string())?;
+    }
 
     let stats = engine.run_stats();
     println!(
@@ -121,6 +172,58 @@ fn run(options: Options) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Writes an RGBA8 buffer as a 32-bit BMP, bottom-up.
+///
+/// BMP and not PNG on purpose: `SDL2_image` on the device image is built **without
+/// libpng** — `IMG_isPNG` exists and reports "PNG images are not supported" — so a
+/// PNG writer would have to carry its own deflate implementation for a capture the
+/// PC converts anyway. BMP needs no library on either side.
+fn escrever_bmp(caminho: &str, largura: u32, altura: u32, pixels: &[u8]) -> Result<(), String> {
+    let esperado = (largura as usize) * (altura as usize) * 4;
+    if pixels.len() != esperado {
+        return Err(format!(
+            "quadro com {} bytes; esperado {esperado} ({largura}x{altura} RGBA)",
+            pixels.len()
+        ));
+    }
+
+    let tamanho_pixels = esperado;
+    let cabecalho = 54usize;
+    let mut bmp = Vec::with_capacity(cabecalho + tamanho_pixels);
+
+    bmp.extend_from_slice(b"BM");
+    bmp.extend_from_slice(&((cabecalho + tamanho_pixels) as u32).to_le_bytes());
+    bmp.extend_from_slice(&0u32.to_le_bytes());
+    bmp.extend_from_slice(&(cabecalho as u32).to_le_bytes());
+    bmp.extend_from_slice(&40u32.to_le_bytes());
+    bmp.extend_from_slice(&(largura as i32).to_le_bytes());
+    bmp.extend_from_slice(&(altura as i32).to_le_bytes());
+    bmp.extend_from_slice(&1u16.to_le_bytes());
+    bmp.extend_from_slice(&32u16.to_le_bytes());
+    bmp.extend_from_slice(&0u32.to_le_bytes());
+    bmp.extend_from_slice(&(tamanho_pixels as u32).to_le_bytes());
+    bmp.extend_from_slice(&2835i32.to_le_bytes());
+    bmp.extend_from_slice(&2835i32.to_le_bytes());
+    bmp.extend_from_slice(&0u32.to_le_bytes());
+    bmp.extend_from_slice(&0u32.to_le_bytes());
+
+    // BMP guarda de baixo para cima e em BGRA; `read_pixels` devolve RGBA de cima
+    // para baixo. Trocar só a ordem dos canais deixaria a imagem de cabeça para
+    // baixo — que é o mesmo sintoma de rotação errada e manda procurar no lugar
+    // errado.
+    for y in (0..altura as usize).rev() {
+        let linha = &pixels[y * largura as usize * 4..(y + 1) * largura as usize * 4];
+        for pixel in linha.chunks_exact(4) {
+            bmp.push(pixel[2]);
+            bmp.push(pixel[1]);
+            bmp.push(pixel[0]);
+            bmp.push(255);
+        }
+    }
+
+    std::fs::write(caminho, &bmp).map_err(|error| format!("não escrevi {caminho}: {error}"))
 }
 
 /// Runs a Lua script: `giochi-demo lua <script.lua> [args...]`.
