@@ -1,5 +1,8 @@
 # Estado — GIOCHI-ENGINE
 
+## Última entrega: jogo de equilíbrio (`ball_balance`) para medir latência
+Data: 2026-11-07
+
 ## Última fase concluída: 12 — Câmera com controlo + mini_fps
 Data: 2026-11-07
 
@@ -26,8 +29,8 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 360 testes, 0 falhas
-      (209 das fases 0–8 + 151 da crate 3D)
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 378 testes, 0 falhas
+      (209 das fases 0–8 + 169 da crate 3D)
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
 - [x] `cargo doc --workspace --no-deps --document-private-items` (0 warnings)
 - [x] `scripts/gen-header.sh --check` — `giochi.h` em sincronia com o crate
@@ -46,6 +49,65 @@ Verificações manuais da fase:
   recolha pelo GC, `giochi.quit()`, propagação de erro, `app:step`, `arg`).
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
+
+## Entregue — `ball_balance`, o jogo para medir latência
+Data: 2026-11-07
+
+Pedido: um jogo em que se consiga **sentir** a latência e a resposta a comandos —
+uma superfície plana suspensa e uma bola que o jogador mantém em cima inclinando a
+superfície.
+
+### O que existe
+
+- `giochi-engine-3d/src/game/balance.rs` — a física, **pura e sem GL**. `BalanceGame`
+  recebe `(stick_x, stick_z)` e o tempo do quadro; devolve posição e velocidade da
+  bola, inclinação da plataforma, queda em curso e pontuação. Por não tocar no
+  renderer, os testes correm em CI sem ecrã nenhum.
+- `giochi-engine-3d/examples/ball_balance.rs` — o jogo. Plataforma de 6,5 m, bola de
+  0,55 m de raio, inclinação máxima de 22°.
+- `giochi-engine-3d/src/mesh/primitives.rs::sphere` — a bola, uma esfera UV gerada por
+  código; nenhum asset para levar para o console.
+
+### Três indicadores, para separar as fontes de atraso
+
+1. **Marcador de input** (cubo azul) — segue o stick **sem física nenhuma**. Se ele
+   atrasa em relação ao polegar, o atraso está no input ou no ecrã, não no jogo.
+2. **Plataforma** — inclina a partir do mesmo input, um quadro depois do marcador.
+3. **Bola** — soma a simulação aos dois anteriores.
+
+O cubo à esquerda é um indicador de engasgo: verde dentro dos 60 Hz, âmbar a
+aproximar-se, vermelho acima. Um stutter vê-se no ecrã sem consola nenhuma.
+
+### Bugs encontrados ao construir isto
+
+1. **Eixo X invertido.** Rodar sobre +Z por um ângulo positivo *levanta* o lado +X,
+   portanto rolar para a direita precisa do ângulo **negativo**. A primeira versão
+   usava o ângulo positivo e a bola ia para o lado contrário ao stick. O sinal do
+   eixo Z já estava certo — a assimetria é o que torna o erro fácil de escrever e
+   difícil de ver. Fixado em `tilt_from_input`, com quatro testes a fixar a direção
+   (direita, esquerda, perto, e independência dos dois eixos).
+2. **Resposta demasiado mole.** Com 12° de inclinação máxima e muito atrito a bola
+   andava 0,55 m em 1 s num tabuleiro de 4,5 m de meio-lado: não servia para julgar
+   latência, porque nada de mau acontecia. Passou a 22° de inclinação, menos atrito,
+   tabuleiro de 6,5 m — a bola fica comprometida em ~2 s de stick a fundo.
+3. **`drawable_size` obsoleto.** O exemplo lia o tamanho do `RenderContext3D`, que só
+   o aprende dentro de `begin_frame`; na primeira frame recebia o `(1, 1)` inicial e
+   o `--quadro` gravava um BMP de 1×1. Passou a perguntar ao `Window`.
+4. **Rampa de cor ilegível.** A bola ficava oliva a meio tabuleiro, com uma cor
+   próxima do cubo verde do indicador de engasgo. Passou a bola clara que só aquece
+   no último terço do caminho até à borda.
+
+### Medido
+
+| Onde | Comando | Resultado |
+|---|---|---|
+| Mesa 26.0.8 / RX 580, offscreen | `--frames 600 --auto` | 600 frames, sem erro GL, trabalho por quadro p50 0,04 ms / p99 0,09 ms / pior 0,17 ms |
+| Física | `--frames 200 --auto` | stick +x → `tilt +0.371`, `v_x +0.04 → +0.30`; bola termina em `(+1.29, +1.75)`, direção correta nos dois eixos |
+| Unidade | `cargo test -p giochi-engine-3d --lib game::` | 13 testes, 0 falhas |
+
+`--trace N` imprime uma linha por quadro com input, inclinação, posição e velocidade
+da bola. Um input que muda no quadro N e uma bola que reage no quadro N é o correto;
+no quadro N+3 é um bug que vale a pena encontrar.
 
 ## Entregue na fase 12 — Câmera com controlo + `mini_fps`
 

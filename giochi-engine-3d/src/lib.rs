@@ -45,6 +45,7 @@
 #![warn(rust_2018_idioms)]
 
 pub mod context;
+pub mod game;
 pub mod math3d;
 pub mod mesh;
 pub mod render3d;

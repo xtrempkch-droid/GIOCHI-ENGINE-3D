@@ -208,6 +208,57 @@ jobs:
           SDL_VIDEODRIVER: offscreen
         run: cargo run -q -p giochi-engine-3d --example mini_fps -- --frames 120 --auto
 
+      - name: 3D balance game
+        # The ball has to finish where the script pushed it. This is the program-level
+        # twin of the unit tests in `game::balance`: those prove the physics responds in
+        # the right direction, this proves the example actually feeds input into it and
+        # draws the result.
+        env:
+          SDL_VIDEODRIVER: offscreen
+        run: |
+          cargo run -q -p giochi-engine-3d --example ball_balance -- \
+            --frames 200 --auto | tee /tmp/balance.log
+          python3 - <<'PY'
+          import re
+          log = open("/tmp/balance.log").read()
+          match = re.search(r"bola em \(([+-][\d.]+),([+-][\d.]+)\)", log)
+          assert match, f"no final ball position in the log:\n{log}"
+          x, z = float(match.group(1)), float(match.group(2))
+          assert x > 0.5, f"the script starts by pushing right; the ball ended at x={x}"
+          assert z > 0.5, f"the script ends by pushing near; the ball ended at z={z}"
+          assert "no GL error" in log, log
+          PY
+
+      - name: 3D balance game capture
+        # "It ran" is weaker than "it drew a ball on a platform". The ball is the only pale
+        # region and the platform the only large grey one, so both are looked for by colour.
+        env:
+          SDL_VIDEODRIVER: offscreen
+        run: |
+          cargo run -q -p giochi-engine-3d --example ball_balance -- \
+            --frames 200 --auto --quadro /tmp/balance.bmp
+          test -s /tmp/balance.bmp
+          python3 - <<'PY'
+          import struct
+          data = open("/tmp/balance.bmp", "rb").read()
+          assert data[:2] == b"BM", "not a BMP"
+          offset = struct.unpack("<I", data[10:14])[0]
+          width, height = struct.unpack("<ii", data[18:26])
+          assert (width, height) == (1280, 720), f"{width}x{height}"
+
+          pale = grey = 0
+          for i in range(offset, len(data), 4):
+              b, g, r = data[i], data[i + 1], data[i + 2]
+              if r > 190 and g > 180 and b > 120:
+                  pale += 1
+              elif 55 < r < 90 and 62 < g < 100 and 78 < b < 120:
+                  grey += 1
+
+          assert pale > 2000, f"no ball in the frame ({pale} pale pixels)"
+          assert grey > 40000, f"no platform in the frame ({grey} grey pixels)"
+          print(f"ball {pale} px, platform {grey} px")
+          PY
+
       - name: 3D frame capture
         # "It drew a frame" and "it drew the right frame" are different claims. The
         # capture is a real BMP read back with glReadPixels, and the size is asserted so

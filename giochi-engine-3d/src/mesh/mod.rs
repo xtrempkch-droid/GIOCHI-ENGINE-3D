@@ -11,5 +11,5 @@ mod vertex;
 
 pub use gpu_mesh::{Mesh, FORCE_NO_VAO_ENV};
 pub use obj_loader::load_obj;
-pub use primitives::{cube, plane};
+pub use primitives::{cube, plane, sphere};
 pub use vertex::Vertex;

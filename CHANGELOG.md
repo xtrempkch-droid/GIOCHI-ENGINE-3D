@@ -6,6 +6,32 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — `ball_balance`, a game for judging input latency
+
+- `giochi-engine-3d::game::BalanceGame`: the balance-board simulation, with no GL in it.
+  2D in the platform's own tangent basis, sub-stepped to 1/120 s so a slow frame gives
+  the same result as two fast ones. 13 tests pin the direction of each axis, the edge,
+  the respawn and the sub-stepping.
+- `mesh::primitives::sphere(radius, rings, segments)`: a UV sphere generated in code, so
+  the ball costs no asset to deploy. 5 tests, including outward winding on every triangle.
+- `examples/ball_balance.rs`: the playable game. A blue cube follows the stick with no
+  physics at all, the platform one frame behind it, then the ball — so a delay can be
+  attributed instead of merely noticed. A hitch-indicator cube turns amber and red as the
+  frame budget is passed. `--frames`/`--trace`/`--auto`/`--quadro`.
+- `RenderContext3D::create_sphere_mesh`.
+- CI runs the game headless and asserts the ball finished where the script pushed it, plus
+  a capture that must contain both a ball and a platform by colour.
+- `docs/3D.md` §7: how to read the three indicators and the `--trace` output.
+
+### Fixed — 3D by the balance game
+
+- The X axis of a tilt was inverted: a rotation about +Z by a positive angle raises the
+  +X side, so rolling right needs the negative angle. The Z axis was already correct,
+  which is what made the asymmetry easy to write and hard to see.
+- `ball_balance` read the drawable size from the render context, which only learns it
+  inside `begin_frame`; the first frame got the initial `(1, 1)` and `--quadro` wrote a
+  1×1 BMP. It asks the window instead.
+
 ### Added — 3D, phase 12: first-person camera and `mini_fps`
 
 - `CameraController`: WASD, Q/E, sprint, relative mouse look. Yaw and pitch are stored as

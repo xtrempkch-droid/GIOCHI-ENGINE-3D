@@ -31,3 +31,7 @@ path = "examples/cube_demo.rs"
 [[example]]
 name = "mini_fps"
 path = "examples/mini_fps.rs"
+
+[[example]]
+name = "ball_balance"
+path = "examples/ball_balance.rs"

@@ -266,6 +266,20 @@ impl RenderContext3D {
         self.create_mesh(&vertices, &indices)
     }
 
+    /// Uploads a procedural ball (UV sphere).
+    ///
+    /// `radius` is the sphere's radius, which the call site also needs for the offset
+    /// above the surface, so naming it here keeps the two in step.
+    pub fn create_sphere_mesh(
+        &mut self,
+        radius: f32,
+        rings: u32,
+        segments: u32,
+    ) -> Result3D<MeshHandle> {
+        let (vertices, indices) = crate::mesh::sphere(radius, rings, segments);
+        self.create_mesh(&vertices, &indices)
+    }
+
     /// Uploads the procedural floor plane.
     pub fn create_plane_mesh(&mut self, size: f32, subdivisions: u32) -> Result3D<MeshHandle> {
         let (vertices, indices) = crate::mesh::plane(size, subdivisions);
