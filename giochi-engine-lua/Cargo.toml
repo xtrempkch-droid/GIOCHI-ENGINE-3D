@@ -1,0 +1,13 @@
+[package]
+name = "giochi-engine-lua"
+description = "Lua (5.4) binding for GIOCHI-ENGINE"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+giochi-engine = { path = "../giochi-engine", version = "0.1.0" }
+mlua = { workspace = true }

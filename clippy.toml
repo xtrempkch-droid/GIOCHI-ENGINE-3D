@@ -1,0 +1,10 @@
+# Clippy configuration for the GIOCHI-ENGINE workspace.
+#
+# `msrv` mirrors the workspace `rust-version` so that clippy never suggests an
+# API that would silently break the declared minimum supported Rust version.
+msrv = "1.75"
+
+# Tests and examples are allowed to unwrap/expect: an explicit panic there is
+# the clearest possible failure signal. Library code must use `?` instead.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

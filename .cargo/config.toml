@@ -1,0 +1,8 @@
+# SDL2 is built from source (the `sdl2` crate's `bundled` feature). Its vendored
+# CMakeLists still declares `cmake_minimum_required(VERSION 3.0.x)`, which CMake
+# 4.x rejects. Raising the policy floor for the whole build is the documented
+# CMake 4 workaround and does not change the resulting SDL2 binary.
+#
+# `force = false` keeps a user-supplied value authoritative.
+[env]
+CMAKE_POLICY_VERSION_MINIMUM = { value = "3.5", force = false }

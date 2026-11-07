@@ -1,0 +1,15 @@
+[package]
+name = "giochi-engine-capi"
+description = "C ABI (cdylib/staticlib) for GIOCHI-ENGINE"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[dependencies]
+giochi-engine = { path = "../giochi-engine", version = "0.1.0" }
