@@ -113,6 +113,22 @@ aarch64, a criar um engine 3D, desenhar três frames de um cubo iluminado, exerc
 todos os caminhos de erro e desmontar tudo — no hardware. A parte II do ABI funciona
 numa linguagem que não é Rust, no dispositivo.
 
+## Release `v0.2.0` — re-apontada para levar a documentação da 2.ª validação
+Data: 2026-11-07
+
+A tag foi primeiro criada em `f8f1aeb`, antes de existir o registo da validação no
+Powkiddy x55. Isso deixava o arquivo publicado com um `PROGRESS.md` que **não mencionava**
+essa validação — enquanto o corpo da release dizia, textualmente, "See ... PROGRESS.md for
+what was validated where". A release apontava para um documento que, dentro do próprio
+arquivo, não dizia o que ela afirmava.
+
+Corrigido re-apontando a tag para `cb1eb19`. Entre os dois commits só mudam `PROGRESS.md`
+e `scripts/hardware-check.sh`, e o segundo nem sequer viaja no arquivo — portanto **os
+binários são equivalentes**; o que muda é a documentação embarcada. Verificado depois do
+rebuild: o `PROGRESS.md` do arquivo publicado menciona o x55 e o Mali-G52, o demo arranca,
+e os dois consumidores C compilados contra o `include/` do arquivo ligam ao `lib/` do
+arquivo e passam (`OK (abi 2, engine 0.2.0)` e `ok`).
+
 ## Release `v0.2.0` — publicada e verificada a partir do artefacto publicado
 Data: 2026-11-07
 
