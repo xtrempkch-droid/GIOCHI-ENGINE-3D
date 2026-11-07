@@ -5,8 +5,9 @@
 //! input/audio → scene stack → fixed-timestep loop.
 //!
 //! ```text
-//! cargo run -p giochi-demo                  # interactive, ESC quits
-//! cargo run -p giochi-demo -- --frames 120  # deterministic run for smoke tests
+//! cargo run -p giochi-demo                    # interactive, ESC quits
+//! cargo run -p giochi-demo -- --frames 120    # deterministic run for smoke tests
+//! cargo run -p giochi-demo -- lua game.lua    # run a Lua script (phase 8)
 //! ```
 //!
 //! The scene is deliberately small: a textured sprite you can move with WASD or the
@@ -29,6 +30,10 @@ fn main() -> ExitCode {
     env_logger::init();
 
     let options = Options::parse();
+    if let Some(arguments) = options.lua.clone() {
+        return run_lua(&arguments);
+    }
+
     match run(options) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -43,6 +48,8 @@ fn main() -> ExitCode {
 struct Options {
     frames: Option<u64>,
     verify: bool,
+    /// `lua <script> [args...]`: run a script instead of the built-in demo.
+    lua: Option<Vec<String>>,
 }
 
 impl Options {
@@ -51,7 +58,11 @@ impl Options {
         let mut args = std::env::args().skip(1);
 
         while let Some(arg) = args.next() {
-            if let Some(value) = arg.strip_prefix("--frames=") {
+            if arg == "lua" {
+                // Everything after `lua` belongs to the script, unparsed.
+                options.lua = Some(args.collect());
+                break;
+            } else if let Some(value) = arg.strip_prefix("--frames=") {
                 options.frames = value.parse().ok();
             } else if arg == "--frames" {
                 options.frames = args.next().and_then(|value| value.parse().ok());
@@ -110,6 +121,38 @@ fn run(options: Options) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Runs a Lua script: `giochi-demo lua <script.lua> [args...]`.
+///
+/// The first argument is the script; the rest are passed to it as `arg[1..]`, with
+/// `arg[0]` set to the script path, matching the usual Lua convention. A script can
+/// therefore be tested from a shell without a second entry point:
+///
+/// ```bash
+/// cargo run -p giochi-demo -- lua giochi-engine-lua/examples/mini_game.lua --auto --frames 600
+/// ```
+fn run_lua(arguments: &[String]) -> ExitCode {
+    let Some(script) = arguments.first() else {
+        eprintln!("erro: uso: giochi-demo lua <script.lua> [argumentos...]");
+        return ExitCode::FAILURE;
+    };
+
+    let lua = match giochi_engine_lua::new_vm() {
+        Ok(lua) => lua,
+        Err(error) => {
+            eprintln!("erro: não foi possível criar a VM Lua: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    match giochi_engine_lua::run_file(&lua, script, &arguments[1..]) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("erro no script '{script}':\n{error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// The demo scene: a movable sprite plus a bouncing square.

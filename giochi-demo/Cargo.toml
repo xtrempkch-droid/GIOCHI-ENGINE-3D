@@ -10,5 +10,6 @@ repository.workspace = true
 
 [dependencies]
 giochi-engine = { path = "../giochi-engine", version = "0.1.0" }
+giochi-engine-lua = { path = "../giochi-engine-lua", version = "0.1.0" }
 env_logger = { workspace = true }
 log = { workspace = true }

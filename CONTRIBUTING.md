@@ -11,10 +11,14 @@
    `N >= 4`. New fields must fit the reserved space or bump the ABI version.
 4. **No `unwrap()` in library code.** Use `?` with `GiochiError`. `unwrap()` is
    acceptable in tests and examples.
-5. **No `unsafe` outside `giochi-engine-capi`.** The core crate declares
-   `#![forbid(unsafe_code)]`. Every `unsafe` block needs a `// SAFETY:` comment.
+5. **No `unsafe` outside `giochi-engine-capi`.** The core and the Lua binding declare
+   `#![forbid(unsafe_code)]`. Every `unsafe` block in the C ABI needs a `// SAFETY:`
+   comment.
 6. **2D only.** Do not introduce EGL, GLES, shaders, VBOs, meshes or render
    pipelines.
+7. **Bindings do not change the engine.** `giochi-engine-capi` and
+   `giochi-engine-lua` are consumers: if a binding needs something the core cannot
+   express, that is a core change, reviewed on its own, not a fork of behaviour.
 
 The authoritative reference for the external surface is
 [docs/C_ABI_CONTRACT.md](docs/C_ABI_CONTRACT.md). If a type does not fit C, the
@@ -77,6 +81,7 @@ they drift, which is deliberate.
 | `docs/C_ABI_CONTRACT.md` | Any public type or function changes (mandatory) |
 | `giochi-engine-capi/include/giochi.h` | Never by hand: run `scripts/gen-header.sh` |
 | `docs/C_ABI.md` | The C consumption workflow or the callback rules change |
+| `docs/LUA_BINDING.md` | The Lua module, a capability or a handle lifetime changes |
 | `docs/ARCHITECTURE.md` | A module is added, removed, or changes layer |
 | `docs/API_GUIDE.md` + `tests/api_guide.rs` | The user-facing API changes |
 | `docs/KMSDRM.md` | Driver negotiation or target requirements change |

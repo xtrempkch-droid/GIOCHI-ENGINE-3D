@@ -1,7 +1,9 @@
 # Estado — GIOCHI-ENGINE
 
-## Última fase concluída: 7 — C ABI (`giochi-engine-capi`)
+## Última fase concluída: 8 — Binding Lua (`giochi-engine-lua`)
 Data: 2026-11-07
+
+**Todas as fases 0–8 estão concluídas.**
 
 ## Gates validados
 
@@ -10,67 +12,65 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 189 testes, 0 falhas
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 203 testes, 0 falhas
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
 - [x] `cargo doc --workspace --no-deps --document-private-items` (0 warnings)
 - [x] `scripts/gen-header.sh --check` — `giochi.h` em sincronia com o crate
+- [x] `scripts/ffi-smoke.sh` — consumidores C e Python (fase 7, mantidos verdes)
 
 Verificações manuais da fase:
 
-- `scripts/ffi-smoke.sh`: `libgiochi.so` construída, `c_smoke.c` compilado com
-  `-Wall -Wextra -Werror` contra o header gerado, executado, e `python_smoke.py`
-  (só `ctypes`, biblioteca padrão) executado. Ambos `OK (abi 1, engine 0.1.0)`.
-- `cargo test -p giochi-engine-capi`: 6 testes unitários + 2 de integração
-  (`rust_ffi.rs`), incluindo o fluxo completo de cena com `on_enter`/`update`/
-  `render`/`on_exit`, quit por `giochi_engine_request_quit()`, dois `run_scene`
-  seguidos com o mesmo handle, `step` e desmontagem idempotente.
-- Cross ARM64 **com link** em container `ubuntu:24.04` limpo:
-  `libgiochi.so: ELF 64-bit LSB shared object, ARM aarch64` além do `giochi-demo`.
-- Smoke de runtime inalterado: `giochi-demo --verify`, `mini_game --auto` a 61 fps.
+- `giochi-demo lua .../mini_game.lua --auto --frames 600`: 600 frames, 59 fps,
+  **pontuação final 7**, 3 vidas, `texturas vivas: 0`.
+- `... --auto --ram --lives 1 --spawn 0.3 --speed 400 --frames 300`: **fim de jogo**
+  aos 68 frames, 0 vidas — o caminho de colisão e game over funciona e pára o loop.
+- `... --frames 60` sem `--auto`: 0 pontos, 3 vidas, sem fugas.
+- `tests/lua_smoke.rs`: percorre toda a superfície (capacidades, texturas, `destroy`,
+  recolha pelo GC, `giochi.quit()`, propagação de erro, `app:step`, `arg`).
+- `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
+  deixa texturas vivas.
 
-## Entregue na fase 7
+## Entregue na fase 8
 
-- `giochi-engine-capi/src/` organizado em `abi_types`, `state`, `version`, `engine`,
-  `render`, `input`, `audio`, `assets` e `scene` — 54 funções `#[no_mangle] extern "C"`.
-- `abi_types.rs`: `GiochiEngineConfig` (`char title[64]`), `GiochiSceneCallbacks`
-  (56 bytes), os 11 códigos de erro e `GIOCHI_MAX_ASSET_SIZE` como literais com
-  `const _: () = assert!(...)` contra `giochi_engine::error::codes`.
-- `state.rs`: singleton `thread_local!` (ADR-012), slot de erro por thread limpo na
-  entrada de cada chamada, `guard` com `catch_unwind` em toda função exportada,
-  acessores por subsistema com dica contextual, slots de callback e o flag de quit.
-- `scene.rs`: registo de cenas com handles nunca reutilizados, adaptador `CScene`
-  que instala os subsistemas Emprestados (ADR-028), `on_enter`/`on_exit` entregues
-  fora do empréstimo do engine, e drenagem de saídas diferidas.
-- `render.rs`, `input.rs`, `audio.rs`, `assets.rs`, `engine.rs`, `version.rs`: a
-  superfície completa, com verificação de NULL e mensagens acionáveis.
-- `giochi-engine-capi/cbindgen.toml` + `include/giochi.h` gerado (932 linhas,
-  todos os tipos e funções com a documentação do crate).
-- `scripts/gen-header.sh` (`--check` falha se o header estiver desatualizado) e
-  `scripts/ffi-smoke.sh`.
-- `giochi-engine-capi/tests/`: `rust_ffi.rs`, `c_smoke.c`, `python_smoke.py`.
-- `docs/C_ABI.md`: guia de consumo, tabela "o que cada callback pode usar", handles,
-  frame pacing, uso por outras linguagens e verificação.
-- `docs/C_ABI_CONTRACT.md` atualizado: estado "completo", destruidores devolvem
-  `int32_t`, tabela de disponibilidade por callback, funções de diagnóstico e de
-  estatística, `giochi_texture_create_memory`, checklist §7 com o local de cada
-  garantia.
-- `docs/DECISIONS.md`: ADR-028 (callback usa exatamente o que o engine empresta) e
-  ADR-029 (`Engine::step` partilha o corpo do frame com `run_current`).
-- `docs/ARCHITECTURE.md`: secção 5b sobre a estrutura interna da capi.
-- `README.md` com secção "From C", `CHANGELOG.md` com a fase 7, `CONTRIBUTING.md`
-  com o header gerado, `ci.yml` com o job `ffi` e a verificação do header,
-  `release.yml` a empacotar `include/giochi.h` + `lib/libgiochi.{so,a}`.
-- Engine: `RenderContext` guarda o `TextureRegistry` em `Rc` e expõe
-  `shared_textures()`; `TextureRegistry::create_texture_from_bytes`;
-  `Engine::step(frame_time)` e o refactor `run_frame`/`FrameOutcome`.
+- `giochi-engine-lua/src/` em seis módulos: `lib` (módulo `giochi`, `run_file`,
+  mapeamento de erros), `app` (`App` + `LuaScene` + flag de quit), `caps`
+  (`Gfx`/`InputRef`/`AudioRef`), `handles` (`Texture`/`Sound`/`Music`), `values`
+  (conversão de cores e rectângulos) e `keys` (tabelas de teclas/ratos/eixos/botões).
+  `#![forbid(unsafe_code)]`.
+- Superfície Lua: `giochi.app`, `giochi.quit`, `giochi.keys/mouse/axes/buttons`,
+  `app:texture/sound/music/set_volume/set_clear_color/run/step` e as estatísticas;
+  `input:*` (teclado, rato, roda, gamepad), `audio:*` (sons, música, volume) e
+  `gfx:*` (clear, rect, draw, sprite, camera, screen, texture, size).
+- Capacidades por callback (ADR-030): o script só vê o que a engine lhe empresta, e as
+  userdata são invalidadas pelo `mlua` quando o callback regressa.
+- `Texture` libertado por `Drop` **e** por `:destroy()` (ADR-031); `Sound`/`Music`
+  geridos pela app.
+- `giochi-demo lua <script> [args...]`, com `arg[0]`/`arg[1..]` na convenção Lua.
+- `giochi-engine-lua/examples/mini_game.lua`: space shooter completo, com beep
+  sintetizado em WAV temporário (nenhum binário no repositório), flags `--auto`,
+  `--frames`, `--lives`, `--ram`, `--spawn`, `--speed`, e uma tabela de resumo
+  devolvida ao host.
+- `docs/LUA_BINDING.md`, `docs/DECISIONS.md` (ADR-030, ADR-031),
+  `docs/ARCHITECTURE.md` §5c, `README.md` com secção "From Lua", `CHANGELOG.md`.
+- `ci.yml` corre `mini_game.lua` no job de smoke; `release.yml` empacota
+  `lua/mini_game.lua` e testa-o com o binário de release.
+- Testes: `giochi-engine-lua/tests/lua_smoke.rs` e `tests/mini_game_script.rs`.
 
-## Próxima fase: 8 — Binding Lua (`giochi-engine-lua`)
+## Roadmap
 
-Módulo `giochi` para Lua 5.4 via mLua (`giochi-engine-lua`): expor a API Rust
-idiomática com handles `u64` (nunca ponteiros), `examples/mini_game.lua` como jogo de
-referência, subcomando `giochi-demo lua <script>` e `docs/LUA_BINDING.md`.
-Aceite: `mini_game.lua` corre headless pelo subcomando `lua` e o gate de testes
-executa o script.
+As oito fases do prompt mestre estão completas. Trabalho futuro, por ordem de valor:
+
+1. **Texto e fontes** — `GiochiFont` existe na ABI v1 apenas como `typedef` reservado;
+   TTF já está na árvore via `sdl2` feature `ttf`. Seria a próxima adição natural (HUD
+   legível em vez de barras).
+2. **Pilha de cenas na ABI** — hoje `giochi_engine_run_scene` deixa a pilha vazia no
+   fim; `push`/`pop` (menus, pausa) exigiriam `giochi_scene_push`/`pop` e uma regra
+   para `on_enter`/`on_exit` com mais de uma cena viva.
+3. **`giochi-engine-3d`** — crate separada em EGL + GLES, nunca um modo deste renderer
+   (ADR-005).
+4. **Empacotamento** — receita de deploy para consola (rootfs mínimo com
+   `libdrm`/`libgbm`/`libEGL` e os satélites SDL2), hoje descrita em `docs/KMSDRM.md`
+   §5 mas não automatizada.
 
 ## Bloqueios / pendências
 
@@ -97,8 +97,12 @@ executa o script.
 - `giochi.h` é gerado pelo `cbindgen` 0.27: quem não o tiver instalado vê o gate do
   header ser saltado em `scripts/gates.sh`, mas o CI falha se estiver desatualizado.
 - A ABI v1 não expõe pilha de cenas: `giochi_engine_run_scene` deixa a pilha vazia no
-  fim, pelo que cada handle equivale a uma cena ativa. `push`/`pop`/`replace` são
-  decisão da fase 8+ se Lua precisar de overlays.
+  fim, pelo que cada handle equivale a uma cena ativa. `push`/`pop`/`replace` ficam
+  para uma revisão futura da ABI.
+- Uma app por processo (o engine é singleton, ADR-012). A camada Lua deteta a segunda
+  tentativa com uma mensagem clara em vez do erro do `EventPump` do SDL.
+- Em Lua, `Sound`/`Music` vivem até a app os destruir ou até ao fim do processo: o
+  mixer pertence ao engine e não é alcançável num finalizador do GC (ADR-031).
 
 ## Notas de arquitetura
 
@@ -116,6 +120,8 @@ executa o script.
 - `render` não conhece `scene` (a dependência é `core::engine` → `scene` →
   `render`/`input`/`audio`); `core` não importa `sdl2`; `math` não depende de
   módulos internos; `handle_registry` é `pub(crate)`.
-- Próxima fase: 8 (binding Lua com `mini_game.lua` e subcomando `giochi-demo lua`).
-- A capi não conhece `sdl2`: fala apenas com `giochi-engine`, e a única `unsafe` do
-  workspace está lá, com `// SAFETY:` em cada bloco.
+- A capi não conhece `sdl2`: fala apenas com `giochi-engine`, e é a única crate do
+  workspace com `unsafe`, com `// SAFETY:` em cada bloco. O core e a camada Lua são
+  `#![forbid(unsafe_code)]`.
+- A camada Lua usa `mlua::Lua::scope` para emprestar os subsistemas (ADR-030): é a
+  versão segura da mesma regra que a capi implementa com ponteiros (ADR-028).

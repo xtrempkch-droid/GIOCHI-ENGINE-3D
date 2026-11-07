@@ -45,7 +45,10 @@ jobs:
         # that a debug build tolerates.
         env:
           SDL_VIDEODRIVER: dummy
-        run: ./target/x86_64-unknown-linux-gnu/release/giochi-demo --verify
+        run: |
+          ./target/x86_64-unknown-linux-gnu/release/giochi-demo --verify
+          ./target/x86_64-unknown-linux-gnu/release/giochi-demo \
+            lua giochi-engine-lua/examples/mini_game.lua --auto --frames 60
 
       - name: Package
         run: |
@@ -57,6 +60,9 @@ jobs:
           cp target/x86_64-unknown-linux-gnu/release/libgiochi.a dist/lib/
           cp README.md LICENSE CHANGELOG.md PROGRESS.md dist/
           cp -r docs assets dist/
+          # The Lua binding's reference game ships with the binary that runs it.
+          mkdir -p dist/lua
+          cp giochi-engine-lua/examples/mini_game.lua dist/lua/
           tar -C dist -czf giochi-engine-x86_64-unknown-linux-gnu.tar.gz .
 
       - uses: actions/upload-artifact@v4
@@ -117,6 +123,9 @@ jobs:
           cp target/aarch64-unknown-linux-gnu/release/libgiochi.a dist/lib/
           cp README.md LICENSE CHANGELOG.md PROGRESS.md dist/
           cp -r docs assets dist/
+          # The Lua binding's reference game ships with the binary that runs it.
+          mkdir -p dist/lua
+          cp giochi-engine-lua/examples/mini_game.lua dist/lua/
           tar -C dist -czf giochi-engine-aarch64-unknown-linux-gnu.tar.gz .
 
       - uses: actions/upload-artifact@v4

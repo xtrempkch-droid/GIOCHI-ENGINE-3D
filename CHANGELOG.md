@@ -16,6 +16,31 @@ rather than a rewrite. Runs on `x86_64-unknown-linux-gnu` and
 `aarch64-unknown-linux-gnu`; auto-selects KMSDRM on a bare Linux console and
 falls back to the desktop driver elsewhere.
 
+### Added — phase 8 (Lua binding)
+
+- **`giochi-engine-lua`** is a working binding, not a stub: a `giochi` module for Lua
+  5.4 (mLua, vendored) with `giochi.app`, the frame callbacks, textures, sounds, music,
+  input, drawing, the camera and named key/mouse/axis/button tables. The crate is
+  `#![forbid(unsafe_code)]`, like the core.
+- **Capabilities instead of a global engine** (ADR-030): `update(time, input, audio)`
+  and `render(gfx)` receive exactly what the engine lends them, and the values stop
+  working when the callback returns, so a script cannot outlive its borrow. The
+  texture registry is `Rc`-shared, which is why `Texture` can free itself.
+- **`Texture` freed by `Drop` *and* by `:destroy()`** (ADR-031); `Sound`/`Music` are
+  app-scoped because the mixer belongs to the engine. Both rules are documented and
+  asserted — `app:texture_count() == 0` at the end of the reference game.
+- **Errors end the run**: a Lua error inside a callback stops the loop and is
+  re-raised by `app:run`, so a broken script never leaves a window on screen.
+- `giochi-demo lua <script> [args...]`, with `arg[0]`/`arg[1..]` per Lua convention.
+- `giochi-engine-lua/examples/mini_game.lua`: a complete space shooter (movement,
+  shooting, drones, collisions, lives, game over, synthesised beep) in ~250 lines,
+  with `--auto`, `--frames` and test-only `--lives`/`--ram`/`--spawn`/`--speed` flags.
+  It returns a summary table so tests assert on the outcome instead of parsing stdout.
+- `docs/LUA_BINDING.md`: the module reference, the capability table, handle lifetimes,
+  design notes and the test matrix.
+- `tests/lua_smoke.rs` and `tests/mini_game_script.rs`; a Lua smoke run in CI and in
+  the release workflow, which now ships `lua/mini_game.lua` with the binary.
+
 ### Added — phase 7 (C ABI)
 
 - **`libgiochi`**: `giochi-engine-capi` is now a real `cdylib` + `staticlib` exposing

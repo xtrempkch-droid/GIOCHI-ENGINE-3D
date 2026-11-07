@@ -154,3 +154,4 @@ jobs:
           cargo run -p giochi-engine --example input_test -- --frames 30
           cargo run -p giochi-engine --example audio_test -- --frames 10
           cargo run -p giochi-engine --example mini_game -- --auto --frames 120
+          cargo run -p giochi-demo -- lua giochi-engine-lua/examples/mini_game.lua --auto --frames 120

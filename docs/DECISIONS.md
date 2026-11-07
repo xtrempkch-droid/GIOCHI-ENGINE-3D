@@ -689,3 +689,63 @@ statistics without resetting them.
 `run` and `step` cannot drift. A host driving `step` in its own loop gets cumulative
 `frames`/`steps`/`elapsed`, which is what an editor's profiler wants. The refactor
 was verified by the existing `engine_smoke` test and by all five example smoke runs.
+
+## ADR-030 — Lua gets capabilities, not a global engine
+
+**Context.** The Lua callbacks run inside the engine's frame. `Scene::update` receives
+`&Input` and `&mut AudioSystem`, `Scene::render` receives `&mut RenderContext`. A Lua
+closure created once at start-up cannot capture those references, and the C ABI's
+answer (thread-local raw pointers) would cost `#![forbid(unsafe_code)]`.
+
+**Decision.** Each callback is invoked inside `Lua::scope`, with the subsystems it is
+allowed to touch wrapped in short-lived userdata and passed as arguments:
+
+```lua
+update = function(time, input, audio) ... end,
+render = function(gfx) ... end,
+```
+
+`mlua` invalidates scoped userdata when the scope drops, so a capability stored in a
+global raises a Lua error instead of dereferencing a dead borrow. The texture registry
+is the exception: it is `Rc`-shared, so `Texture` userdata can be created and freed
+anywhere, including from the garbage collector.
+
+**Why not a command buffer.** Deferring draw calls would keep the API safe and free of
+`unsafe`, but it also defers every error to the end of the frame, adds an allocation
+per draw and makes the API second-order. Immediate mode with a scope costs one small
+allocation per callback and keeps errors where they happen.
+
+**Why not `unsafe` `*mut` like the C ABI.** The C ABI has no choice: a C caller has no
+lifetime to check. Lua does — `Lua::scope` is exactly that check. Using `unsafe` here
+would be opting out of a guarantee that is available.
+
+**Consequences.** The binding is not a thin wrapper: `update` and `render` have a
+different shape from `Scene`. That is deliberate and documented in
+`docs/LUA_BINDING.md`. The app owns the engine and everything used outside the loop,
+which is why `app:` methods raise "the app is busy" if called mid-frame, and why
+`giochi.quit()` is a module function rather than a method.
+
+## ADR-031 — `Texture` freed by `Drop`, `Sound`/`Music` by the app
+
+**Context.** R2 requires explicit lifetimes and no RAII *at the C boundary*. Lua has a
+garbage collector, and a script that forgets `destroy` would leak for the life of the
+process.
+
+**Decision.** `Texture` frees its handle from `Drop` **and** from `:destroy()`, both
+idempotent. `Sound` and `Music` are freed only by `app:destroy_sound`/`destroy_music`
+or at process exit.
+
+**Why the asymmetry.** `Drop` needs to reach the registry. Textures have one, shared
+and safely reachable from anywhere (`RenderContext::shared_textures`). The mixer is
+owned by the engine, so a `Drop` for `Sound` would need the engine — which does not
+exist at collection time and would be borrowed during a frame.
+
+**Why `Drop` does not violate R2.** R2 governs the *C boundary*, where a caller has no
+destructor semantics to rely on. In Lua, finalisation is guaranteed by the language, so
+using it is the idiomatic expression of the same rule: every handle has exactly one
+owner and is released exactly once. The explicit `:destroy()` still exists for
+determinism, and `docs/LUA_BINDING.md` §6 states both.
+
+**Consequences.** `mini_game.lua` ends with `app:texture_count() == 0`; the reference
+game and both integration tests assert it. Sounds and music are process-scoped, which
+matches how a scripted game uses them.

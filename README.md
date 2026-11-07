@@ -9,12 +9,12 @@ A **2D** game engine in Rust on top of SDL2, designed from day one to be consume
 from any language through a C ABI. Primary target: `aarch64-unknown-linux-gnu`
 (Linux consoles with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 
-> **Status: 0.1.0 — phases 0 to 7 complete.** The workspace, the SDL2 platform layer,
-> the fixed-timestep loop, the 2D renderer with opaque texture handles,
+> **Status: 0.1.0 — every phase (0 to 8) complete.** The workspace, the SDL2 platform
+> layer, the fixed-timestep loop, the 2D renderer with opaque texture handles,
 > keyboard/mouse/gamepad input, the asset cache, the audio mixer, the scene stack, the
-> `Engine` facade, and the **C ABI** — `libgiochi.so` / `libgiochi.a` plus a generated
-> `giochi.h` — with CI, release packaging and the guides in place. The Lua binding
-> lands in phase 8 — see [PROGRESS.md](PROGRESS.md).
+> `Engine` facade, the **C ABI** (`libgiochi.so` / `libgiochi.a` + generated `giochi.h`)
+> and the **Lua binding** (`giochi` module + a complete reference game), with CI,
+> release packaging and the guides. See [PROGRESS.md](PROGRESS.md).
 
 
 ## Why "C-shaped" Rust?
@@ -45,8 +45,8 @@ is authoritative.
 |---|---|---|
 | [`giochi-engine`](giochi-engine/) | lib | Idiomatic Rust API, C-shaped data, no `unsafe` |
 | [`giochi-engine-capi`](giochi-engine-capi/) | `cdylib` + `staticlib` | `libgiochi` C ABI and generated `giochi.h` |
-| [`giochi-engine-lua`](giochi-engine-lua/) | lib | Reference binding (Lua 5.4 via mLua) |
-| [`giochi-demo`](giochi-demo/) | bin | Bootstrap binary, examples, `lua` subcommand |
+| [`giochi-engine-lua`](giochi-engine-lua/) | lib | Reference binding — Lua 5.4 via mLua, no `unsafe` |
+| [`giochi-demo`](giochi-demo/) | bin | The demo; `--frames`, `--verify`, `lua <script>` |
 
 ## Build
 
@@ -171,6 +171,39 @@ specification is [docs/C_ABI_CONTRACT.md](docs/C_ABI_CONTRACT.md).
 scripts/gen-header.sh --check   # the committed header matches the Rust crate
 scripts/ffi-smoke.sh            # builds libgiochi, runs the C and Python consumers
 ```
+
+### From Lua
+
+```lua
+local giochi = require("giochi")
+
+local app = giochi.app { title = "my game", width = 960, height = 540 }
+local player = app:texture("assets/player.png")
+local x, y = 100, 100
+
+app:run {
+    update = function(time, input, audio)
+        if input:key_down(giochi.keys.d) then x = x + 200 * time.delta end
+        if input:key_down(giochi.keys.a) then x = x - 200 * time.delta end
+        if input:key_pressed(giochi.keys.escape) then giochi.quit() end
+    end,
+    render = function(gfx)
+        gfx:clear { 12, 14, 22 }
+        gfx:draw(player, { x, y, 64, 64 })
+    end,
+}
+```
+
+```bash
+cargo run -p giochi-demo -- lua giochi-engine-lua/examples/mini_game.lua
+cargo run -p giochi-demo -- lua giochi-engine-lua/examples/mini_game.lua --auto --frames 600
+```
+
+The second form plays itself headlessly, which is how the binding is tested. A callback
+receives exactly the capabilities it needs — `update` gets the clock, the input
+snapshot and the mixer, `render` gets the renderer — and they stop working when it
+returns, so the binding is `#![forbid(unsafe_code)]`. Full reference:
+[docs/LUA_BINDING.md](docs/LUA_BINDING.md).
 
 ### Minimal render loop
 
@@ -314,6 +347,7 @@ other the way they do: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | File | Contents |
 |---|---|
 | [docs/API_GUIDE.md](docs/API_GUIDE.md) | Task-oriented guide: scenes, rendering, input, audio, assets, errors |
+| [docs/LUA_BINDING.md](docs/LUA_BINDING.md) | The `giochi` Lua module, capabilities, handles, the reference game |
 | [docs/C_ABI.md](docs/C_ABI.md) | Consuming the engine from C, Python, Go, Zig, C# |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layers, dependency rules, ownership, per-frame order, testing |
 | [docs/C_ABI_CONTRACT.md](docs/C_ABI_CONTRACT.md) | Authoritative C ABI: types, sizes, error codes, functions |
