@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed — release tooling
+
+- `scripts/verify-release-artifact.sh` unpacks a release archive and *runs* it: layout,
+  version stated by the header, exported ABI symbols, the demo, the Lua game and a C
+  consumer compiled against the archive's own `include/` and `lib/` — then all three
+  again with the PNGs deleted, which is the codec-less console case. `release.yml` runs
+  it on the packaged x86_64 archive before attaching it, and checks the ARM64 archive's
+  layout and ELF architecture, so "well-formed tarball" can no longer stand in for
+  "working tarball".
+
 ## [0.1.1] - 2026-11-07
 
 Everything here came from the first run on real console hardware. The 0.1.0 release sat

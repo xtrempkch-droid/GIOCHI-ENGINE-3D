@@ -82,7 +82,8 @@ afford on every push: a real ARM64 **link** with the multiarch SDL2 packages.
 All three call the same scripts rather than reimplementing them, so a fix lands once:
 `scripts/install-deps.sh`, `scripts/install-arm64-deps.sh`, `scripts/check-aarch64.sh`, `scripts/build-aarch64.sh`,
 `scripts/gen-header.sh`, `scripts/ffi-smoke.sh`, `scripts/gates.sh`, `scripts/png-to-bmp.py`,
-`scripts/hardware-check.sh`, `scripts/check-version.sh`.
+`scripts/hardware-check.sh`, `scripts/check-version.sh`,
+`scripts/verify-release-artifact.sh`.
 
 ## Style
 
@@ -138,8 +139,20 @@ git push origin main vx.y.z    # the tag triggers release.yml
 
 `release.yml` builds both targets with LTO, smokes the release binary, packages
 `giochi-demo`, `giochi.h`, `libgiochi.{so,a}`, the Lua reference game, the docs and
-`assets/` (both the PNGs and their BMP twins), then attaches the archives to the
-release. It creates a **draft** on purpose: check the artefacts before publishing.
+`assets/` (both the PNGs and their BMP twins), then **runs the packaged archive** —
+`scripts/verify-release-artifact.sh` — before attaching it. The ARM64 archive cannot
+execute on the runner, so it gets a layout and ELF check instead.
+
+It creates a **draft** on purpose: check the artefacts before publishing. Verify a
+download (or a locally packaged archive) with the same script:
+
+```bash
+scripts/verify-release-artifact.sh giochi-engine-x86_64-unknown-linux-gnu.tar.gz
+```
+
+It unpacks, checks the layout and version, then runs the demo, the Lua game and a
+real C consumer against the archive's own header and library — and again with the
+PNGs deleted, which is the codec-less console case (ADR-036).
 
 Publishing a draft that still contains known defects is worse than no release — 0.1.0
 stayed in draft precisely because a hardware run afterwards found four portability

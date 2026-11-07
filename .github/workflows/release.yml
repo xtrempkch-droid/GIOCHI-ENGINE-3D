@@ -145,6 +145,33 @@ jobs:
           test -f artifacts/giochi-engine-x86_64-unknown-linux-gnu/giochi-engine-x86_64-unknown-linux-gnu.tar.gz
           test -f artifacts/giochi-engine-aarch64-unknown-linux-gnu/giochi-engine-aarch64-unknown-linux-gnu.tar.gz
 
+      - name: Verify the x86_64 archive by running it
+        # A well-formed tarball is not a working one. 0.1.0 shipped four portability
+        # bugs that a run would have caught, which is why the release is a draft --
+        # this makes that review a gate instead of a good intention.
+        run: |
+          set -euo pipefail
+          ./scripts/verify-release-artifact.sh \
+            artifacts/giochi-engine-x86_64-unknown-linux-gnu/giochi-engine-x86_64-unknown-linux-gnu.tar.gz
+
+      - name: Verify the ARM64 archive layout
+        # The binary cannot execute on this runner, so check the structure and prove
+        # the ELF really is AArch64 rather than a host binary with a misleading name.
+        run: |
+          set -euo pipefail
+          archive=artifacts/giochi-engine-aarch64-unknown-linux-gnu/giochi-engine-aarch64-unknown-linux-gnu.tar.gz
+          work="$(mktemp -d)"
+          tar -C "$work" -xzf "$archive"
+          for path in giochi-demo include/giochi.h lib/libgiochi.so lib/libgiochi.a \
+                      lua/mini_game.lua assets/player.bmp assets/checker.bmp \
+                      docs/KMSDRM.md docs/C_ABI_CONTRACT.md; do
+            test -e "$work/$path" || { echo "missing: $path" >&2; exit 1; }
+          done
+          file "$work/giochi-demo" | grep -q 'ARM aarch64'
+          file "$work/lib/libgiochi.so" | grep -q 'ARM aarch64'
+          grep -q 'For version' "$work/include/giochi.h"
+          echo "ARM64 archive layout OK"
+
       - uses: softprops/action-gh-release@v2
         with:
           files: |
