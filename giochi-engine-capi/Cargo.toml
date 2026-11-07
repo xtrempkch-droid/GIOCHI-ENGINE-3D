@@ -15,4 +15,4 @@ name = "giochi"
 crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
-giochi-engine = { path = "../giochi-engine", version = "0.1.0" }
+giochi-engine = { path = "../giochi-engine", version = "0.1.1" }

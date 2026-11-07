@@ -33,7 +33,7 @@ If you can, reduce it to a small Rust snippet against `giochi-engine`:
 | Rust version | `rustc --version` |
 | SDL video driver | `SDL_VIDEODRIVER` (empty = auto) |
 | Display / KMSDRM | desktop session / bare console / headless |
-| `giochi-engine` version | `0.1.0` |
+| `giochi-engine` version | `0.1.1` |
 
 ## Logs
 

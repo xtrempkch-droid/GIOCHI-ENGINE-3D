@@ -119,23 +119,71 @@ restore_console() {
         restored=1
         echo
         echo "==> restoring the console"
-        remote "$launcher" <<'REMOTE' || echo "  warning: restore failed. On the device: chmod +x $launcher && rm -f /run/giochi/launcher-parado && kill -TERM \$(ps | grep '[g]iochi-init' | awk '{print \$1}')" >&2
+        remote "$launcher" <<'REMOTE' || echo "  warning: restore did not confirm. On the device run: chmod +x $launcher; kill -TERM \$(ps | grep '[g]iochi-init' | awk '{print \$1}')" >&2
 launcher="$1"
-[ -e "$launcher" ] && chmod +x "$launcher"
+
+# Returns 0 and prints "<pid> <comm>" for the process holding card0, 1 if nobody is.
+drm_owner() {
+    for p in /proc/[0-9]*; do
+        for f in "$p"/fd/*; do
+            case "$(readlink "$f" 2>/dev/null)" in
+                /dev/dri/card0) echo "${p#/proc/} $(cat "$p/comm" 2>/dev/null)"; return 0;;
+            esac
+        done
+    done 2>/dev/null
+    return 1
+}
+
+if [ -e "$launcher" ]; then
+    chmod 0755 "$launcher" || true
+fi
 rm -f /run/giochi/launcher-parado
-for pid in $(ps | grep '[g]iochi-init' | awk '{print $1}'); do
-    kill -TERM "$pid" 2>/dev/null || true
-done
+
+# The supervisor re-checks `-x` on every pass, so re-enabling the file is what
+# brings the console back; its own poll does it within $LAUNCHER_WAIT (30 s on this
+# image). Waiting is preferred to signalling: /etc/inittab registers the
+# supervisor as `::respawn:`, so a kill only makes BusyBox start a new one, and
+# that is a heavier hammer than the job needs.
+owner=""
 i=0
-while [ $i -lt 20 ]; do
-    running=$(ps | grep -c '[g]iochi-launcher' 2>/dev/null || true)
-    [ "${running:-0}" -gt 0 ] && break
+while [ $i -lt 35 ]; do
+    owner=$(drm_owner) || owner=""
+    if [ -n "$owner" ]; then break; fi
     i=$((i + 1))
     sleep 1
 done
-running=$(ps | grep -c '[g]iochi-launcher' 2>/dev/null || true)
-echo "  launcher processes: ${running:-0}"
-[ -e /run/giochi/launcher-parado ] && echo "  marker still present: /run/giochi/launcher-parado"
+
+# Only if the natural poll has not acted -- a supervisor that was parked in
+# `sleep 3600` after giving up needs the nudge to re-enter its loop.
+if [ -z "$owner" ]; then
+    for pid in $(ps | grep '[g]iochi-init' | awk '{print $1}'); do
+        kill -TERM "$pid" 2>/dev/null || true
+    done
+    i=0
+    while [ $i -lt 35 ]; do
+        owner=$(drm_owner) || owner=""
+        if [ -n "$owner" ]; then break; fi
+        i=$((i + 1))
+        sleep 1
+    done
+fi
+
+launchers=$(ps | grep -c '[g]iochi-launcher' 2>/dev/null || true)
+echo "  launcher processes: ${launchers:-0}"
+echo "  DRM master: ${owner:-nobody}"
+if [ -e /run/giochi/launcher-parado ]; then
+    echo "  marker present: /run/giochi/launcher-parado"
+fi
+
+# Positive confirmation: the console is only really restored when something holds
+# card0 again. Ending on a bare `[ ... ] && echo` reports a false failure whenever
+# the test is false -- which is how the first version of this script lied.
+if [ -n "$owner" ]; then
+    echo "  console restored"
+    exit 0
+fi
+echo "  the console did NOT come back" >&2
+exit 1
 REMOTE
     fi
     rm -rf "$work"
@@ -194,9 +242,8 @@ fi
 
 echo "==> releasing the console (the launcher holds DRM master)"
 console_released=1
-remote "$launcher" "$dest" <<'REMOTE'
+remote "$launcher" <<'REMOTE'
 launcher="$1"
-dest="$2"
 
 drm_holders() {
     for p in /proc/[0-9]*; do
@@ -208,27 +255,61 @@ drm_holders() {
     done 2>/dev/null | sort -u
 }
 
-# The supervisor only respawns an executable launcher into the *next* loop
-# iteration; making it non-executable parks it in `sleep $LAUNCHER_WAIT` instead
-# of respawning a process that would immediately grab DRM again.
+# Order matters, and both steps were measured the hard way on a PX30:
+#
+# 1. Make the launcher non-executable FIRST. The supervisor re-checks `-x` on
+#    every pass and parks in `sleep $LAUNCHER_WAIT` when it is false, so nothing
+#    respawns a new DRM master behind us.
+# 2. Never kill the supervisor. /etc/inittab registers it as
+#    `::respawn:/usr/bin/giochi-init`, so killing it only makes BusyBox start a
+#    fresh one -- and a supervisor that was blocked in `"$LAUNCHER"` left an
+#    orphaned launcher child behind, which kept DRM master. Measured: that is
+#    exactly the loop that made the first version of this script hang.
+#
+# Killing the launcher once is enough. The supervisor classifies status 143
+# (SIGTERM) as a deliberate exit, zeroes its crash quota and goes to wait for the
+# launcher to reappear -- no /run/giochi/launcher-parado marker, no give-up.
+#
+# `chmod 0644`, not `chmod -x`: BusyBox applies the umask to a symbolic mode, and
+# this image runs with umask 0077, so `chmod -x` left `-rw-r-xr-x` -- still
+# executable, and since everything here runs as root `[ -x ]` stayed true. The
+# supervisor then respawned the launcher mid-run and DRM never came free.
 if [ -e "$launcher" ]; then
-    chmod -x "$launcher" || true
+    chmod 0644 "$launcher" || true
+    if [ -x "$launcher" ]; then
+        echo "  could not clear the execute bit on $launcher" >&2
+        exit 1
+    fi
 fi
 
-for pid in $(ps | grep '[g]iochi-init' | awk '{print $1}'); do
-    kill -TERM "$pid" 2>/dev/null || true
+kill_holders() {
+    signal="$1"
+    for pid in $(drm_holders); do
+        comm=$(cat "/proc/$pid/comm" 2>/dev/null)
+        case "$comm" in
+            giochi-launcher|giochi-demo)
+                kill "-$signal" "$pid" 2>/dev/null || true
+                ;;
+        esac
+    done
+}
+
+# The launcher installs a SIGTERM handler, so TERM usually works but is not
+# guaranteed -- measured both ways on the same unit, depending on what it was
+# blocked in. Give it a grace period, then escalate; a KILL also only counts as
+# one of the supervisor's five crashes before it parks.
+i=0
+while [ $i -lt 10 ]; do
+    [ -z "$(drm_holders)" ] && break
+    kill_holders TERM
+    i=$((i + 1))
+    sleep 1
 done
 
 i=0
-while [ $i -lt 30 ]; do
-    holders=$(drm_holders)
-    [ -z "$holders" ] && break
-    for pid in $holders; do
-        comm=$(cat "/proc/$pid/comm" 2>/dev/null)
-        case "$comm" in
-            giochi-launcher|giochi-init|giochi-demo) kill -TERM "$pid" 2>/dev/null || true;;
-        esac
-    done
+while [ $i -lt 10 ]; do
+    [ -z "$(drm_holders)" ] && break
+    kill_holders KILL
     i=$((i + 1))
     sleep 1
 done
@@ -239,9 +320,11 @@ if [ -n "$holders" ]; then
     for pid in $holders; do
         echo "    $pid $(cat /proc/$pid/comm 2>/dev/null)" >&2
     done
+    echo "  Kill it from another shell, then re-run with --skip-build:" >&2
+    echo "    ssh <host> 'kill -KILL <pid>'" >&2
     exit 1
 fi
-echo "  console free after ${i}s"
+echo "  console free (DRM master released)"
 REMOTE
 
 echo

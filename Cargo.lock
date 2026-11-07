@@ -204,7 +204,7 @@ checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
 
 [[package]]
 name = "giochi-demo"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "env_logger",
  "giochi-engine",
@@ -214,7 +214,7 @@ dependencies = [
 
 [[package]]
 name = "giochi-engine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "log",
  "sdl2",
@@ -223,14 +223,14 @@ dependencies = [
 
 [[package]]
 name = "giochi-engine-capi"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "giochi-engine",
 ]
 
 [[package]]
 name = "giochi-engine-lua"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "giochi-engine",
  "mlua",

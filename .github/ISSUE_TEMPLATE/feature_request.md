@@ -37,5 +37,5 @@ The current version is **2D only**. Tick what applies:
 
 - [ ] This fits the existing 2D scope.
 - [ ] This is 2D but needs a new subsystem (say which).
-- [ ] This needs 3D — deliberately out of scope for 0.1.0 (see
+- [ ] This needs 3D — deliberately out of scope for the whole 0.1 line (see
       [docs/DECISIONS.md](../../docs/DECISIONS.md), ADR-005).

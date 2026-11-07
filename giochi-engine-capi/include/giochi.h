@@ -924,7 +924,7 @@ uint32_t giochi_abi_version(void);
 
 // Returns the engine version packed as `major << 16 | minor << 8 | patch`.
 //
-// For version `0.1.0` this returns `0x0000_0100`.
+// For version `0.1.1` this returns `0x0000_0101`.
 //
 // # C ABI
 //

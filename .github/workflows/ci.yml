@@ -60,6 +60,11 @@ jobs:
         # does not match the library.
         run: ./scripts/gen-header.sh --check
 
+      - name: Version is consistent
+        # Cargo.toml is the source of truth; docs, header, changelog and the path
+        # dependency pins must agree with it or a release misreports what it is.
+        run: ./scripts/check-version.sh
+
       - name: Asset BMP twins are up to date
         # A target whose SDL2_image has no PNG decoder loads the .bmp twin instead
         # (ADR-036), so a stale twin is a bug that only shows up on that target.

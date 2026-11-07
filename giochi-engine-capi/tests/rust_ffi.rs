@@ -141,7 +141,7 @@ fn c_abi_end_to_end() {
     assert_eq!(
         giochi_engine_version() >> 8,
         0x0001,
-        "0.1.0 packs to 0x0001_00"
+        "the 0.1.x line packs to major 0, minor 1"
     );
     assert_eq!(message(), "");
 

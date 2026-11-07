@@ -29,6 +29,11 @@ else
     echo "    cargo install cbindgen --version 0.27.0 --locked"
 fi
 
+# Version fields live in six files the compiler cannot check against each other;
+# a release that disagrees with its own header is the failure mode (ADR: see
+# CONTRIBUTING, "Releasing").
+run scripts/check-version.sh
+
 # The BMP twins exist so a target without a PNG decoder can still load the assets
 # (ADR-036). Byte comparison, because a same-size twin with different pixels would
 # pass every other gate.

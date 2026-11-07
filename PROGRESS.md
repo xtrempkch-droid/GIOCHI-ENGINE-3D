@@ -122,7 +122,7 @@ de índices coincidentes fixados em `ubuntu-24.04`.
 |---|---|---|
 | `ci.yml` | gates, ffi, cross-check, smoke | ✅ verde |
 | `cross-compile.yml` | check, link (`ubuntu-24.04`) | ✅ verde, link ARM64 real |
-| `release.yml` | build-x86_64, build-aarch64, publish | ✅ verde, rascunho `v0.1.0` com os dois arquivos |
+| `release.yml` | build-x86_64, build-aarch64, publish | ✅ verde; `v0.1.1` publicada com os dois arquivos |
 
 Validação: a matriz completa de CI espelhada num contentor `ubuntu:24.04` limpo — fmt,
 clippy, build, 209 testes, doc, header, FFI (C + Python), demo, os cinco exemplos e o
@@ -182,7 +182,7 @@ Duas armadilhas de operação, ambas registadas em `docs/KMSDRM.md` §8:
 | `giochi-demo --frames 300` | 59,4 fps, 303 passos |
 | `giochi-demo lua mini_game.lua --auto --frames 1200` | 59,5 fps, 16 pontos, **0 texturas vivas** |
 | Memória residente (`VmRSS`) | 21,9 MB (`VmPeak` 181 MB) |
-| Consumidor C (`c_smoke`) | `OK (abi 1, engine 0.1.0)` |
+| Consumidor C (`c_smoke`) | `OK (abi 1, engine 0.1.x)` |
 | Áudio | disponível (ALSA, `/dev/snd/pcmC0D0p`) |
 | Gamepad | detetado (`r36s_Gamepad`) |
 

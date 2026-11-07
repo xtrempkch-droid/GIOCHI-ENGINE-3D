@@ -1,7 +1,7 @@
 # GIOCHI-ENGINE — C ABI Contract
 
 **Contract version: `GIOCHI_ABI_VERSION 1`**
-**Engine version: `0.1.0`**
+**Engine version: `0.1.1`**
 **Status: authoritative.** This document is the law of the project. If a Rust type
 cannot be expressed in the C form below, the *type* is redesigned — the contract
 is never relaxed.

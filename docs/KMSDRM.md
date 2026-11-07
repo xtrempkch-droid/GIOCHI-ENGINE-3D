@@ -186,27 +186,56 @@ done; done | sort -u
 On our image `giochi-init` restarts the launcher within a second, so releasing the
 console for a test needs a wider window than killing it. Making the launcher
 non-executable is what the supervisor honours (`[ -x "$LAUNCHER" ] ||` falls into a
-wait loop that polls every `LAUNCHER_WAIT` seconds, 30 by default), and it is undone
-with a single `chmod +x`:
+wait loop that polls every `LAUNCHER_WAIT` seconds, 30 by default).
+
+Three details of that recipe are counter-intuitive, and each one cost a failed run:
+
+**`chmod -x` is not enough on this image.** BusyBox applies the umask to a symbolic
+mode, and the image runs with `umask 0077`, so `chmod -x` produced `-rw-r-xr-x` —
+still executable, and since everything runs as `root` the supervisor's `[ -x ]` stayed
+true and it respawned the launcher mid-test. Use an explicit mode and verify it:
 
 ```bash
-chmod -x /opt/giochi/apps/launcher/bin/giochi-launcher
-kill -TERM "$(pidof giochi-init)"      # inittab respawns it into the wait loop
-# ... run the engine against /dev/dri/card0 ...
-chmod +x /opt/giochi/apps/launcher/bin/giochi-launcher
-kill -TERM "$(pidof giochi-init)"      # respawned, this time it launches
+chmod 0644 /opt/giochi/apps/launcher/bin/giochi-launcher
+[ -x /opt/giochi/apps/launcher/bin/giochi-launcher ] && echo "still executable"
 ```
+
+**Do not kill `giochi-init` to release the console.** `/etc/inittab` registers it as
+`::respawn:/usr/bin/giochi-init`, so a kill only makes BusyBox start a fresh copy. A
+supervisor that was blocked in `"$LAUNCHER"` leaves its launcher child orphaned
+(`PPid: 1`) and that orphan keeps DRM master, so the sequence "kill init, kill
+launcher, kill init again" chases its own tail. Killing the launcher once is enough:
+the supervisor classifies exit status 143 (SIGTERM) as a deliberate exit, zeroes its
+crash quota and goes to wait for the launcher to reappear.
+
+**SIGTERM to the launcher usually works but is not guaranteed.** Its `SigCgt` includes
+signal 15, and on the same unit it sometimes exited on TERM and sometimes ignored it.
+Give it a grace period and then escalate to SIGKILL; one KILL is one of the
+supervisor's five crashes, which is well inside tolerance.
+
+The whole sequence, measured to leave the screen free:
+
+```bash
+chmod 0644 /opt/giochi/apps/launcher/bin/giochi-launcher
+kill -TERM <launcher-pid>     # wait; if /dev/dri is still held, kill -KILL it
+# ... run the engine against /dev/dri/card0 ...
+chmod 0755 /opt/giochi/apps/launcher/bin/giochi-launcher
+rm -f /run/giochi/launcher-parado
+# the supervisor's own poll brings the launcher back within LAUNCHER_WAIT
+```
+
+`scripts/hardware-check.sh` does exactly this and confirms success by checking that
+something holds `card0` again — a restore that only re-enables the file without
+verifying the holder is how a script reports success on a dead screen.
 
 **The trap: a broken test binary can leave the console dead.** The supervisor gives
 up after `RESTART_MAX=5` failures inside `RESTART_WINDOW=60` seconds, and then parks
 in `while :; do sleep 3600; done` — it stays alive (the kernel needs an init) but
 never starts the launcher again. The screen goes black and no amount of rebooting
 the *app* helps. Deploying a test binary that crashes on startup five times will do
-exactly this. Recovery is the same `kill -TERM` on `giochi-init`, which re-enters
-`main` with a fresh quota; a SIGTERM to the launcher counts as a deliberate exit and
-resets the quota instead of consuming it, so use that signal deliberately. Leave a
-marker when this happens rather than guessing later — on failure the supervisor
-writes `quedas_repetidas` into `$PARADA_FILE`.
+exactly this. Recovery is a fresh `kill -TERM` on `giochi-init`, which re-enters
+`main` with a fresh quota. Leave a marker when this happens rather than guessing
+later — on failure the supervisor writes `quedas_repetidas` into `$PARADA_FILE`.
 
 ### 8.2 The driver name is `KMSDRM`, in capitals
 
@@ -268,7 +297,7 @@ Measured with the release ARM64 build described in
 | `giochi-demo --frames 300` | 59.4 fps, 303 steps |
 | `giochi-demo lua mini_game.lua --auto --frames 1200` | 59.5 fps, 16 points, 0 live textures |
 | Resident memory (`VmRSS`) | 21.9 MB (`VmPeak` 181 MB) |
-| C ABI consumer (`c_smoke`) | `OK (abi 1, engine 0.1.0)` |
+| C ABI consumer (`c_smoke`) | `OK (abi 1, engine 0.1.x)` |
 | Audio | available (ALSA, `/dev/snd/pcmC0D0p`) |
 
 The texture count returning to zero after a 1200-frame game is the leak check: the
@@ -287,9 +316,24 @@ scripts/hardware-check.sh --host root@10.55.0.2 --sysroot /tmp/r35s-sysroot
 It cross-builds, deploys to `/opt/giochi`, frees DRM by parking the launcher,
 runs the demo, a frame capture, the Lua reference game and the C consumer, brings
 the captured frame back for inspection, prints the battery, and then re-enables the
-launcher and signals `giochi-init`. Use `--skip-build` to reuse an existing
+launcher and confirms the console came back. Use `--skip-build` to reuse an existing
 `target/aarch64-unknown-linux-gnu/release`, and `--skip-c-smoke` when no
 `aarch64-linux-gnu-gcc` is available.
 
 Every remote snippet sticks to busybox `sh`/`awk`/`ps`/`readlink`: the target image
 has no bash, no `python3`, no `timeout` and no `fuser`.
+
+### 8.7 The BMP fallback is not a theory
+
+A second run on the same unit checked which asset variant actually loads, with the
+demo logging at `debug`:
+
+```text
+DEBUG giochi_demo] textura 'player.png' indisponível: asset error: failed to load
+                   texture 'assets/player.png': Unsupported image format
+DEBUG giochi_demo] textura carregada: player.bmp
+```
+
+So on this image the PNG is genuinely undecodable and the committed BMP twin
+(ADR-036) is what keeps the demo running — including from the release tarball, whose
+`assets/` ships both files.

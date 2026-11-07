@@ -4,7 +4,35 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.1] - 2026-11-07
+
+Everything here came from the first run on real console hardware. The 0.1.0 release sat
+in draft precisely because these defects would have shipped in it.
+
+### Changed — release tooling
+
+- `scripts/check-version.sh` verifies that the version in `Cargo.toml` is echoed by
+  the member pins, the Rust constants, the generated header, the docs, the changelog
+  and `Cargo.lock`. It runs in `gates.sh` and in CI, so a bump cannot leave a release
+  whose artefacts disagree about what they are.
+- `CONTRIBUTING.md` documents the release procedure and the six files a bump touches.
+
+### Documentation — hardware traps corrected
+
+- §8.1 of [docs/KMSDRM.md](docs/KMSDRM.md) prescribed `chmod -x` and `kill -TERM` on
+  `giochi-init`. Both were wrong and cost three failed runs:
+  - BusyBox applies the umask to a symbolic mode and this image runs `umask 0077`, so
+    `chmod -x` produced `-rw-r-xr-x` — still executable, and since everything runs as
+    root `[ -x ]` stayed true, so the supervisor respawned the launcher mid-test. Use
+    `chmod 0644` and verify.
+  - `/etc/inittab` registers the supervisor as `::respawn:`, so killing it only makes
+    BusyBox start a new one, and its launcher child is orphaned with DRM master still
+    open. Killing the launcher once is enough; the supervisor treats SIGTERM as a
+    deliberate exit and zeroes its crash quota.
+  - SIGTERM to the launcher is honoured *sometimes*; its `SigCgt` includes signal 15.
+    Escalate to SIGKILL after a grace period.
+- §8.7 records the run that proves the BMP fallback is load-bearing on this image:
+  `player.png` fails with "Unsupported image format" and `player.bmp` loads.
 
 ### Verified on real hardware
 
