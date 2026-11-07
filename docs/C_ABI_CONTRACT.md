@@ -1,10 +1,14 @@
 # GIOCHI-ENGINE — C ABI Contract
 
-**Contract version: `GIOCHI_ABI_VERSION 1`**
+**Contract version: `GIOCHI_ABI_VERSION 1` for part I (2D), `2` for part II (3D).**
 **Engine version: `0.1.1`**
 **Status: authoritative.** This document is the law of the project. If a Rust type
 cannot be expressed in the C form below, the *type* is redesigned — the contract
 is never relaxed.
+
+Part I (§1–§7) is implemented and exported. Part II (§8–§12) specifies 3D and is
+written before the code on purpose; it ships in phase 14 and bumps
+`GIOCHI_ABI_VERSION` to 2. Part I signatures never change.
 
 The header `giochi-engine-capi/include/giochi.h` is generated from the Rust crate
 by `cbindgen` and must match this document exactly; `scripts/gen-header.sh --check`
@@ -612,3 +616,172 @@ int32_t     giochi_scene_destroy(GiochiScene scene);                     /* phas
 | `rust_ffi`, `c_smoke` and `python_smoke` exercise version, lifecycle, texture, render and scene paths | `cargo test -p giochi-engine-capi` and `scripts/ffi-smoke.sh` |
 | `GIOCHI_ABI_VERSION` is `1` and matches `giochi_abi_version()` | `tests::abi_version_matches_contract` |
 | The C structs have the documented size and alignment | `tests/rust_ffi.rs::abi_type_layouts_match_the_contract` and `giochi-engine/tests/abi_layout.rs` |
+
+---
+
+# Part II — 3D (ABI version 2, phases 9–14)
+
+**Status: specified, not yet exported.** This part is written *before* the code, which
+is the rule that made part I work: a type that cannot be expressed here gets redesigned
+now, not after six phases of callers depend on it. The functions below land in phase 14;
+the types are fixed here so the Rust structs can be written against them.
+
+`GIOCHI_ABI_VERSION` becomes **2** when phase 14 ships. Version 1 consumers keep
+working: part I is unchanged, and every 3D symbol is additive.
+
+## 8. How 3D differs from 2D at the boundary
+
+The 2D ABI hides a single engine-owned renderer behind `giochi_render_*` (ADR-012). 3D
+cannot use that shape: a game may want a 2D overlay and a 3D scene, and the two
+renderers are different subsystems that cannot share a canvas. So 3D gets an **opaque
+engine pointer** instead of global functions:
+
+```c
+typedef struct GiochiEngine3D GiochiEngine3D;   /* opaque, no layout in the header */
+```
+
+Rationale: a `glow::Context` and a `sdl2::video::GLContext` have no C representation at
+all, and the 3D renderer's size legitimately changes between releases. An opaque pointer
+is the only honest form. This is a deliberate divergence from part I, recorded in
+ADR-039.
+
+## 9. Types
+
+### 9.1 `GiochiColor3D`
+
+16 bytes of data plus reserved; every field is a float in `0.0..=1.0`.
+
+```c
+typedef struct GiochiColor3D {
+    float    r, g, b, a;
+    uint32_t _reserved[4];
+} GiochiColor3D;                     /* size 32, align 4 */
+```
+
+Out-of-range values are clamped by the renderer rather than rejected: a shader
+uniform of `2.0` is a caller bug, not a reason to fail a frame.
+
+### 9.2 `GiochiVec3` and `GiochiQuat`
+
+The 3D path cannot use `glam` types across the boundary, so vectors are plain arrays
+with a struct wrapper for readability.
+
+```c
+typedef struct GiochiVec3 {
+    float    x, y, z;
+    uint32_t _reserved[4];
+} GiochiVec3;                        /* size 28, align 4 */
+
+typedef struct GiochiQuat {
+    float    x, y, z, w;
+    uint32_t _reserved[4];
+} GiochiQuat;                        /* size 32, align 4 */
+```
+
+`GiochiQuat` is `(x, y, z, w)` — **not** `(w, x, y, z)`. The order is stated here because
+transposing it produces a camera that is subtly wrong rather than visibly broken.
+
+### 9.3 `GiochiTransform3D`
+
+```c
+typedef struct GiochiTransform3D {
+    GiochiVec3 position;
+    GiochiQuat rotation;
+    GiochiVec3 scale;
+    uint32_t   _reserved[4];
+} GiochiTransform3D;                 /* size 104, align 4 */
+```
+
+Applied in the order scale → rotation → translation, the same order every scene graph
+uses. Documented because getting it wrong looks like a broken pivot.
+
+### 9.4 `GiochiCamera3D`
+
+```c
+typedef struct GiochiCamera3D {
+    GiochiVec3 position;
+    GiochiVec3 target;
+    GiochiVec3 up;
+    float      fov_y;                /* radians, vertical */
+    float      near_plane;
+    float      far_plane;
+    float      aspect;               /* width / height; 0 = use the drawable */
+    uint32_t   _reserved[4];
+} GiochiCamera3D;                    /* size 116, align 4 */
+```
+
+`aspect == 0.0` means "ask the renderer", which is what a console wants: the panel's
+real size is authoritative, the same rule ADR-035 established for 2D.
+
+### 9.5 Handles
+
+3D resources follow the same `u64`, `0`-is-invalid rule as 2D. They live in a **separate**
+registry: a `GiochiTexture` and a `GiochiGlTexture` are different resources with
+different lifetimes, and letting one be passed where the other is expected is a mistake
+worth making impossible.
+
+```c
+typedef uint64_t GiochiMeshHandle;      /* 0 invalid */
+typedef uint64_t GiochiShaderHandle;    /* 0 invalid */
+typedef uint64_t GiochiGlTextureHandle; /* 0 invalid */
+```
+
+Ownership: `giochi_mesh_destroy` and `giochi_shader_destroy` release them. Textures are
+created through `giochi_gl_texture_create` and released with `giochi_gl_texture_destroy`.
+Nothing is freed on engine shutdown — a caller that leaks a mesh leaks it, exactly as in
+part I.
+
+## 10. Functions (phase 14)
+
+```c
+/* 10.1 Lifecycle — opaque engine pointer */
+GiochiEngine3D* giochi_engine3d_create(const GiochiWindowConfig* config);
+void            giochi_engine3d_destroy(GiochiEngine3D* engine);
+int32_t         giochi_engine3d_begin_frame(GiochiEngine3D* engine);
+int32_t         giochi_engine3d_end_frame(GiochiEngine3D* engine);
+
+/* 10.2 Camera — by value in, no allocation */
+GiochiCamera3D  giochi_camera3d_new(void);
+void            giochi_camera3d_look_at(GiochiCamera3D* camera,
+                                        GiochiVec3 position, GiochiVec3 target);
+
+/* 10.3 Meshes and shaders */
+int32_t giochi_mesh_load_obj(const char* path, GiochiMeshHandle* out);
+int32_t giochi_mesh_destroy(GiochiMeshHandle mesh);
+int32_t giochi_shader_load(const char* vert_path, const char* frag_path,
+                           GiochiShaderHandle* out);
+int32_t giochi_shader_destroy(GiochiShaderHandle shader);
+
+/* 10.4 Drawing */
+int32_t giochi_renderer3d_clear(GiochiEngine3D* engine, GiochiColor3D color);
+int32_t giochi_renderer3d_draw_mesh(GiochiEngine3D* engine,
+                                    GiochiMeshHandle mesh,
+                                    GiochiShaderHandle shader,
+                                    const GiochiTransform3D* model,
+                                    const GiochiCamera3D* camera);
+```
+
+Every one returns `int32_t` and reports through `giochi_get_last_error()`, unchanged from
+part I. `giochi_engine3d_create` is the single exception: it returns `NULL` on failure,
+because a caller cannot use an error code without an engine to read it from — the same
+pattern SDL uses for `SDL_CreateWindow`.
+
+## 11. What part II deliberately does not have
+
+| Not exposed | Reason |
+|---|---|
+| A `GiochiEngine3D` struct layout | Holds `glow::Context`; no C representation exists (ADR-039). |
+| `GiochiMat4` as a public type | Matrices are computed by the engine from `GiochiTransform3D` and `GiochiCamera3D`; exposing them invites callers to depend on the multiplication order. |
+| GLSL source as a string parameter | Shaders are files (`giochi_shader_load`) or built-ins, per R10. A string parameter would put the whole shader text in the ABI. |
+| VAO/OES extension exposure | Whether VAOs are core depends on the GLES version; the renderer abstracts it (fase 11) and callers never see it. |
+| A 3D scene callback table | Phase 14 is a draw API, not a loop. A caller drives its own loop, which is what a 3D game does anyway. |
+
+## 12. Compliance checklist for part II
+
+| Requirement | Enforced by |
+|---|---|
+| Every 3D type is `#[repr(C)]` with `_reserved` | `giochi-engine-3d/tests/abi_layout_3d.rs` (phase 14), mirroring `abi_layout.rs` |
+| Handles are `u64` with `0` invalid | `tests/rust_ffi_3d.rs` |
+| `GIOCHI_ABI_VERSION == 2` and `giochi_abi_version()` agrees | `python_smoke_3d.py`, `rust_ffi_3d.rs` |
+| No `glow`, `glam` or `sdl2` type appears in a public struct field | the same test that checks the 2D crate's rule (ADR-032) |
+| 3D additions never change a part I signature | `git diff` review plus `c_smoke.c` continuing to pass untouched |

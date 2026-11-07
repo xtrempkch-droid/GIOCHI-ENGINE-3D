@@ -1,0 +1,29 @@
+[package]
+name = "giochi-engine-3d"
+description = "GIOCHI-ENGINE 3D: OpenGL ES 2.0 renderer over EGL, parallel to the 2D engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+giochi-engine = { path = "../giochi-engine", version = "0.1.1" }
+glow = { workspace = true }
+bytemuck = { workspace = true }
+tobj = { workspace = true }
+glam = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+# Window, input and audio only. The 3D path never touches `sdl2::render`, which
+# belongs to the 2D renderer (ADR-037).
+sdl2 = { workspace = true }
+
+[dev-dependencies]
+env_logger = { workspace = true }
+
+[[example]]
+name = "cube_demo"
+path = "examples/cube_demo.rs"

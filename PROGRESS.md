@@ -1,9 +1,23 @@
 # Estado — GIOCHI-ENGINE
 
-## Última fase concluída: 8 — Binding Lua (`giochi-engine-lua`)
+## Última fase concluída: 9 — Bootstrap 3D (contexto GLES/EGL)
 Data: 2026-11-07
 
-**Todas as fases 0–8 estão concluídas.**
+**Fases 0–8 (2D) concluídas. Extensão v2.1 (3D) em andamento: fase 9 concluída.**
+
+## Status 2D (Fases 0–8)
+
+Todas concluídas — nenhuma regressão tolerada pelas fases 3D (regra de ouro da
+extensão v2.1). Gates 2D revalidados a cada fase 3D.
+
+## Status 3D (Fases 9–14)
+
+- [x] Fase 9 — Bootstrap 3D: contexto GLES/EGL, clear, swap
+- [ ] Fase 10 — Math 3D (`Mat4`, `Transform3D`, `Camera3D`)
+- [ ] Fase 11 — Pipeline de mesh + shaders
+- [ ] Fase 12 — Câmera com controle + `mini_fps`
+- [ ] Fase 13 — Iluminação Phong (opcional)
+- [ ] Fase 14 — C ABI 3D (v2)
 
 ## Gates validados
 
@@ -12,11 +26,14 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 209 testes, 0 falhas
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 236 testes, 0 falhas
+      (209 das fases 0–8 + 27 da crate 3D)
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
 - [x] `cargo doc --workspace --no-deps --document-private-items` (0 warnings)
 - [x] `scripts/gen-header.sh --check` — `giochi.h` em sincronia com o crate
 - [x] `scripts/ffi-smoke.sh` — consumidores C e Python (fase 7, mantidos verdes)
+- [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --test context_smoke`
+      — 3 testes contra GLES real (Mesa/EGL), incluindo leitura de pixel
 
 Verificações manuais da fase:
 
@@ -29,6 +46,67 @@ Verificações manuais da fase:
   recolha pelo GC, `giochi.quit()`, propagação de erro, `app:step`, `arg`).
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
+
+## Entregue na fase 9 — Bootstrap 3D (contexto GLES/EGL)
+
+Crate nova `giochi-engine-3d`, paralela ao 2D (ADR-037). Não toca em `sdl2::render`.
+
+- `context/gl_context.rs`: `configure_attributes` (atributos `SDL_GL_*`, que são
+  globais do processo e lidos na criação da **janela**), `create` (contexto via
+  `SDL_GL_CreateContext` + `glow::Context::from_loader_function`), `swap`,
+  `GlesVersion` com detecção pelo string do driver e `GlesVersion::from_env`.
+- `context/state.rs`: `GlState` explícito por frame (depth test, cull, front face,
+  blend, cor de clear). Regra de ouro 6 da extensão: nada é assumido.
+- `render3d/renderer.rs`: `RenderContext3D` com `begin_frame`/`end_frame`,
+  `take_gl_error` e `read_pixels` (RGBA8 via `glReadPixels`).
+- `math3d/color.rs`: `Color3D` `#[repr(C)]`, 32 bytes, clamp incluindo NaN.
+- `examples/cube_demo.rs`: tela azul, fecha com ESC, `--frames N` para execução
+  não-interativa (CI e hardware).
+- `docs/C_ABI_CONTRACT.md` parte II (§8–§12): tipos 3D completos, versão ABI 2
+  especificada, funções da fase 14 declaradas. Escrito **antes** do código, como R11
+  exige.
+- `docs/3D.md`: guia da fase, tabela de drivers GL, troubleshooting, estado por fase.
+- ADR-037 (crate separada, não backend), ADR-038 (GLES 2.0 padrão, 3.0 opt-in),
+  ADR-039 (ponteiro opaco de engine no 3D). ADR-005 anotada como superada no 3D.
+- Adições **retrocompatíveis** na crate 2D: `Window::new_opengl`, `Window::sdl_window`,
+  `Platform::video_subsystem`. Nenhuma assinatura existente mudou.
+
+### Medido
+
+| Verificação | Resultado |
+|---|---|
+| `SDL_VIDEODRIVER=offscreen` + `--frames 120` | 120 frames, **nenhum erro GL** |
+| `SDL_VIDEODRIVER=offscreen` + `GIOCHI_GL_VERSION=3` | contexto GLES 3.0 (Mesa 26.0.8, AMD RX 580) |
+| `cargo test -p giochi-engine-3d --lib` | 17 testes |
+| `--test context_smoke` (GL real) | 3 testes, incluindo leitura do pixel de clear |
+| `--test abi_layout_3d` | 5 testes de layout |
+| `SDL_VIDEODRIVER=dummy` | falha descritiva: o driver não tem OpenGL |
+| `cargo check --target aarch64` | passa |
+| **PX30 real, `--frames 300` (padrão GLES 2)** | `GLES 2 on Mali-G31 (Panfrost)`, 300 frames, **0 erros GL** |
+| **PX30 real, `GIOCHI_GL_VERSION=3 --frames 300`** | `GLES 3 on Mali-G31`, 300 frames, 0 erros GL |
+| **PX30 real, `--frames 1200`** | 20,57 s = **58,3 fps** |
+
+**Validado em hardware real.** O teste manual que a fase exigia foi feito: a tela
+abre, o clear funciona e o swap apresenta no Mali-G31 via KMSDRM, sem erro de GL.
+
+### Bug encontrado no hardware (e corrigido)
+
+Pedir `SDL_GL_CONTEXT_MAJOR_VERSION=2` no KMSDRM do PX30 produzia um contexto
+**OpenGL ES 3.1** de qualquer forma — o SDL2 honra o profile mas não a versão nesse
+driver. A primeira versão reportava o que o driver dizia, o que quebrava a promessa de
+`supports_gles3()`: um jogo que pediu o piso 2.0 podia ver um caminho 3.0 ativar.
+Corrigido: **pedido 2.0 → reportado 2.0 sempre**; pedido 3.0 → 3.0 só se o driver
+confirmar, senão 2.0 com aviso. Detalhes em `docs/3D.md` §3 e `docs/KMSDRM.md` §8.8.
+
+### Notas de fase
+
+- O driver `dummy` do SDL **não tem GL**; `offscreen` tem a pilha completa. Isso
+  decidiu como o CI testa 3D sem GPU: `SDL_VIDEODRIVER=offscreen`.
+- `glReadPixels` no CI é o que separa "a chamada foi feita" de "o pixel é aquela
+  cor" — a mesma distinção que o `--quadro` faz no 2D.
+- Os tamanhos de struct do contrato foram corrigidos contra um compilador C real:
+  o primeiro rascunho dizia 92 e 64 para `Transform3D` e `Camera3D`; os valores certos
+  são **104** e **116**.
 
 ## Entregue na fase 8
 

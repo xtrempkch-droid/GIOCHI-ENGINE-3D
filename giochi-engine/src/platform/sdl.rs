@@ -309,6 +309,15 @@ impl Platform {
     pub(crate) fn sdl_context(&self) -> &Rc<SdlContext> {
         &self.context
     }
+
+    /// Returns the SDL video subsystem.
+    ///
+    /// Needed by the 3D crate, which must set `SDL_GL_*` attributes *before* the
+    /// window exists: those are process-global in SDL2, not per-window. The 2D path
+    /// never calls this — it has no OpenGL context.
+    pub fn video_subsystem(&self) -> &sdl2::VideoSubsystem {
+        &self.context.video
+    }
 }
 
 /// Initialises SDL2, selecting KMSDRM when the user has no preference.

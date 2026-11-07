@@ -41,6 +41,9 @@ add a new ADR that states what it replaces.
 | 034 | Optional image decoders are probed, never assumed | Accepted |
 | 035 | The drawable size is authoritative, not the configured size | Accepted |
 | 036 | Assets ship as PNG plus a BMP twin, resolved at load time | Accepted |
+| 037 | 3D is a separate crate, not a render backend | Accepted (supersedes ADR-005) |
+| 038 | GLES 2.0 by default, 3.0 opt-in | Accepted |
+| 039 | 3D uses an opaque engine pointer, unlike the 2D ABI v1 | Accepted |
 
 ---
 
@@ -134,8 +137,11 @@ different resource model and a different pipeline design; designing for it now
 would slow 2D and freeze the wrong abstractions.
 
 **Consequences.** A future `giochi-engine-3d` crate (EGL + GLES) is the only
-sanctioned path. It must not reuse `sdl2::render`. Requests for 3D are answered
-with this ADR and the current phase continues.
+sanctioned path. It must not reuse `sdl2::render`.
+
+**Superseded by ADR-037** for the 3D half: extension v2.1 adds phases 9–14, which build
+that crate. The 2D decisions in this ADR stand unchanged — 3D is still a separate crate
+with its own pipeline, and `giochi-engine` still does not grow 3D concepts.
 
 ---
 
@@ -915,3 +921,96 @@ shipping a decoder to the platform that lacks one.
 and committing both files; the test fails loudly if that step is skipped. The 32-bit
 `BI_BITFIELDS` + `BITMAPV4HEADER` form is used so the alpha channel survives — SDL
 decodes it with no external library.
+
+---
+
+## ADR-037 — 3D is a separate crate, not a render backend
+
+**Context.** The v2 scope was 2D-only (ADR-005), which named the sanctioned path for
+3D: `giochi-engine-3d` with EGL + GLES, never `sdl2::render`. Phase 9 arrives through
+extension v2.1, which builds exactly that. The question it forces is the one ADR-005
+deferred: how do the two renderers relate?
+
+**Decision.** Two crates, two renderers, no shared abstraction.
+
+* `giochi-engine` keeps `sdl2::render` and is not modified except for additive
+  window/GL helpers.
+* `giochi-engine-3d` drives GLES through EGL via SDL2's window. It depends on
+  `giochi-engine` for `Platform`, `Window`, input and audio — not for `render`.
+* A game chooses one. There is no `RenderBackend` trait, no runtime switch, no
+  "unified" context.
+
+**Why not one abstraction.** A trait over `sdl2::render` and GLES would have to expose
+the union of both: texture creation, state, pipeline and batching for GL; canvas
+semantics for SDL. Every 2D caller would pay for concepts it never uses, and the
+trait would be frozen before a single line of 3D existed — the exact failure ADR-005
+was written to avoid. The overlap that actually exists (window, input, audio, handles)
+is shared by sharing those modules, not by abstracting the renderer.
+
+**What was added to the 2D crate, and why it is additive.** `Window::new_opengl`,
+`Window::sdl_window` and `Platform::video_subsystem` are new `pub` items. None changes
+an existing signature, so no 2D caller recompiles differently and `GIOCHI_ABI_VERSION`
+does not move. `new_opengl` exists because `SDL_WINDOW_OPENGL` must be set when the
+window is built, and the 2D `Window::new` deliberately does not set it: a window with
+that flag plus a 2D renderer makes some drivers choose the software path.
+
+**Consequences.** The two crates can be versioned and broken independently. A bug in
+one cannot be fixed by the other's test suite, which is why the golden rule of the 3D
+extension is "3D must never regress 2D": the 2D gates run unchanged in every 3D phase,
+and the 3D crate has its own.
+
+---
+
+## ADR-038 — GLES 2.0 by default, 3.0 opt-in
+
+**Context.** The ARM64 handhelds this project targets (RK3326 class, R35S/X35H) ship
+drivers built for a fixed-function pipeline. Asking for GLES 3.0 on them fails, or —
+worse — succeeds and then breaks on the first call that relies on a 3.0 feature. On a
+desktop the driver answers 3.2 happily, so a bug that only appears on the console is
+invisible during development.
+
+**Decision.** Request GLES 2.0 unless `GIOCHI_GL_VERSION=3` is set. Detect the version
+the driver actually returned, expose it as `RenderContext3D::gles_version()` and
+`supports_gles3()`, and require every 3.0-only path to check the latter.
+
+**Why detection, not trust.** The `GL_VERSION` string is not portable: Mesa reports
+`OpenGL ES 3.2 Mesa ...`, some embedded drivers report `OpenGL ES 2.0 build ...`, and a
+few report the fixed-function profile `OpenGL ES-CM 1.1`. The parser takes the first
+integer it can find, treats `>= 3` as 3.0 and `2` as 2.0, and falls back to the
+*requested* version when the string is unparseable — so an unusual driver is never
+silently downgraded to a version the caller did not ask for.
+
+**What is deliberately not done.** No extension allowlist and no feature flags are
+exposed yet. `OES_vertex_array_object` is the one that matters and phase 11 handles it
+inside the mesh code; exposing it now would promise a compatibility surface before the
+first mesh draws.
+
+**Consequences.** A shader written for `#version 300 es` will fail to compile on the
+default context — deliberately, and with the driver's full log (see R10). Requesting
+3.0 on hardware that has it is one environment variable away, and the fallback is
+logged rather than silent.
+
+---
+
+## ADR-039 — 3D uses an opaque engine pointer, unlike the 2D ABI v1
+
+**Context.** Part I of the C ABI hides a single engine-owned renderer behind
+`giochi_render_*` functions, with no opaque context pointer in the header (ADR-012).
+3D cannot follow that shape: `RenderContext3D` holds a `glow::Context` and an SDL
+`GLContext`, neither of which has a C representation, and its size legitimately changes
+between releases.
+
+**Decision.** `GiochiEngine3D` is an opaque, forward-declared struct in `giochi.h`. The
+caller never sees a layout; every function takes or returns a pointer. Creation returns
+`NULL` on failure, because a caller cannot read an error code from an engine it does
+not have — the same reason `SDL_CreateWindow` returns `NULL`.
+
+**Why the divergence is safe.** Part I is unchanged, so existing consumers keep
+working and `GIOCHI_ABI_VERSION` moves only when part II ships (phase 14). The two
+shapes coexist because they never describe the same object: `giochi_render_*` is the
+global 2D canvas, `giochi_engine3d_*` is an instance the caller owns.
+
+**Consequences.** 3D callers have explicit lifetime management they do not have in 2D
+(`giochi_engine3d_create` / `_destroy`). That is the correct trade: a 3D engine owns a
+GPU context, and pretending otherwise would hide the expensive object behind global
+state.

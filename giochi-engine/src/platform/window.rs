@@ -141,6 +141,55 @@ impl Window {
         self.inner.window_flags() & flag != 0
     }
 
+    /// Creates a window that can host an OpenGL ES context.
+    ///
+    /// Identical to [`Window::new`] except for `WindowBuilder::opengl()`. The 2D
+    /// renderer must not use this: a window carrying `SDL_WINDOW_OPENGL` and a 2D
+    /// renderer selected at the same time makes SDL pick the software path on some
+    /// drivers. The 3D crate is the only caller (ADR-037).
+    ///
+    /// The caller must have set the `SDL_GL_*` attributes on the video subsystem
+    /// first — SDL reads them when the window is created, not when the context is.
+    pub fn new_opengl(
+        platform: &Platform,
+        config: WindowConfig,
+        title: &str,
+    ) -> Result<Window, GiochiError> {
+        if config.width == 0 || config.height == 0 {
+            return Err(GiochiError::InvalidArgument(
+                "window width and height must be non-zero",
+            ));
+        }
+
+        let video = platform.sdl_context().video();
+        let mut builder = video.window(title, config.width, config.height);
+
+        if config.fullscreen != 0 {
+            builder.fullscreen_desktop();
+        } else {
+            builder.position_centered();
+        }
+
+        let inner = builder
+            .opengl()
+            .build()
+            .map_err(|err| GiochiError::Platform(format!("failed to create GL window: {err}")))?;
+
+        Ok(Window {
+            inner,
+            _context: Rc::clone(platform.sdl_context()),
+            _reserved: [0; 4],
+        })
+    }
+
+    /// Returns the underlying SDL window.
+    ///
+    /// Exists so the 3D crate can create and swap an OpenGL context; the 2D path
+    /// never needs the raw handle.
+    pub fn sdl_window(&self) -> &sdl2::video::Window {
+        &self.inner
+    }
+
     /// Splits the wrapper into the raw SDL window and the shared SDL context.
     ///
     /// Consumed by [`crate::render::RenderContext`], which must own the SDL window

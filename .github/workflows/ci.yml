@@ -175,3 +175,23 @@ jobs:
         run: |
           cargo run -q -p giochi-demo -- lua giochi-engine-lua/examples/mini_game.lua \
             --auto --frames 120
+
+      - name: 3D context smoke test
+        # `SDL_VIDEODRIVER=dummy` has no OpenGL at all; `offscreen` provides a real
+        # EGL/GLES context with no display attached. Measured on a developer machine:
+        # dummy fails with "OpenGL support is either not configured in SDL", offscreen
+        # gets the full driver stack. The integration tests skip cleanly when a runner
+        # has no GL, so this step cannot produce a false failure.
+        env:
+          SDL_VIDEODRIVER: offscreen
+        run: |
+          cargo test -q -p giochi-engine-3d --test context_smoke
+          cargo run -q -p giochi-engine-3d --example cube_demo -- --frames 60
+
+      - name: 3D opt-in GLES 3.0 path
+        # The fallback is the interesting part: the driver may answer 2.0 and the code
+        # must continue rather than fail.
+        env:
+          SDL_VIDEODRIVER: offscreen
+          GIOCHI_GL_VERSION: "3"
+        run: cargo run -q -p giochi-engine-3d --example cube_demo -- --frames 30

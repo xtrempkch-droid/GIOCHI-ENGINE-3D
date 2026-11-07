@@ -337,3 +337,41 @@ DEBUG giochi_demo] textura carregada: player.bmp
 So on this image the PNG is genuinely undecodable and the committed BMP twin
 (ADR-036) is what keeps the demo running — including from the release tarball, whose
 `assets/` ships both files.
+
+### 8.8 GLES: asking for 2.0 does not give you 2.0
+
+The 3D path (phases 9–14) creates a GLES context through SDL2. On this unit — Mali-G31
+with Panfrost, Mesa 24.0.0 — setting `SDL_GL_CONTEXT_MAJOR_VERSION=2` produced an
+`OpenGL ES 3.1` context anyway:
+
+```text
+$ GIOCHI_GL_VERSION=2 RUST_LOG=debug ./cube_demo --frames 2
+DEBUG giochi_engine_3d::context::gl_context] driver reports GL_VERSION=OpenGL ES 3.1 Mesa 24.0.0
+INFO  giochi_engine_3d::context::gl_context] GLES 2 context on Mali-G31 (Panfrost) (Mesa)
+```
+
+SDL2's KMSDRM path honours the profile request but not the version request on this
+driver. That is fine as long as the engine reports what the *caller asked for* rather
+than what the driver volunteered: `supports_gles3()` is a promise about what a caller
+may assume, so a game that asked for the GLES 2.0 floor must keep getting floor
+behaviour even when the driver offers more. Reporting the driver's answer instead would
+let a 3.0-only code path activate on a request that explicitly excluded it.
+
+The measured numbers on this unit, with the fix in place:
+
+| Run | Result |
+| --- | --- |
+| `./cube_demo --frames 300` (default, GLES 2) | `GLES 2 on Mali-G31`, 300 frames, no GL error |
+| `GIOCHI_GL_VERSION=3 ./cube_demo --frames 300` | `GLES 3 on Mali-G31`, 300 frames, no GL error |
+| `./cube_demo --frames 1200` | 20.57 s wall = **58.3 fps** |
+
+`libEGL`, `libGLESv2` and `libgbm` are all present on this image, so the 3D path works
+without any change to the system. That is not true of every Buildroot image — see the
+checklist in §8.9.
+
+### 8.9 The device is ready for 3D
+
+`libEGL.so.1`, `libGLESv2.so.2` and `libgbm.so.1` are all present, and Panfrost drives
+the Mali-G31. No system change is needed for the 3D crate. The gaps that do exist are
+the ones already listed for 2D: `libSDL2_image` has no PNG/JPEG decoder, and the
+sysroot has no libc headers.

@@ -51,7 +51,7 @@ expect() {
 # The member manifests pin the path dependency to the workspace version, so a
 # published crate cannot resolve to a version that was never released. A member may
 # either inherit (`version.workspace = true`) or restate the literal.
-for crate in giochi-engine giochi-engine-capi giochi-engine-lua giochi-demo; do
+for crate in giochi-engine giochi-engine-capi giochi-engine-lua giochi-demo giochi-engine-3d; do
     file="$crate/Cargo.toml"
     if [[ ! -f "$file" ]]; then
         echo "  MISSING  $file" >&2
@@ -67,7 +67,7 @@ done
 
 # A `{ path = ... , version = "X" }` pin that lags the workspace publishes a crate
 # whose dependency can never be satisfied.
-for file in giochi-engine-capi/Cargo.toml giochi-engine-lua/Cargo.toml giochi-demo/Cargo.toml; do
+for file in giochi-engine-capi/Cargo.toml giochi-engine-lua/Cargo.toml giochi-demo/Cargo.toml giochi-engine-3d/Cargo.toml; do
     while IFS= read -r pinned; do
         if [[ "$pinned" != "$version" ]]; then
             echo "  STALE    $file pins a path dependency to $pinned" >&2

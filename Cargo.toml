@@ -5,6 +5,7 @@ members = [
     "giochi-demo",
     "giochi-engine-capi",
     "giochi-engine-lua",
+    "giochi-engine-3d",
 ]
 
 [workspace.package]
@@ -32,6 +33,11 @@ env_logger = "0.11"
 serde = { version = "1", features = ["derive"] }
 mlua = { version = "0.12", features = ["lua54", "vendored"] }
 cbindgen = "0.27"
+# 3D (phases 9–14). `glow` is a thin GL/GLES binding: it declares the functions and
+# lets the loader supply the pointers, without tying us to a windowing library.
+glow = "0.14"
+bytemuck = { version = "1", features = ["derive"] }
+tobj = "4"
 
 [profile.release]
 lto = "thin"

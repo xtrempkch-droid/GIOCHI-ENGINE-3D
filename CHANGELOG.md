@@ -6,6 +6,43 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — 3D, phase 9 (extension v2.1)
+
+3D arrives as a **separate crate**, not a render backend: `giochi-engine-3d` drives
+GLES through EGL while `giochi-engine` keeps `sdl2::render`. A game picks one. ADR-037
+supersedes ADR-005 for the 3D half only.
+
+- `context`: GLES context creation through SDL2 (`configure_attributes` before the
+  window, because `SDL_GL_*` is process-global), `glow` loading, swap, explicit
+  `GlState` applied every frame.
+- `render3d`: `RenderContext3D` with `begin_frame`/`end_frame`, `take_gl_error` and
+  `read_pixels` for asserting on pixels instead of on the absence of errors.
+- `math3d`: `Color3D`, `#[repr(C)]`, 32 bytes, NaN-safe clamping.
+- `docs/C_ABI_CONTRACT.md` part II (§8–§12): the complete 3D type set, ABI version 2
+  specified, phase 14 function table declared — written before the code, per R11.
+- `docs/3D.md`: driver table, troubleshooting, per-phase state.
+- ADR-037 (separate crate), ADR-038 (GLES 2.0 default, 3.0 opt-in), ADR-039 (opaque
+  engine pointer in the 3D ABI).
+- 2D crate additions are strictly additive: `Window::new_opengl`, `Window::sdl_window`,
+  `Platform::video_subsystem`. No existing signature changed.
+
+**Validated on the PX30** (Mali-G31/Panfrost, Mesa 24.0.0): 300 frames with no GL
+error at either GLES version, 1200 frames in 20.57 s (58.3 fps).
+
+### Fixed — GLES version request ignored by SDL2/KMSDRM
+
+Asking for a GLES 2.0 context on this driver produced `OpenGL ES 3.1` regardless.
+Reporting the driver's answer made `supports_gles3()` untrustworthy: a caller that
+requested the 2.0 floor could have a 3.0-only path activate. Now a 2.0 request always
+reports 2.0, and a 3.0 request reports 3.0 only when the driver confirms it, otherwise
+2.0 with a warning. `docs/KMSDRM.md` §8.8.
+
+### Changed — CI runs the 3D path
+
+`SDL_VIDEODRIVER=dummy` has no OpenGL; `offscreen` has the full EGL/GLES stack. The
+smoke job runs the 3D integration tests and the example under `offscreen`, plus one run
+with `GIOCHI_GL_VERSION=3` to exercise the opt-in path.
+
 ### Changed — release tooling
 
 - `scripts/verify-release-artifact.sh` unpacks a release archive and *runs* it: layout,
