@@ -6,6 +6,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Verified — phases 10 and 11 on real hardware
+
+Confirmed on the Rockchip PX30 (Mali-G31/Panfrost, Mesa 24.0.0), which is the device
+these phases exist for:
+
+- 300 frames at GLES 2 and 200 at GLES 3, no GL error in either;
+- the no-VAO path runs (300 frames, no error), which is the path GLES 2.0 embedded
+  devices may take and no desktop can exercise;
+- 1200 frames in 21 s (**57.1 fps**), 19.9 MB resident;
+- a frame captured **on the device** shows the cube 209x209 px, centred at (322,238) on
+  a 640x480 panel whose centre is (320,240) — the camera took its aspect from the real
+  drawable, not from an assumed 16:9;
+- the OBJ loader parses on the device's libc, and a missing file reports its path.
+
 ### Added — 3D, phase 11: mesh pipeline
 
 - `mesh`: `Vertex` (`#[repr(C)]` + `Pod`, 32 bytes, interleaved position/normal/uv),
@@ -16,7 +30,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `giochi-engine-3d/shaders/*.vert|frag` with `include_str!` (R10).
 - `render3d`: `create_mesh`/`destroy_mesh`, `create_builtin_shader`/`load_shader`/
   `destroy_shader`, `draw_mesh`, `draw_mesh_colored` and `release_all`.
-- `examples/cube_demo.rs` draws a tumbling cube, with `--quadro` to capture a BMP.
+- `examples/cube_demo.rs` draws a tumbling cube, with `--quadro` to capture a BMP and
+  `--obj` to draw a model file instead — the loader is the only code here that parses
+  untrusted input, so it needs a path that actually runs on a console.
 
 ### Fixed — two cube faces were wound backwards
 

@@ -9,6 +9,7 @@
 //! cargo run -p giochi-engine-3d --example cube_demo
 //! cargo run -p giochi-engine-3d --example cube_demo -- --frames 120
 //! cargo run -p giochi-engine-3d --example cube_demo -- --frames 3 --quadro cube.bmp
+//! cargo run -p giochi-engine-3d --example cube_demo -- --obj model.obj
 //! SDL_VIDEODRIVER=offscreen GIOCHI_FORCE_NO_VAO=1 \
 //!     cargo run -p giochi-engine-3d --example cube_demo -- --frames 60
 //! ```
@@ -37,6 +38,12 @@ const CUBE_DISTANCE: f32 = 5.0;
 struct Options {
     /// Stop after this many frames instead of waiting for ESC.
     frames: Option<u64>,
+    /// `--obj <arquivo.obj>`: draw this model instead of the built-in cube.
+    ///
+    /// The procedural cube never exercises the OBJ loader, and the loader is the only
+    /// code in the crate that parses untrusted input. This flag gives it a path to run
+    /// through on the console, where `tobj` meets the device's own libc.
+    obj: Option<String>,
     /// `--quadro <arquivo.bmp>`: capture the last frame.
     ///
     /// Exists for the same reason the 2D demo has it: "drew a frame" and "drew the right
@@ -55,6 +62,10 @@ impl Options {
                 options.frames = value.parse().ok();
             } else if arg == "--frames" {
                 options.frames = args.next().and_then(|value| value.parse().ok());
+            } else if arg == "--obj" {
+                options.obj = args.next();
+            } else if let Some(value) = arg.strip_prefix("--obj=") {
+                options.obj = Some(value.to_string());
             } else if arg == "--quadro" {
                 options.quadro = args.next();
             } else if let Some(value) = arg.strip_prefix("--quadro=") {
@@ -97,7 +108,13 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         println!("GLES 3.0 was requested but the driver gave 2.0; continuing on 2.0");
     }
 
-    let mesh = render.create_cube_mesh(CUBE_SIZE)?;
+    // The procedural cube never exercises the OBJ loader, and the loader is the only
+    // code here that parses untrusted input. `--obj` gives it a path to run through on
+    // a console, where `tobj` meets the device's own libc.
+    let mesh = match options.obj.as_deref() {
+        Some(path) => render.load_obj_mesh(std::path::Path::new(path))?,
+        None => render.create_cube_mesh(CUBE_SIZE)?,
+    };
     let shader = render.create_builtin_shader(BuiltinShader::Flat)?;
     println!(
         "mesh {mesh}: {} vertices, {} indices, vertex array object: {}",

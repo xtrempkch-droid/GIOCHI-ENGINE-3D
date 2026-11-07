@@ -375,3 +375,28 @@ checklist in §8.9.
 the Mali-G31. No system change is needed for the 3D crate. The gaps that do exist are
 the ones already listed for 2D: `libSDL2_image` has no PNG/JPEG decoder, and the
 sysroot has no libc headers.
+
+### 8.10 The 3D pipeline on this unit
+
+Measured on the PX30 (Mali-G31/Panfrost, Mesa 24.0.0) after phase 11:
+
+| Check | Result |
+| --- | --- |
+| `cube_demo --frames 300`, GLES 2 default | 300 frames, no GL error, VAO available |
+| `GIOCHI_FORCE_NO_VAO=1 --frames 300` | 300 frames, no GL error, per-draw attribute path |
+| `GIOCHI_GL_VERSION=3 --frames 200` | GLES 3, 200 frames, no GL error |
+| `--frames 1200` | 21 s = **57.1 fps** |
+| `--quadro` on the device | BMP 640x480; cube 209x209 px, 43 162 lit pixels, centred at (322,238) against a panel centre of (320,240) |
+| `--obj` | 3-vertex OBJ loaded, no GL error; a missing file reports `asset error: OBJ file does not exist` |
+| Resident memory | 19.9 MB (`VmPeak` 180 MB) |
+
+Two things this confirms that a desktop cannot:
+
+* the no-VAO fallback is the path this class of device may use, and it works here
+  (`vertex array object: no (fallback path)` in the log);
+* the cube lands **centred on a 4:3 panel**, which is only true if the camera took its
+  aspect from the real drawable (ADR-035) instead of assuming 16:9.
+
+An operational note: this unit's rootfs does not survive a power cut. After the battery
+died, `/opt/giochi` was empty and the SSH `authorized_keys` were gone, so the deploy has
+to be rebuilt after every reset.

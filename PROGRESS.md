@@ -99,10 +99,23 @@ poderia servir mais de um shader.
 | Captura `--quadro` | BMP 1280×720, 3,7 MB, quadrado sólido centrado |
 | Build cruzado aarch64 `--all-targets` | linka, `cube_demo` é ELF ARM aarch64 |
 
-**Teste manual em hardware pendente — bloqueado.** Continua sem acesso ao PX30 (ver
-§"Bloqueios"). O cubo a girar foi verificado em GL real no desktop e por leitura de
-pixels, que é a mesma evidência que o teste manual daria — mas falta a confirmação no
-Mali-G31, sobretudo do caminho sem VAO.
+**Validado no PX30 (Mali-G31/Panfrost, Mesa 24.0.0), 2026-11-07 12:30.** O teste manual
+que a fase exigia foi feito, e a captura de quadro prova que desenhou:
+
+| Verificação | Resultado |
+|---|---|
+| `cube_demo --frames 300` (GLES 2 padrão) | 300 frames, **0 erros GL**, VAO disponível |
+| `GIOCHI_FORCE_NO_VAO=1 --frames 300` | 300 frames, 0 erros GL, caminho de fallback |
+| `GIOCHI_GL_VERSION=3 --frames 200` | GLES 3, 200 frames, 0 erros GL |
+| `--frames 1200` | **57,1 fps** (21 s) |
+| Captura `--quadro` **no aparelho** | BMP 640×480; cubo 209×209 px, 43 162 pixels acesos, centrado em (322,238) com o painel em (320,240) |
+| `--obj ../assets/tri.obj` | 3 vértices carregados, 60 frames, 0 erros GL |
+| `--obj` inexistente | `asset error: OBJ file does not exist: ...` |
+| Memória residente | **19,9 MB** RSS (VmPeak 180 MB) |
+| Libertação | `released: 0 meshes and 0 shaders left` |
+
+O cubo centrado no painel 4:3 é a prova de que a fase 10 também está certa no hardware:
+o aspect vem do drawable real, não de um 16:9 assumido.
 
 ## Entregue na fase 10 — Math 3D
 
@@ -145,11 +158,9 @@ travado por teste.
 | `cargo check --target aarch64` | passa |
 | Build cruzado do crate + exemplo para aarch64 | linka, ELF ARM aarch64 |
 
-**Teste manual em hardware pendente — bloqueado.** O aparelho ficou inacessível: quando
-a bateria morreu e voltou, ele regenerou a chave de host SSH **e** perdeu as chaves
-autorizadas (`Permission denied (publickey)`). Ou foi reflashado, ou o rootfs resetou.
-Sem acesso não há como rodar a fase 10 no PX30; a validação possível (GL real via
-`offscreen`) foi feita. Ver §"Bloqueios".
+**Validado no PX30** junto com a fase 11: a câmera resolve o aspect pelo drawable real e
+o cubo sai centrado no painel 640×480 (bbox centrada em (322,238), painel em (320,240)).
+Um aspect assumido como 16:9 teria deslocado ou cortado o cubo.
 
 ## Entregue na fase 9 — Bootstrap 3D (contexto GLES/EGL)
 
@@ -422,6 +433,11 @@ As oito fases do prompt mestre estão completas. Trabalho futuro, por ordem de v
 ## Bloqueios / pendências
 
 - Nenhum bloqueio de gate.
+- **PX30 acessível de novo (13:30).** O acesso voltou; fases 10 e 11 validadas no
+  Mali-G31 (ver as secções das fases). Nota operacional: o aparelho tinha perdido
+  `/opt/giochi` e o `authorized_keys`, ou seja o rootfs não sobrevive a um corte de
+  energia — o deploy precisa de ser refeito a cada reset. O *registro* histórico segue
+  abaixo.
 - **PX30 inacessível (2026-11-07, tarde) — confirmado de novo às 13:00.** O adaptador
   USB-ethernet voltou (`enx0247494f4348`, 10.55.0.1/24) e o aparelho responde a ping,
   mas `ssh` oferece a chave e o servidor **rejeita**: `Permission denied (publickey,
