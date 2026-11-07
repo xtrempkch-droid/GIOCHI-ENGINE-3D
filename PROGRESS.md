@@ -1,6 +1,6 @@
 # Estado — GIOCHI-ENGINE
 
-## Última fase concluída: 5 — Scene + Engine (fachada)
+## Última fase concluída: 6 — Polimento + CI + Docs
 Data: 2026-11-07
 
 ## Gates validados
@@ -10,66 +10,73 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 182 testes, 0 falhas
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 183 testes, 0 falhas
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
-- [x] `cargo doc --workspace --no-deps --document-private-items` (sem warnings)
+- [x] `cargo doc --workspace --no-deps --document-private-items` (0 warnings)
 
 Verificações manuais da fase:
 
-- `cargo run -p giochi-demo -- --verify` (x11): 1 frame pelo loop do `Engine`,
-  `texturas vivas: 1, sons vivos: 1, áudio: ativo`.
-- `cargo run -p giochi-engine --example mini_game -- --frames 600` (sem input):
-  368 frames, **fim de jogo** com pontuação 0 — o caminho game over → `Quit`
-  funciona e para o loop.
-- `cargo run -p giochi-engine --example mini_game -- --auto --frames 600`:
-  600 frames completos, **pontuação final 120** — tiro, colisão e pontuação
-  comprovados; jogo sobrevivível e jogável.
-- `tests/engine_smoke.rs` (driver `dummy`): pilha vazia → push (`on_enter`) →
-  push → pop (`on_exit`) → replace (`exit`+`enter`); loop real com frame limit de
-  40 (40 renders, `updates == stats.steps`); `Quit` para o loop e deixa
-  `is_running() == false`; pilha vazia roda e desenha; sem handles vazando.
+- `scripts/gates.sh` completo: exit 0, "All gates passed.".
+- Smoke headless (`SDL_VIDEODRIVER=dummy`), os mesmos comandos que o CI roda:
+  `giochi-demo --verify` (1 frame, `texturas vivas: 1, sons vivos: 1, áudio:
+  ativo`), `giochi-demo --frames 60` (61.8 fps), `hello_rect`, `moving_sprite`,
+  `input_test` e `audio_test` com `--frames 30`, `mini_game --auto --frames 120`
+  (pontuação 10).
+- Release x86_64: `cargo build --release --workspace` (LTO + codegen-units=1) e
+  `giochi-demo --verify` a partir do binário release — usado pelo `release.yml`.
+- Cross ARM64 **com link** verificado em container limpo `ubuntu:24.04`: a receita
+  multiarch documentada em `docs/CROSS_COMPILE.md` produz
+  `ELF 64-bit LSB pie executable, ARM aarch64`. Ver ADR-027.
+- YAML dos três workflows e do `dependabot.yml` validado com um parser real.
 
-## Entregue na fase 5
+## Entregue na fase 6
 
-- `scene/scene.rs`: `trait Scene` com `on_enter`/`on_exit`/`update(Time, &Input,
-  &mut AudioSystem)`/`render(&mut RenderContext)`/`transition()`;
-  `SceneTransition` (`Continue`/`Quit`/`Replace`/`Push`/`Pop`) e `EmptyScene`
-  (contador de callbacks para testes) — 4 testes.
-- `scene/state.rs`: `SceneManager` com `push`/`pop`/`replace`/`clear`/`current`/
-  `current_mut`/`depth`/`is_empty`, chamando `on_enter`/`on_exit` exatamente uma vez
-  por cena — 10 testes.
-- `core/engine.rs`: `Engine` (fachada) dono de `Platform`, `RenderContext`,
-  `AudioSystem`, `Input`, `SceneManager`, `GameLoop`, relógio e `RunStats`;
-  `Engine::new(config)`, `with_scene`, `run`, `run_current`, `push_scene`,
-  `replace_scene`, `pop_scene`, `request_quit`, `is_running`, `reset_quit`,
-  `set_frame_limit`/`clear_frame_limit`, `run_stats`, `set_clear_color`,
-  acessores (`render`, `audio`, `input`, `scenes`, `resources`, `platform`,
-  `game_loop`, `fixed_timestep`) e `Drop` que limpa cenas/áudio/texturas —
-  14 testes.
-- `RunStats` C-shaped (`frames`, `steps`, `elapsed`, `_reserved`) com `fps`,
-  `step_rate` e `frame_time_ms`.
-- `giochi-demo` refatorado para usar `Engine` + `Scene`: sprite móvel com WASD,
-  arrasto com botão direito, companheiro que quica, bipe no ESPAÇO, grid de fundo,
-  marcador de "áudio carregado" e flags `--frames N` / `--verify`.
-- `examples/mini_game.rs`: space shooter completo (ship, drones, balas,
-  colisões, vidas, pontuação, dificuldade progressiva, game over, som procedural de
-  tiro) usando todos os módulos; `--frames N` e `--auto` (auto-play para verificação
-  por script).
-- `tests/engine_smoke.rs`: integração headless do loop e da pilha de cenas.
-- `docs/DECISIONS.md`: ADR-024 (engine empresta subsistemas; cenas não os possuem),
-  ADR-025 (transições como pedido aplicado após o frame), ADR-026 (loop único com
-  frame limit no `Engine`).
-- `docs/C_ABI_CONTRACT.md`: contrato de callbacks (quando `update`/`render`/`on_enter`/
-  `on_exit` são chamados), lifetime de cena em execução e semântica de transições.
+- `docs/ARCHITECTURE.md`: diagrama de camadas, tabela das regras de dependência,
+  propriedade e lifetimes, ordem obrigatória por frame, tabela dos mecanismos que
+  impõem a superfície C-shaped, política de falha, estratégia de testes e
+  perspectivas das fases 7/8.
+- `docs/KMSDRM.md`: negociação de driver, variáveis de ambiente, permissões em
+  `/dev/dri` (grupos `video`/`render`), tabela das mensagens de falha típicas,
+  bibliotecas de runtime necessárias no alvo (incluindo os satélites SDL2 e o
+  fecho de dependências) e receita de verificação.
+- `docs/API_GUIDE.md`: guia orientado a tarefas — exemplo de 5 minutos,
+  configuração, cenas e transições, inspeção do loop, screen-space vs world-space,
+  semântica de bordas de input, áudio e modo silencioso, assets, matemática,
+  tabela completa de códigos de erro e padrões recomendados.
+- `giochi-engine/tests/api_guide.rs`: compila e executa **todos** os exemplos do
+  guia, para que a documentação não divirja do código.
+- `docs/CROSS_COMPILE.md` reescrito: os dois scripts, a receita multiarch
+  verificada, sysroot de console, requisito de linker, satélites SDL2 e o caminho
+  `cross`.
+- `.github/workflows/ci.yml`: gates em x86_64, cross-check ARM64 e smoke do demo e
+  dos cinco exemplos.
+- `.github/workflows/cross-compile.yml`: job `check` (rápido) e job `link` (receita
+  multiarch + `scripts/build-aarch64.sh --workspace --all-targets`).
+- `.github/workflows/release.yml`: binários x86_64 e aarch64, smoke do binário de
+  release, empacotamento em `.tar.gz` e anexo a um release em rascunho.
+- `.github/ISSUE_TEMPLATE/{bug_report,feature_request}.md`,
+  `.github/PULL_REQUEST_TEMPLATE.md`, `.github/dependabot.yml`.
+- `scripts/build-aarch64.sh`: build ARM64 **com link**, resolve os satélites a
+  partir de `CROSS_SYSROOT` ou do diretório multiarch, falha com instruções
+  acionáveis quando faltam e afirma que os binários são ELF AArch64.
+- `.cargo/config.toml`: `linker = "aarch64-linux-gnu-gcc"` para o alvo ARM64
+  (bug real, ver ADR-027).
+- `README.md` reescrito para 0.1.0: badges, pré-requisitos, build nativo e cross,
+  troca de driver KMSDRM, exemplos e links para todos os guias.
+- `CHANGELOG.md`: seção `## [0.1.0] - 2026-11-07` com todas as fases e
+  `[Unreleased]` vazio para a próxima.
+- `CONTRIBUTING.md`: referência a `scripts/gates.sh`, ao `api_guide.rs` como teste
+  de documentação e tabela de "que documento atualizar quando".
+- `docs/DECISIONS.md`: ADR-027.
 
-## Próxima fase: 6 — Polimento + CI + Docs
+## Próxima fase: 7 — C ABI (`giochi-engine-capi`)
 
-`.github/workflows/{ci,release,cross-compile}.yml`, `.github/ISSUE_TEMPLATE/`,
-`PULL_REQUEST_TEMPLATE.md`, `dependabot.yml`; `docs/ARCHITECTURE.md`,
-`docs/KMSDRM.md`, `docs/API_GUIDE.md`; `README.md` completo com badges,
-pré-requisitos, build nativo + cross e KMSDRM; `CHANGELOG.md` 0.1.0 e
-`CONTRIBUTING.md` revisado; `cargo doc` limpo. Aceite: CI verde (ou validação local
-documentada) e README cobrindo build/execução em x86_64 e ARM64.
+Superfície `#[no_mangle] extern "C"` sobre `giochi-engine`: `giochi_get_last_error()`
+(thread-local), `giochi_engine_version()`, funções `giochi_*` da tabela do
+`docs/C_ABI_CONTRACT.md`, `cbindgen.toml` + `include/giochi.h` gerado,
+`tests/rust_ffi.rs`, `tests/c_smoke.c` e `tests/python_smoke.py`, e `docs/C_ABI.md`.
+Aceite: um programa C e um programa Python carregam a `cdylib`/`staticlib`, chamam
+a engine e leem a mensagem de erro pelo código de retorno.
 
 ## Bloqueios / pendências
 
@@ -85,6 +92,14 @@ documentada) e README cobrindo build/execução em x86_64 e ARM64.
 - `SceneTransition::Replace`/`Push` não podem ser aplicados pelo engine (o enum não
   carrega payload); a troca de cena é feita por `Engine::push_scene`/
   `replace_scene`. Documentado no ADR-025.
+- O cross ARM64 **com link** exige os satélites SDL2 para aarch64
+  (`libSDL2_image`/`libSDL2_mixer`/`libSDL2_ttf`): o `bundled` do crate `sdl2`
+  compila só o SDL2 core. Nesta máquina eles não existem, então o gate da fase
+  continua sendo `cargo check` e o link é verificado no CI (receita multiarch) e em
+  container limpo. ADR-027.
+- Até a fase 6 o alvo de produção não linkava (`cargo check` não linka): faltava o
+  linker no `.cargo/config.toml` **e** os satélites ARM64. Corrigido e agora
+  coberto pelo job `link` do `cross-compile.yml`.
 
 ## Notas de arquitetura
 
@@ -102,5 +117,5 @@ documentada) e README cobrindo build/execução em x86_64 e ARM64.
 - `render` não conhece `scene` (a dependência é `core::engine` → `scene` →
   `render`/`input`/`audio`); `core` não importa `sdl2`; `math` não depende de
   módulos internos; `handle_registry` é `pub(crate)`.
-- Próximas fases: 6 (CI/docs), 7 (capi com cbindgen + testes C/Python), 8 (binding
-  Lua com `mini_game.lua` e subcomando `giochi-demo lua`).
+- Próximas fases: 7 (capi com cbindgen + testes C/Python), 8 (binding Lua com
+  `mini_game.lua` e subcomando `giochi-demo lua`).

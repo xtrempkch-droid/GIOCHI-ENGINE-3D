@@ -9,5 +9,9 @@ image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0.2.5"
 pre-build = [
     "dpkg --add-architecture arm64",
     "apt-get update",
+    # SDL2's audio/input backends.
     "apt-get install -y --no-install-recommends libasound2-dev:arm64 libudev-dev:arm64",
+    # The `image`, `mixer` and `ttf` features link the system SDL2 satellites;
+    # `bundled` only builds core SDL2 (see docs/CROSS_COMPILE.md).
+    "apt-get install -y --no-install-recommends libsdl2-image-dev:arm64 libsdl2-mixer-dev:arm64 libsdl2-ttf-dev:arm64",
 ]

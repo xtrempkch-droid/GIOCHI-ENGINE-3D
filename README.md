@@ -1,14 +1,21 @@
 # GIOCHI-ENGINE
 
+[![CI](https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/actions/workflows/ci.yml/badge.svg)](https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/actions/workflows/ci.yml)
+[![Cross compile](https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/actions/workflows/cross-compile.yml/badge.svg)](https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/actions/workflows/cross-compile.yml)
+[![Release](https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/actions/workflows/release.yml/badge.svg)](https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A **2D** game engine in Rust on top of SDL2, designed from day one to be consumed
 from any language through a C ABI. Primary target: `aarch64-unknown-linux-gnu`
 (Linux consoles with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 
-> **Status: phase 5 (scenes + `Engine`).** The workspace, the C ABI contract, the
+> **Status: 0.1.0 — phases 0 to 6 complete.** The workspace, the C ABI contract, the
 > value types, the SDL2 platform layer, the fixed-timestep loop, the 2D renderer with
 > opaque texture handles, keyboard/mouse/gamepad input, the asset cache, the audio
-> mixer, the scene stack and the `Engine` facade all exist. CI, release packaging and
-> the remaining guides land in phase 6 — see [PROGRESS.md](PROGRESS.md).
+> mixer, the scene stack and the `Engine` facade all exist, with CI, release packaging
+> and the guides in place. The `extern "C"` surface and the Lua binding land in
+> phases 7 and 8 — see [PROGRESS.md](PROGRESS.md).
+
 
 ## Why "C-shaped" Rust?
 
@@ -43,8 +50,29 @@ is authoritative.
 
 ## Build
 
-Prerequisites: Rust (stable), a C toolchain, CMake and pkg-config. SDL2 is built
-from source, so no system SDL2 is required.
+### Prerequisites
+
+| Requirement | Notes |
+|---|---|
+| Rust stable | `rustup toolchain install stable`; the workspace declares `rust-version = 1.75` |
+| A C toolchain | `build-essential` (GCC or Clang) |
+| CMake ≥ 3.5 | SDL2 is built from source by the `bundled` feature, so a system SDL2 is **not** needed |
+| `pkg-config` | locates optional SDL2 backends |
+
+Optional backends are picked up when their headers are present; missing ones are
+simply disabled:
+
+```bash
+sudo apt install libasound2-dev libudev-dev libdrm-dev libgbm-dev \
+                 libgl1-mesa-dev libegl1-mesa-dev
+```
+
+On Ubuntu 24.04+ the bundled CMake files are older than the policy minimum CMake 4
+accepts. [`cmake/aarch64-linux-toolchain.cmake`](cmake/aarch64-linux-toolchain.cmake)
+and [`.cargo/config.toml`](.cargo/config.toml) work around this (ADR-014);
+`cargo build` needs no extra flags.
+
+### Native build
 
 ```bash
 cargo build --workspace
@@ -70,6 +98,24 @@ cargo run -p giochi-engine --example mini_game       # complete space shooter
 
 All examples accept `--frames N` to run for a fixed number of frames, which is how
 the smoke tests exercise them without a display.
+
+### Cross build for ARM64
+
+```bash
+rustup target add aarch64-unknown-linux-gnu
+sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+scripts/check-aarch64.sh            # cargo check: fast, never links
+scripts/build-aarch64.sh --release  # full compile and link, asserts AArch64 ELF
+```
+
+`scripts/check-aarch64.sh` points `sdl2-sys` at
+[`cmake/aarch64-linux-toolchain.cmake`](cmake/aarch64-linux-toolchain.cmake) so the
+bundled SDL2 becomes a real cross build instead of a native one that emits x86_64
+linker flags. `scripts/build-aarch64.sh` does the same and then actually links,
+which additionally needs the ARM64 `libSDL2_image`/`libSDL2_mixer`/`libSDL2_ttf`
+(`bundled` builds core SDL2 only). Details, including the verified multiarch
+recipe and how to supply a console sysroot:
+[docs/CROSS_COMPILE.md](docs/CROSS_COMPILE.md).
 
 ### Minimal render loop
 
@@ -181,7 +227,12 @@ the desktop driver. Pin the driver to make that failure loud instead:
 ```bash
 SDL_VIDEODRIVER=kmsdrm ./target/debug/giochi-demo   # production console
 SDL_VIDEODRIVER=x11    ./target/debug/giochi-demo   # development desktop
+SDL_VIDEODRIVER=dummy  ./target/debug/giochi-demo   # headless (tests, CI)
 ```
+
+The running session usually has to be in the `video` and `render` groups to open
+`/dev/dri/card*`. The full procedure, the failure messages and the runtime
+libraries the ARM64 target needs: [docs/KMSDRM.md](docs/KMSDRM.md).
 
 All quality gates:
 
@@ -189,8 +240,6 @@ All quality gates:
 scripts/gates.sh             # fmt, clippy, build, test, doc, aarch64 check
 SKIP_ARM64=1 scripts/gates.sh
 ```
-
-ARM64 details: [docs/CROSS_COMPILE.md](docs/CROSS_COMPILE.md).
 
 ## Design rules (short version)
 
@@ -201,14 +250,19 @@ ARM64 details: [docs/CROSS_COMPILE.md](docs/CROSS_COMPILE.md).
 5. **2D only.** No `render` backend abstraction, meshes, shaders or pipelines. 3D,
    if it ever happens, is a separate `giochi-engine-3d` crate on EGL + GLES.
 
-Decisions and their rationale: [docs/DECISIONS.md](docs/DECISIONS.md).
+Decisions and their rationale: [docs/DECISIONS.md](docs/DECISIONS.md). How the
+rules are actually enforced by the crate layout, and why the modules depend on each
+other the way they do: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Documentation
 
 | File | Contents |
 |---|---|
+| [docs/API_GUIDE.md](docs/API_GUIDE.md) | Task-oriented guide: scenes, rendering, input, audio, assets, errors |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layers, dependency rules, ownership, per-frame order, testing |
 | [docs/C_ABI_CONTRACT.md](docs/C_ABI_CONTRACT.md) | Authoritative C ABI: types, sizes, error codes, functions |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Architecture decision records |
+| [docs/KMSDRM.md](docs/KMSDRM.md) | Bare-console video: permissions, failures, runtime libs |
 | [docs/CROSS_COMPILE.md](docs/CROSS_COMPILE.md) | ARM64 cross toolchain |
 | [PROGRESS.md](PROGRESS.md) | Phase status and validated gates |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |

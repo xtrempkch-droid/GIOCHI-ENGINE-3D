@@ -590,3 +590,45 @@ tested one would be correct.
 limit persists across `reset_quit`, which is what a test wants. `giochi-demo --verify`
 uses it to prove the full pipeline (texture loaded, sound loaded, audio device state)
 in one frame.
+
+## ADR-027 — The ARM64 gate is `cargo check`; linking is a separate, verified path
+
+**Context.** Every phase gate runs
+`cargo check --workspace --target aarch64-unknown-linux-gnu`, as the master prompt
+specifies. While adding the release workflow in phase 6, a real cross build was
+attempted for the first time, and it failed for two reasons that `cargo check`
+cannot see:
+
+1. `.cargo/config.toml` had no
+   `[target.aarch64-unknown-linux-gnu] linker`, so Cargo used the host `cc` for the
+   ARM64 target and the link died with
+   `rust-lld: error: --fix-cortex-a53-843419 is only supported on AArch64`.
+2. The `image`, `mixer` and `ttf` features of the `sdl2` crate link the *system*
+   `SDL2_image`/`SDL2_mixer`/`SDL2_ttf`. The `bundled` feature builds core SDL2
+   only, so nothing provided those three libraries for aarch64, and the link died
+   with `cannot find -lSDL2_mixer`.
+
+Neither is detectable by `cargo check`, which never links. The gate was therefore
+green while the primary production target could not be built at all.
+
+**Decision.**
+
+* Fix the linker, permanently, in `.cargo/config.toml`. Host builds ignore it.
+* Keep `cargo check` as the per-phase gate: it is fast, and the phase protocol asks
+  for exactly that command.
+* Add `scripts/build-aarch64.sh`, which performs a real cross **build** and asserts
+  the resulting binaries are AArch64 ELF by inspecting them with `file`. It
+  resolves the satellite libraries from `CROSS_SYSROOT` or from the Debian/Ubuntu
+  multiarch directory, and fails with instructions when they are absent.
+* Run it in the `cross-compile` workflow on every relevant push and in the release
+  workflow for both targets, so the gap cannot reopen.
+
+**Why not make the link part of the mandatory gate.** It needs ARM64 SDL2 packages
+installed on the developer machine, which is a much heavier prerequisite than a
+Rust target and a GCC cross compiler. The gate must stay runnable everywhere; the
+link check runs where ARM64 libraries are guaranteed to exist.
+
+**Consequences.** `docs/CROSS_COMPILE.md` documents both scripts and the verified
+multiarch recipe. `README.md` no longer claims `scripts/check-aarch64.sh --release`
+performs a link — it never did, and `--release` was simply forwarded to
+`cargo check`.

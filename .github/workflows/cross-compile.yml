@@ -1,0 +1,107 @@
+name: Cross Compile
+
+# `ci.yml` only runs `cargo check` for ARM64, which never links. This workflow is
+# the slower, fuller version: it provides ARM64 SDL2 libraries, links real
+# binaries and inspects the ELF headers, so a change that only breaks the linker
+# or the bundled CMake build of SDL2 is caught without waiting for a release tag.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "giochi-engine/**"
+      - "giochi-engine-capi/**"
+      - "giochi-engine-lua/**"
+      - "giochi-demo/**"
+      - "cmake/**"
+      - "scripts/**"
+      - ".cargo/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/cross-compile.yml"
+  pull_request:
+    paths:
+      - "giochi-engine/**"
+      - "giochi-engine-capi/**"
+      - "giochi-engine-lua/**"
+      - "giochi-demo/**"
+      - "cmake/**"
+      - "scripts/**"
+      - ".cargo/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/cross-compile.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: aarch64 cargo check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust and the ARM64 cross toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-unknown-linux-gnu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          aarch64-linux-gnu-gcc --version
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: aarch64-check
+
+      - name: Cross-check
+        run: ./scripts/check-aarch64.sh
+
+  link:
+    name: aarch64 link
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-unknown-linux-gnu
+
+      - name: Install ARM64 SDL2 libraries
+        # The `image`, `mixer` and `ttf` features link against the system
+        # SDL2_image/SDL2_mixer/SDL2_ttf; `bundled` only builds core SDL2. These
+        # must be ARM64. Recipe verified on ubuntu-24.04; see docs/CROSS_COMPILE.md.
+        run: |
+          set -euo pipefail
+          sudo sed -i 's/^Types: deb$/Types: deb\nArchitectures: amd64/' \
+            /etc/apt/sources.list.d/ubuntu.sources
+          sudo dpkg --add-architecture arm64
+          sudo tee /etc/apt/sources.list.d/ubuntu-arm64.sources > /dev/null <<'EOF'
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports
+          Suites: noble noble-updates noble-security
+          Components: main universe
+          Architectures: arm64
+          EOF
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config file \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            libsdl2-image-dev:arm64 libsdl2-mixer-dev:arm64 libsdl2-ttf-dev:arm64
+          ls -l /usr/lib/aarch64-linux-gnu/libSDL2_*
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: aarch64-link
+
+      - name: Cross-build and inspect the binaries
+        run: ./scripts/build-aarch64.sh --workspace --all-targets

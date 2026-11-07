@@ -49,12 +49,37 @@ scripts/gates.sh
 If a gate cannot pass for an environmental reason, document the blocker in
 `PROGRESS.md` and leave the phase open. Do not mark it complete.
 
+The same gates run in GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)),
+plus a smoke job that executes the demo and every example headlessly
+(`SDL_VIDEODRIVER=dummy`). [`cross-compile.yml`](.github/workflows/cross-compile.yml)
+builds and inspects the ARM64 binaries on every relevant push, and
+[`release.yml`](.github/workflows/release.yml) packages both targets for a tagged
+release. A pull request is expected to be green on all three.
+
 ## Style
 
 * `cargo fmt` decides formatting; do not hand-format.
 * Public items need documentation: the crate warns on `missing_docs`.
 * Comments explain *why*, not *what*. A comment that repeats the code is noise.
 * Stubs for future phases use `todo!("fase N: ...")` and say so in their doc.
+
+## Documentation
+
+`docs/API_GUIDE.md` is executable: every code block is also a test in
+`giochi-engine/tests/api_guide.rs`. When you change an example in the guide you
+must change the matching block in that file, and vice versa — the gate fails if
+they drift, which is deliberate.
+
+| Document | Update it when |
+|---|---|
+| `docs/C_ABI_CONTRACT.md` | Any public type or function changes (mandatory) |
+| `docs/ARCHITECTURE.md` | A module is added, removed, or changes layer |
+| `docs/API_GUIDE.md` + `tests/api_guide.rs` | The user-facing API changes |
+| `docs/KMSDRM.md` | Driver negotiation or target requirements change |
+| `docs/DECISIONS.md` | A non-obvious choice is made, or an ADR is superseded |
+| `CHANGELOG.md` | Anything user-visible changes |
+| `PROGRESS.md` | A phase starts, finishes, or is blocked |
+
 
 ## Commits
 

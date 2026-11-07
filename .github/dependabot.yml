@@ -1,0 +1,33 @@
+version: 2
+
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    # Grouped so a routine bump does not open six PRs at once. `sdl2` stays
+    # separate: its `-sys` crate compiles SDL2 from source and a version bump
+    # needs the CMake toolchain files in `cmake/` re-checked for ARM64.
+    groups:
+      patch-updates:
+        applies-to: version-updates
+        update-types: ["patch"]
+      minor-updates:
+        applies-to: version-updates
+        update-types: ["minor"]
+    ignore:
+      - dependency-name: "sdl2"
+        update-types: ["version-update:semver-major"]
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "ci"

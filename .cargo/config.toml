@@ -6,3 +6,10 @@
 # `force = false` keeps a user-supplied value authoritative.
 [env]
 CMAKE_POLICY_VERSION_MINIMUM = { value = "3.5", force = false }
+
+# `cargo check` never links, so without this the ARM64 target silently falls back
+# to the host `cc` and only fails once something actually produces a binary —
+# with a confusing "rust-lld: --fix-cortex-a53-843419 is only supported on
+# AArch64" from the x86_64 linker. Ignored by host builds.
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"

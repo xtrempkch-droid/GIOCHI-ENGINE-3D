@@ -6,7 +6,63 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Added
+Nothing yet.
+
+## [0.1.0] - 2026-11-07
+
+The first release: a working 2D engine in Rust on SDL2 whose public surface is
+C-shaped end to end, so a C, C++, Lua, Python, Go, Zig or C# binding is a wrapper
+rather than a rewrite. Runs on `x86_64-unknown-linux-gnu` and
+`aarch64-unknown-linux-gnu`; auto-selects KMSDRM on a bare Linux console and
+falls back to the desktop driver elsewhere.
+
+### Added — phase 6 (polish)
+
+- `docs/ARCHITECTURE.md`: layer diagram, the dependency rules that keep the crates
+  acyclic, ownership and lifetime rules, the mandated per-frame order, a table of
+  the mechanisms that enforce the C-shaped surface, the failure policy and the
+  testing strategy.
+- `docs/KMSDRM.md`: how the driver is negotiated, environment hints, the
+  `/dev/dri` permission problem and how to fix it, a table of the typical failure
+  messages, the runtime libraries needed on the target and a verification recipe.
+- `docs/API_GUIDE.md`: task-oriented guide covering the five-minute example,
+  configuration, scenes and transitions, inspecting a running loop, screen-space
+  versus world-space drawing, the input edge semantics, audio and silent mode,
+  assets, math, the complete error-code table, and recommended game patterns.
+- `giochi-engine/tests/api_guide.rs`: compiles and executes every example in
+  `API_GUIDE.md`, so the guide cannot drift from the code.
+- GitHub Actions: `ci.yml` (fmt, clippy `-D warnings`, build, test, doc on x86_64;
+  ARM64 cross-check; demo and example smoke runs), `cross-compile.yml` (dedicated
+  ARM64 build that inspects the produced binaries) and `release.yml` (tagged
+  x86_64 and aarch64 archives attached to a draft GitHub release).
+- Repository housekeeping: issue templates, a pull-request template and Dependabot
+  configuration.
+- `scripts/build-aarch64.sh`: a full ARM64 cross **build** (not just `cargo check`)
+  that resolves the SDL2 satellite libraries from `CROSS_SYSROOT` or the
+  Debian/Ubuntu multiarch directory, fails with actionable instructions when they
+  are absent, and asserts the produced binaries are AArch64 ELF. Run by
+  `cross-compile.yml` and `release.yml`.
+- `docs/CROSS_COMPILE.md` rewritten: the two scripts and what each one proves, the
+  verified multiarch recipe, console sysroots, the linker requirement and the
+  satellite-library requirement.
+- `README.md` rewritten for 0.1.0: badges, prerequisites, native and cross builds,
+  the KMSDRM driver switch, the examples, and links to every guide.
+
+### Fixed — phase 6
+
+- **The primary target could not be built.** `cargo check` never links, so the
+  per-phase gate was green while `aarch64-unknown-linux-gnu` failed to produce a
+  single binary. Two causes, both fixed: `.cargo/config.toml` had no
+  `[target.aarch64-unknown-linux-gnu] linker`, so Cargo handed ARM64 objects to the
+  host `cc` (`rust-lld: --fix-cortex-a53-843419 is only supported on AArch64`); and
+  nothing provided the ARM64 `libSDL2_image`/`libSDL2_mixer`/`libSDL2_ttf` that the
+  `image`/`mixer`/`ttf` features link against, because `bundled` builds core SDL2
+  only. Verified end to end in a clean `ubuntu:24.04` container, which now produces
+  an `ELF 64-bit LSB pie executable, ARM aarch64`. See ADR-027.
+- `docs/CROSS_COMPILE.md` claimed `scripts/check-aarch64.sh --release` performed a
+  full compile and link. It never did — `--release` was forwarded to `cargo check`.
+
+### Added — phase 5
 
 - Phase 5 — scenes and the `Engine` facade: `trait Scene` with
   `on_enter`/`on_exit`/`update`/`render`/`transition`, `SceneManager` with
@@ -29,12 +85,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `tests/engine_smoke.rs`: headless integration test of the loop, the scene stack
   lifecycle and the transition paths.
 
-### Changed
+### Changed — phase 5
 
 - `Scene::update` now receives `&mut AudioSystem` in addition to `Time` and
   `&Input` (ADR-024). Scenes had no legal way to play a sound they had loaded.
 
-### Fixed
+### Fixed — phase 5
 
 - `SceneTransition::Quit` broke out of the loop without stopping it, leaving
   `Engine::is_running()` true; it now requests a quit so the state is coherent.
@@ -81,7 +137,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `tests/input_smoke.rs`: headless end-to-end input test injecting real SDL events
   through `Platform::push_event`.
 
-### Fixed
+### Fixed — phase 3
 
 - The mouse delta was double-counted by adding both the position difference and
   SDL's `xrel`/`yrel`; the engine now uses SDL's relative motion only.
@@ -107,7 +163,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `read_pixels`, invalid-handle and missing-asset errors, and that the live texture
   count returns to zero.
 
-### Changed
+### Changed — phase 2
 
 - `sdl2` is built with the `unsafe_textures` feature so textures can live in an
   opaque handle registry without a public lifetime (ADR-017). `RenderContext` now
@@ -130,7 +186,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   platform init, window creation, argument validation and the full
   Escape → `QuitSignal` → loop-stopped path.
 
-### Fixed
+### Fixed — phase 1
 
 - A fixed timestep coarser than `MAX_FRAME_TIME` could never advance the
   simulation; the frame clamp is now `max(MAX_FRAME_TIME, fixed_timestep)`.
@@ -156,4 +212,5 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `giochi-engine/tests/abi_layout.rs`: byte-size and alignment assertions for
   every `#[repr(C)]` type in the contract.
 
-[Unreleased]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/commits/main
+[Unreleased]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/compare/v0.1.0...main
+[0.1.0]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/releases/tag/v0.1.0
