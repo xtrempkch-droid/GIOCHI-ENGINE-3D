@@ -23,6 +23,8 @@ add a new ADR that states what it replaces.
 | 016 | `Platform` owns an `Rc`'d SDL context | Accepted |
 | 017 | `sdl2` is built with `unsafe_textures` | Accepted |
 | 018 | `RenderContext` owns the window and the texture registry | Accepted |
+| 019 | Input snapshots per frame, with injectable state | Accepted |
+| 020 | Gamepad axes and buttons are queried live from SDL | Accepted |
 
 ---
 
@@ -363,3 +365,55 @@ delegated through the canvas.
   delegating methods (`create_texture`, `destroy_texture`, `texture_size`) instead
   of holding the registry reference across `clear`/`draw_*`/`present`. This is
   documented on `textures()`.
+
+---
+
+## ADR-019 — Input snapshots per frame, with injectable state
+
+**Context.** Scenes need one consistent input view per frame, and the same input
+code must be testable without a window and drivable from the C ABI and from
+scripted replays. Two designs compete: query SDL directly from gameplay code, or
+snapshot into an engine-owned state.
+
+**Decision.** [`Input`] owns a snapshot. `Input::update(&[Event])` runs once per
+frame, before the scene's `update`, and:
+
+1. **clears** the one-frame data (pressed/released edges, mouse delta, wheel);
+2. **applies** every event in order;
+3. opens the first available controller if none is open.
+
+Held state (keys down, buttons down, cursor position) survives the frame. Every
+state machine is a pure method on its type (`KeyboardState::press/release`,
+`MouseState::press/release/add_wheel`, `set_position`, `add_delta`), so tests and
+replays drive the identical code path with no SDL involvement.
+
+**Why not query SDL on demand.** It would fetch a different value on every call
+inside one frame (SDL updates between calls), make edge detection impossible
+without hidden globals, and force every query in the C ABI to touch SDL.
+
+**Consequences.** One unavoidable extra step per frame (`input.update(&events)`),
+documented in every example. Consumers that inject input use
+`Input::without_gamepad()` plus `keyboard_mut()`/`mouse_mut()`.
+
+---
+
+## ADR-020 — Gamepad axes and buttons are queried live from SDL
+
+**Context.** SDL can either deliver `ControllerAxisMotion`/`ControllerButtonDown`
+events that the engine accumulates, or report the current device state on demand
+(`GameController::axis`/`button`).
+
+**Decision.** Query live. `GamepadState` holds the open `GameController` and
+delegates `axis`/`is_down` to SDL, which already applies the dead zones and
+curves from the controller mapping. The engine only handles
+`ControllerDeviceAdded`/`ControllerDeviceRemoved`, because those change *which*
+device is open.
+
+**Why.** The live query is the authoritative current state, needs no accumulation
+books, and cannot desynchronise if an event is dropped. It also keeps
+`GamepadState` tiny: no axis array, no button set.
+
+**Consequences.** Gamepad state cannot be injected the way keyboard and mouse can
+(there is no virtual controller). Tests therefore cover id mapping and
+normalisation directly and assert "disconnected ⇒ neutral" rather than faking a
+device; a real controller is needed to exercise the live path.

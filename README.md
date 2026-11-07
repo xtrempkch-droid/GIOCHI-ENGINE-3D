@@ -4,10 +4,10 @@ A **2D** game engine in Rust on top of SDL2, designed from day one to be consume
 from any language through a C ABI. Primary target: `aarch64-unknown-linux-gnu`
 (Linux consoles with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 
-> **Status: phase 2 (2D render).** The workspace, the C ABI contract, the value
-> types, the SDL2 platform layer, the fixed-timestep loop and the 2D renderer with
-> opaque texture handles exist. Input lands in phase 3 — see
-> [PROGRESS.md](PROGRESS.md).
+> **Status: phase 3 (input).** The workspace, the C ABI contract, the value types,
+> the SDL2 platform layer, the fixed-timestep loop, the 2D renderer with opaque
+> texture handles and keyboard/mouse/gamepad input exist. Assets and audio land in
+> phase 4 — see [PROGRESS.md](PROGRESS.md).
 
 ## Why "C-shaped" Rust?
 
@@ -62,6 +62,7 @@ cargo run -p giochi-demo -- --frames 60
 ```bash
 cargo run -p giochi-engine --example hello_rect      # three rectangles
 cargo run -p giochi-engine --example moving_sprite   # bouncing sprite + camera
+cargo run -p giochi-engine --example input_test      # WASD, mouse, gamepad
 ```
 
 Both accept `--frames N` to run headlessly for a fixed number of frames.
@@ -82,6 +83,25 @@ render.draw_texture(player, Rect::new(200.0, 120.0, 64.0, 64.0), Rect::ZERO)?;
 render.present();
 render.destroy_texture(player);
 ```
+
+### Input per frame
+
+```rust
+# use giochi_engine::{Input, Platform};
+# let platform = Platform::new()?;
+let mut input = Input::new(&platform);
+
+let events = platform.poll_events();
+input.update(&events);                       // clears one-frame edges, applies events
+
+if input.key_down(giochi_engine::input::keyboard::KEY_W) { /* held */ }
+if input.key_pressed(giochi_engine::input::keyboard::KEY_SPACE) { /* tapped */ }
+let (mouse_x, mouse_y) = input.mouse().position();
+# Ok::<(), giochi_engine::GiochiError>(())
+```
+
+Order matters: `poll_events` → `input.update` → simulation → `present`. The
+`pressed`/`released` edges are valid only until the next `input.update`.
 
 ### Video driver
 

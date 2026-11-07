@@ -12,7 +12,8 @@ by `cbindgen` (phase 7) and must match it exactly.
 Implementation progress: phase 0 delivered the value types and the two version
 queries; phase 1 delivered the platform layer behind `giochi_engine_init`
 (`Platform`, `Window`, `Time`, `GameLoop`); phase 2 delivered the 2D renderer and
-the texture registry behind `giochi_texture_*`/`giochi_render_*`. The `extern "C"`
+the texture registry behind `giochi_texture_*`/`giochi_render_*`; phase 3 delivered
+the input state behind `giochi_input_*`/`giochi_gamepad_*`. The `extern "C"`
 functions themselves land in phase 7.
 
 ---
@@ -410,6 +411,20 @@ int32_t giochi_gamepad_button_down(uint32_t button);      /* phase 3 */
 * Boolean results are `1`/`0`.
 * `pressed`/`released` are true for exactly one frame.
 * Queries are valid only after `giochi_engine_init`.
+
+Input semantics, implemented in phase 3 and shared by Rust and C:
+
+| Rule | Behaviour |
+|---|---|
+| Frame edges | `pressed`/`released` describe the frame that just ended and clear on the next update. |
+| Fast taps | A key pressed **and** released between two frames reports **both** edges in that frame, so a tap is never lost. |
+| Key repeat | SDL's auto-repeat (`repeat = 1`) keeps the key `down` but does not re-raise `pressed`. |
+| Unknown ids | An unmapped keycode, mouse button, axis or controller button is simply "not down" / `0.0`, never an error. |
+| Mouse delta | `giochi_input_mouse_*` returns absolute position; the per-frame delta is Rust-only (`MouseState::delta`). |
+| Wheel | Positive values mean scroll up/away from the user. The delta accumulates within a frame and resets on the next one. |
+| Gamepad axes | Normalised and clamped to `[-1.0, 1.0]`. Sticks rest at `0.0`, triggers at `-1.0` (SDL's convention). |
+| Gamepad selection | The lowest-indexed device SDL maps as a game controller is player one. Device add/remove events are handled; a removal of another device is ignored. |
+| No controller subsystem | Keyboard and mouse keep working; `giochi_gamepad_connected` returns `0`. The engine logs a warning at start-up. |
 
 ### 5.6 Audio
 

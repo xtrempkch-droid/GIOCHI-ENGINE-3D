@@ -68,7 +68,7 @@ pub use crate::core::engine::{Engine, EngineConfig};
 pub use crate::core::game_loop::{GameLoop, FIXED_TIMESTEP, MAX_FRAME_TIME};
 pub use crate::core::time::{FrameClock, Time};
 pub use crate::error::{codes, GiochiError, GiochiResult};
-pub use crate::input::Input;
+pub use crate::input::{Input, KeyboardState, MouseState};
 pub use crate::math::{Color, Rect, Vec2};
 pub use crate::platform::sdl::{quit_signal, sdl_version, Platform, QuitSignal, VideoDriverChoice};
 pub use crate::platform::window::{Window, WindowConfig};

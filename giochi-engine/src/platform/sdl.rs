@@ -113,6 +113,7 @@ pub(crate) struct SdlContext {
     video: sdl2::VideoSubsystem,
     timer: sdl2::TimerSubsystem,
     events: sdl2::EventSubsystem,
+    game_controller: Option<sdl2::GameControllerSubsystem>,
     _sdl: sdl2::Sdl,
 }
 
@@ -186,6 +187,16 @@ impl Platform {
         let events = sdl
             .event()
             .map_err(|err| map_sdl_error("event subsystem", err))?;
+
+        // Gamepads are optional: a console without a controller attached, or a
+        // build without joystick support, must not stop the engine from running.
+        let game_controller = match sdl.game_controller() {
+            Ok(subsystem) => Some(subsystem),
+            Err(err) => {
+                log::warn!("gamepad subsystem unavailable: {err}");
+                None
+            }
+        };
         let event_pump = sdl
             .event_pump()
             .map_err(|err| map_sdl_error("event pump", err))?;
@@ -197,6 +208,7 @@ impl Platform {
                 video,
                 timer,
                 events,
+                game_controller,
                 _sdl: sdl,
             }),
             event_pump: RefCell::new(event_pump),
@@ -251,6 +263,20 @@ impl Platform {
     /// Creates the engine's main window.
     pub fn create_window(&self, config: WindowConfig, title: &str) -> Result<Window, GiochiError> {
         Window::new(self, config, title)
+    }
+
+    /// Returns the game controller subsystem, or a descriptive error when it could
+    /// not be initialised.
+    ///
+    /// Keyboard and mouse input never depend on this; only
+    /// [`crate::input::Input::gamepad`] does.
+    pub fn game_controller_subsystem(&self) -> Result<&sdl2::GameControllerSubsystem, GiochiError> {
+        self.context
+            .game_controller
+            .as_ref()
+            .ok_or(GiochiError::Unsupported(
+                "the game controller subsystem is not available",
+            ))
     }
 
     pub(crate) fn sdl_context(&self) -> &Rc<SdlContext> {
