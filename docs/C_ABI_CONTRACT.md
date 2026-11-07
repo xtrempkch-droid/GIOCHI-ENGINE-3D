@@ -11,8 +11,9 @@ by `cbindgen` (phase 7) and must match it exactly.
 
 Implementation progress: phase 0 delivered the value types and the two version
 queries; phase 1 delivered the platform layer behind `giochi_engine_init`
-(`Platform`, `Window`, `Time`, `GameLoop`). The `extern "C"` functions themselves
-land in phase 7.
+(`Platform`, `Window`, `Time`, `GameLoop`); phase 2 delivered the 2D renderer and
+the texture registry behind `giochi_texture_*`/`giochi_render_*`. The `extern "C"`
+functions themselves land in phase 7.
 
 ---
 
@@ -344,9 +345,17 @@ uint32_t      giochi_texture_height(GiochiTexture texture);                  /* 
 
 `/* Returns 0 on failure; query giochi_get_last_error(). */`
 
-`giochi_texture_create` goes through the engine's resource cache: loading the same
-path twice returns the same handle and charges one upload. Width/height return
-`0` for an invalid handle.
+`giochi_texture_create` goes through the engine's resource cache (phase 4): loading
+the same path twice returns the same handle and charges one upload. Until phase 4
+each call uploads its own texture. Width/height return `0` for an invalid handle,
+and destroying an unknown or already-destroyed handle returns
+`GIOCHI_ERROR_INVALID_HANDLE` — a double destroy is always reported.
+
+In the Rust API the same operations are `TextureRegistry::create_texture`,
+`create_texture_from_rgba`, `destroy_texture`, `dimensions` and `len`, or their
+`RenderContext` delegations. `create_texture_from_rgba` has no ABI v1 counterpart
+because it takes a pixel buffer; `giochi_texture_create_memory` covers it in
+phase 7.
 
 ### 5.4 Rendering
 
@@ -371,6 +380,14 @@ void    giochi_camera_get(GiochiCamera* out_camera);                            
 * `giochi_render_present` has no return value: presenting cannot fail in SDL2.
 * `giochi_camera_get` writes the default camera (viewport = window, zoom = 1)
   when none was set.
+* The camera transform, implemented in phase 2 and shared by Rust and C, is
+  `screen = viewport.center + (world - camera.position) * zoom`. A `zoom` that is
+  not finite or not positive is treated as `1.0`; non-finite coordinates are
+  treated as `0.0`. `giochi_sprite_draw` therefore never produces NaN geometry.
+* Float rectangles are rounded to SDL's integer rectangles. A destination whose
+  width or height rounds to zero is a no-op that returns success.
+* Drawing with an unknown handle returns `GIOCHI_ERROR_INVALID_HANDLE` and draws
+  nothing.
 
 ### 5.5 Input
 
@@ -454,6 +471,7 @@ void        giochi_scene_destroy(GiochiScene scene);                     /* phas
 | Rust `String`, `Vec`, `Rc`, `Box`, traits, generics | Cannot be expressed in C; handles replace them. |
 | `GiochiSprite` by-value arrays | Callers pass one sprite pointer per call; batching is a phase 2 internal optimisation. |
 | Font rendering | TTF text rendering is not part of phases 0–8; `GiochiFont` exists only so the typedef can be added without an ABI break. |
+| `GiochiTextureSize` | Texture sizes are returned through two `uint32_t*` out-parameters instead, which keeps the function count and the struct count down. The Rust API's `TextureSize` is a convenience mirror, not an ABI type. |
 
 ---
 

@@ -12,4 +12,4 @@ pub mod texture;
 pub use camera::Camera;
 pub use renderer::RenderContext;
 pub use sprite::Sprite;
-pub use texture::{TextureHandle, TextureRegistry};
+pub use texture::{TextureHandle, TextureRegistry, TextureSize};

@@ -1,6 +1,6 @@
 # Estado — GIOCHI-ENGINE
 
-## Última fase concluída: 1 — Platform + Game Loop
+## Última fase concluída: 2 — Render 2D (SDL2 render, C-shaped)
 Data: 2026-11-07
 
 ## Gates validados
@@ -10,89 +10,93 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 66 testes, 0 falhas
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 100 testes, 0 falhas
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
 - [x] `cargo doc --workspace --no-deps --document-private-items`
 
 Verificações manuais da fase:
 
-- `cargo run -p giochi-demo -- --frames 60` abre janela 1280x720 (driver `x11`
-  após fallback), roda 60 iterações / 60 passos fixos a 59,6 fps reais e sai com
-  0. Idem com `SDL_VIDEODRIVER=wayland` e com `SDL_VIDEODRIVER=x11`.
-- `SDL_VIDEODRIVER=kmsdrm cargo run -p giochi-demo -- --frames 1` falha com
-  mensagem descritiva listando `by-path, card1, renderD128` e os hints KMSDRM.
-- `tests/platform_smoke.rs` (driver `dummy`, sem display): init explícito, janela
-  320x200, título, rejeição de janela 0x200 com `INVALID_ARGUMENT`, e caminho
-  completo ESC → evento SDL → `QuitSignal` → `GameLoop` parado.
+- `cargo run -p giochi-engine --example hello_rect -- --frames 30` (x11): abre
+  960x540, desenha 3 retângulos, encerra com 0.
+- `cargo run -p giochi-engine --example moving_sprite -- --frames 60` (x11 e
+  wayland): carrega `player.png` (32x32) e `checker.png` (64x64), 2 texturas vivas,
+  desenha 18 tiles + sprite via câmera, destrói ambas e termina com
+  `restantes: 0`.
+- `tests/render_smoke.rs` (headless, driver `dummy`): verifica **pixels** via
+  `read_pixels` — o retângulo desenhado aparece em (20,20) e o fundo permanece em
+  (48,48); handle 0 retorna `INVALID_HANDLE`; arquivo inexistente retorna `ASSET`;
+  `destroy_texture` duplo retorna `false`; contador volta a 0.
 
-## Entregue na fase 1
+## Entregue na fase 2
 
-- `platform/sdl.rs`: `Platform` (Rc do contexto SDL: vídeo, timer, events, pump),
-  `init_sdl()` que define `SDL_VIDEODRIVER=kmsdrm` **somente** se a variável
-  estiver ausente, hints KMSDRM documentados como constantes, fallback explícito
-  para o driver de desktop (log `warn` + `VideoDriverChoice::AutoFallback`) e erro
-  descritivo com diagnóstico de `/dev/dri` quando KMSDRM falha de vez.
-  Utilitários: `poll_events`, `push_event`, `delay_ms`, `ticks_ms`,
-  `video_driver_name`, `video_driver_choice`, `has_drm_device`, `quit_signal`.
-- `platform/window.rs`: `Window` real sobre `sdl2::video::Window` (fullscreen
-  desktop, position centered, `size`, `drawable_size`, `set_title`,
-  `is_fullscreen`), `WindowConfig` C-shaped validado (rejeita dimensão zero).
-- `core/time.rs`: `Time::advance` com saneamento de `NaN`/negativo/infinito,
-  `frame_count` saturante e `FrameClock` (Instant/CLOCK_MONOTONIC) — 6 testes.
-- `core/game_loop.rs`: acumulador de passo fixo 1/60, clamp `MAX_FRAME_TIME=0.25`
-  (relaxado para `max(0.25, fixed_timestep)`), `alpha()` para interpolação,
-  `sleep_ms(work_time)` para o limitador de frame sem double-count,
-  `with_fixed_timestep` validado e `handle_quit_signal` (Quit/Escape) — 14 testes.
-- `giochi-demo`: janela preta 1280x720, loop fixo, ESC/fechar encerram, flag
-  `--frames N` para execução determinística, saída com `ExitCode` e relatório de
-  frames/fps — 5 testes de parsing.
-- `tests/platform_smoke.rs`: integração headless com o driver `dummy`.
-- `docs/DECISIONS.md`: ADR-015 (negociação de driver KMSDRM + fallback) e ADR-016
-  (contexto SDL em `Rc` para `Window` sobreviver ao `Platform`).
-- `docs/C_ABI_CONTRACT.md`: seção 5.2 documenta a negociação de driver e os hints.
+- `render/camera.rs`: `world_to_screen`, `screen_to_world` (inversa exata),
+  `world_rect_to_screen`, `viewport_center`, `effective_zoom` que saneia
+  `NaN`/infinito/`<= 0` para `1.0` — 9 testes.
+- `render/texture.rs`: `TextureRegistry` com `HandleRegistry<Texture>`,
+  `create_texture(path)`, `create_texture_from_rgba(w, h, &[u8])`,
+  `destroy_texture`, `dimensions`/`size`, `contains`, `len`, `clear`; `Drop` limpa o
+  registro; `ensure_image_subsystem` inicializa SDL_image uma vez por processo.
+  `TextureSize` C-shaped.
+- `render/renderer.rs`: `RenderContext` dono de canvas + registry + câmera;
+  `clear`, `draw_rect`, `draw_texture(handle, dst, src)`, `draw_sprite`,
+  `present`, `read_pixels`, `size`/`drawable_size`/`set_title`,
+  `set_camera`/`camera`, `fit_camera_to_window` e delegações
+  `create_texture`/`destroy_texture`/`texture_size`/`texture_count`.
+  Conversão float→`SDL_Rect` com arredondamento, clamp de `i32` e no-op para área
+  zero — 5 testes.
+- `render/sprite.rs`: `world_rect`, `translate`, `is_drawable` (layout de 56 bytes
+  preservado: nenhum campo novo).
+- `math/vec2.rs` e `math/rect.rs`: operadores `Add`/`Sub`/`Mul` em `Vec2`,
+  `length`/`distance`/`is_finite`; `Rect::{intersection, contains, center}` — 17
+  testes de math.
+- `handle_registry.rs`: `#![allow(dead_code)]` temporário removido (agora há
+  consumidor real); `Window::sdl_window` substituído por `into_parts`.
+- Exemplos `hello_rect` e `moving_sprite` (+ `--frames N`).
+- `assets/player.png` (32x32, RGBA com transparência) e `assets/checker.png`
+  (64x64) gerados sem dependências externas.
+- `tests/render_smoke.rs`: integração headless com verificação de pixels.
+- `docs/DECISIONS.md`: ADR-017 (`unsafe_textures` no `sdl2`) e ADR-018
+  (`RenderContext` dono da janela e do registro).
+- `docs/C_ABI_CONTRACT.md`: regras de arredondamento/`zoom`/handles inválidos,
+  semântica de double-destroy e nota sobre o cache de texturas.
 
-## Próxima fase: 2 — Render 2D (SDL2 render, C-shaped)
+## Próxima fase: 3 — Input
 
-`HandleRegistry<T>` passa a ser usado de fato; `TextureRegistry` com
-`create_texture`/`destroy_texture` e contador de vivos; `RenderContext` com
-`clear`, `draw_rect`, `draw_texture`, `present`; `Camera::world_to_screen`
-implementada e testada; `math` com testes; exemplos `hello_rect` e
-`moving_sprite`. Aceite: exemplos rodam em x86_64, create+destroy sem leak pelo
-contador, câmera testada.
-
-**Ao iniciar a fase 2:** remover `#![allow(dead_code)]` de `handle_registry.rs` e
-o `#[allow(dead_code)]` de `Window::sdl_window`, que existem só até o primeiro
-consumidor real.
+`input/keyboard.rs` (`is_down`, `is_pressed_this_frame`, `is_released_this_frame`),
+`input/mouse.rs` (posição flutuante, botões, wheel), `input/gamepad.rs` (primeiro
+controle via `sdl2::controller`), `input/mod.rs` com `Input::update(&mut self,
+events: &[Event])` chamado antes de `game.update`, e exemplo `input_test`
+(retângulo WASD, muda cor com ESPAÇO, segue o mouse com botão direito). Aceite:
+exemplo funcional e testes cobrindo as transições de estado.
 
 ## Bloqueios / pendências
 
 - Nenhum bloqueio de gate.
-- CMake do ambiente é 4.2.3 e o SDL2 vendorizado declara
-  `cmake_minimum_required(VERSION 3.0.x)`; workaround em `.cargo/config.toml`
-  (`CMAKE_POLICY_VERSION_MINIMUM=3.5`, ADR-014). Revisitar quando `sdl2-sys`
-  subir o mínimo de CMake.
-- O SDL2 vendorizado é compilado com KMSDRM habilitado (`SDL_KMSDRM=ON`,
-  `SDL_KMSDRM_SHARED=ON` → `libdrm`/`gbm`/`EGL` via `dlopen` em runtime). Isso foi
-  verificado nos objetos do build ARM64 (`SDL_kmsdrm*.c.o` são ELF aarch64), e é o
-  que permite validar o cross-check sem sysroot ARM64 completo. Para link
-  estático de produção, ver `docs/CROSS_COMPILE.md`.
-- Nesta máquina o `kmsdrm` não inicializa (sessão gráfica detém DRM master); é
-  exatamente o caso coberto pelo fallback do ADR-015.
+- CMake 4.2.3 × `cmake_minimum_required(VERSION 3.0.x)` do SDL2 vendorizado:
+  workaround em `.cargo/config.toml` (ADR-014).
+- `sdl2` passou a ser compilado com `unsafe_textures` (ADR-017). É o que permite
+  guardar `Texture` num `HashMap<u64, Rc<Texture>>` sem lifetime público; o
+  pressuposto é **um único canvas por processo**, garantido pelo ADR-018.
+- `read_pixels` força cópia GPU→CPU: existe para testes e screenshots, nunca no
+  frame loop (documentado no método).
+- `TextureRegistry::create_texture` (fase 2) ainda faz upload por chamada; o cache
+  por caminho chega com `ResourceManager` na fase 4.
+- Nesta máquina o `kmsdrm` não inicializa (sessão gráfica detém DRM master); é o
+  caso coberto pelo fallback do ADR-015.
 
 ## Notas de arquitetura
 
-- `src/error.rs` não estava na estrutura original do prompt; foi adicionado como
-  módulo de topo para não violar as regras de dependência (ADR-011).
-- `EngineConfig.title` é `[u8; 64]` em vez de `String` (ADR-007).
-- `TextureRegistry::create_texture` recebe só o path; o `TextureCreator` fica
-  dentro do registro (ADR-008).
-- `KeyCode = u32` com valores `SDLK_*` (ADR-009).
-- ABI v1 é singleton: nada de `GiochiRenderContext*` público (ADR-012).
-- `core` não importa `sdl2`: `GameLoop` recebe `QuitSignal` (definido em
-  `platform`) em vez de `sdl2::event::Event`. `input::Input::update` receberá
-  eventos na fase 3, ainda via `platform`.
-- `Platform::poll_events`/`push_event` expõem `sdl2::event::Event` na camada
-  `platform`, que é declaradamente o wrapper de SDL2 (e a fase 3 exige
-  `Input::update(&[Event])`).
+- `src/error.rs` não estava na estrutura original do prompt; módulo de topo para
+  não violar as regras de dependência (ADR-011).
+- `EngineConfig.title` é `[u8; 64]` (ADR-007); `KeyCode = u32` (ADR-009); ABI v1
+  singleton (ADR-012).
+- Fluxo de posse do render: `Window` → `into_render_context()` → `RenderContext`
+  (canvas + `TextureRegistry` + `Camera`). O `Window` é consumido porque o SDL
+  vincula o renderer à janela (ADR-018).
+- `RenderContext::textures()` empresta `&self`; em loop de desenho use as
+  delegações (`create_texture`, `destroy_texture`, `texture_size`) para não
+  conflitar com `&mut self`.
+- `render` não conhece `scene`; `core` não importa `sdl2`; `math` não depende de
+  módulos internos (só de `crate::math`).
 - Fase 6 é dona de `.github/workflows/*`, dos templates de issue/PR e do README
   completo; o diretório existe vazio de propósito.

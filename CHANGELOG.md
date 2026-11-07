@@ -8,6 +8,33 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Phase 2 — 2D rendering: `RenderContext` (owns the SDL canvas, the texture
+  registry and the current camera), `clear`/`draw_rect`/`draw_texture`/
+  `draw_sprite`/`present`, a float-rect → `SDL_Rect` conversion that rounds and
+  clamps instead of wrapping, and `read_pixels` for screenshot tooling.
+- `TextureRegistry`: opaque `u64` texture handles backed by `HandleRegistry`,
+  `create_texture(path)`, `create_texture_from_rgba`, `destroy_texture`,
+  `dimensions`/`size`, `contains`, `len`, and a `Drop` that frees everything.
+- `Camera::world_to_screen`, `screen_to_world` (exact inverse),
+  `world_rect_to_screen` and `viewport_center`, with `zoom` sanitised to `1.0` for
+  non-finite/non-positive values.
+- `Sprite::world_rect`, `translate` and `is_drawable`; `Vec2` operators
+  (`Add`/`Sub`/`Mul<f32>`) plus `length`/`distance`/`is_finite`; `Rect`
+  `intersection`/`contains`/`center`.
+- Examples `hello_rect` and `moving_sprite`, with `--frames N` for smoke runs, and
+  `assets/player.png`/`assets/checker.png`.
+- `tests/render_smoke.rs`: headless renderer test that verifies drawn pixels via
+  `read_pixels`, invalid-handle and missing-asset errors, and that the live texture
+  count returns to zero.
+
+### Changed
+
+- `sdl2` is built with the `unsafe_textures` feature so textures can live in an
+  opaque handle registry without a public lifetime (ADR-017). `RenderContext` now
+  consumes the `Window` and owns it (ADR-018).
+
+### Added — phase 1
+
 - Phase 1 — platform and game loop: `Platform` (SDL2 video/timer/events with a
   shared `Rc` context), `Window` (fullscreen desktop, size, drawable size, title,
   fullscreen query), `Time::advance` with NaN/negative sanitisation, `FrameClock`,

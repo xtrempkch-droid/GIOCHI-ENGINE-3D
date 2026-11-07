@@ -10,12 +10,6 @@
 //! * handle `0` is reserved for "null/invalid" and is never issued;
 //! * handles are never reused, so a stale handle can never alias a new resource;
 //! * the registry is single-threaded (`RefCell`), matching the engine.
-//!
-//! The registry is not referenced by any phase-0 code yet: it is consumed by the
-//! texture, audio and scene registries in phases 2, 4 and 5. Until then the
-//! `dead_code` allowance below keeps `clippy -D warnings` meaningful; it is
-//! removed in phase 2, when the first caller lands.
-#![allow(dead_code)]
 
 use std::cell::RefCell;
 use std::collections::HashMap;

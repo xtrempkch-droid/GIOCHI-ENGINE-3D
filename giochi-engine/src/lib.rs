@@ -72,7 +72,9 @@ pub use crate::input::Input;
 pub use crate::math::{Color, Rect, Vec2};
 pub use crate::platform::sdl::{quit_signal, sdl_version, Platform, QuitSignal, VideoDriverChoice};
 pub use crate::platform::window::{Window, WindowConfig};
-pub use crate::render::{Camera, RenderContext, Sprite, TextureHandle, TextureRegistry};
+pub use crate::render::{
+    Camera, RenderContext, Sprite, TextureHandle, TextureRegistry, TextureSize,
+};
 pub use crate::scene::{Scene, SceneHandle, SceneManager};
 
 #[cfg(test)]

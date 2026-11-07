@@ -16,7 +16,10 @@ authors = ["GIOCHI-SYSTEM contributors"]
 repository = "https://github.com/xtrempkch-droid/GIOCHI-SYSTEM"
 
 [workspace.dependencies]
-sdl2 = { version = "0.38", features = ["bundled", "image", "mixer", "ttf"] }
+# `unsafe_textures` drops the lifetime from `sdl2::render::Texture`, which is what
+# lets textures live in an opaque `u64` handle registry instead of being borrowed
+# from the canvas. See ADR-017 in docs/DECISIONS.md.
+sdl2 = { version = "0.38", features = ["bundled", "image", "mixer", "ttf", "unsafe_textures"] }
 glam = "0.29"
 anyhow = "1.0"
 thiserror = "2.0"

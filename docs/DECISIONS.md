@@ -21,6 +21,8 @@ add a new ADR that states what it replaces.
 | 014 | CMake 4 policy workaround for bundled SDL2 | Accepted |
 | 015 | KMSDRM is auto-selected, with a loud desktop fallback | Accepted |
 | 016 | `Platform` owns an `Rc`'d SDL context | Accepted |
+| 017 | `sdl2` is built with `unsafe_textures` | Accepted |
+| 018 | `RenderContext` owns the window and the texture registry | Accepted |
 
 ---
 
@@ -314,3 +316,50 @@ infect every user signature. Why not `Arc`: the engine is single-threaded
 **Consequences.** Field declaration order matters in `Window`: the SDL window drops
 before the `Rc` releases the video subsystem. That ordering is documented on the
 struct and is the reason the field is named `_context` and declared last.
+
+---
+
+## ADR-017 — `sdl2` is built with `unsafe_textures`
+
+**Context.** Without that feature, `sdl2::render::Texture<'r>` borrows the canvas
+and `TextureCreator::create_texture`/`create_texture_from_surface` do not exist at
+all — only `Canvas::create_texture`, which returns a texture tied to the canvas
+borrow. Storing textures in a `HashMap<u64, Rc<Texture>>` (ADR-002) is then
+impossible without either a lifetime parameter on `TextureRegistry` (forbidden by
+ADR-006) or `unsafe` raw-pointer juggling (forbidden in the core crate).
+
+**Decision.** Enable the `unsafe_textures` cargo feature of `sdl2`. It changes
+`Texture` to an owned value with a `Drop` impl that calls `SDL_DestroyTexture`, so
+a texture can live in the handle registry independently of any borrow.
+
+**Why this is sound in this engine.** The feature's documented hazard is using a
+texture with a *different* canvas than its creator. The engine has exactly one
+canvas for its whole lifetime (`RenderContext`) and one registry bound to that
+canvas's creator (ADR-018), which is the same guarantee the feature asks for.
+
+**Consequences.** One extra cargo feature, recorded in the workspace manifest with
+a comment. If the engine ever needs multiple canvases, `TextureRegistry` must track
+which renderer a texture belongs to.
+
+---
+
+## ADR-018 — `RenderContext` owns the window and the texture registry
+
+**Context.** SDL binds a renderer to a window: `CanvasBuilder` consumes the
+`sdl2::video::Window`. A `RenderContext` that only borrowed a `Window` would need a
+lifetime parameter on a public struct and on `RenderContext::new`, both forbidden.
+
+**Decision.** `Window::into_render_context()` consumes the `Window` (it splits into
+the SDL window plus the shared SDL context), and `RenderContext` owns the canvas,
+the `TextureRegistry` and the current `Camera`. Window-level operations the engine
+still needs (`size`, `drawable_size`, `set_title`, `fit_camera_to_window`) are
+delegated through the canvas.
+
+**Consequences.**
+* The lifecycle is explicit: create the `Window`, then hand it to the renderer.
+* There is exactly one canvas and one registry per engine, which is also what makes
+  ADR-017 sound and what the singleton C ABI (ADR-012) assumes.
+* `RenderContext::textures()` borrows `&self`, so a draw loop must use the
+  delegating methods (`create_texture`, `destroy_texture`, `texture_size`) instead
+  of holding the registry reference across `clear`/`draw_*`/`present`. This is
+  documented on `textures()`.

@@ -4,9 +4,9 @@ A **2D** game engine in Rust on top of SDL2, designed from day one to be consume
 from any language through a C ABI. Primary target: `aarch64-unknown-linux-gnu`
 (Linux consoles with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 
-> **Status: phase 1 (platform + game loop).** The workspace, the C ABI contract,
-> every value type, the SDL2 platform layer, the window wrapper and the
-> fixed-timestep loop exist. Rendering lands in phase 2 — see
+> **Status: phase 2 (2D render).** The workspace, the C ABI contract, the value
+> types, the SDL2 platform layer, the fixed-timestep loop and the 2D renderer with
+> opaque texture handles exist. Input lands in phase 3 — see
 > [PROGRESS.md](PROGRESS.md).
 
 ## Why "C-shaped" Rust?
@@ -55,6 +55,32 @@ handy for smoke tests:
 
 ```bash
 cargo run -p giochi-demo -- --frames 60
+```
+
+### Examples
+
+```bash
+cargo run -p giochi-engine --example hello_rect      # three rectangles
+cargo run -p giochi-engine --example moving_sprite   # bouncing sprite + camera
+```
+
+Both accept `--frames N` to run headlessly for a fixed number of frames.
+
+### Minimal render loop
+
+```rust
+use giochi_engine::{Color, Platform, Rect, RenderContext, WindowConfig};
+
+let platform = Platform::new()?;
+let window = platform.create_window(WindowConfig::new(960, 540), "game")?;
+let mut render = RenderContext::new(window)?;
+
+let player = render.create_texture("assets/player.png")?;
+render.clear(Color::rgb(12, 14, 22));
+render.draw_rect(Rect::new(10.0, 10.0, 100.0, 40.0), Color::rgb(230, 70, 70));
+render.draw_texture(player, Rect::new(200.0, 120.0, 64.0, 64.0), Rect::ZERO)?;
+render.present();
+render.destroy_texture(player);
 ```
 
 ### Video driver

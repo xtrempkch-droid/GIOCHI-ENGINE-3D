@@ -141,12 +141,15 @@ impl Window {
         self.inner.window_flags() & flag != 0
     }
 
-    /// Underlying SDL window, for the renderer created in phase 2.
-    // Consumed by `RenderContext::new` in phase 2; until then it is only a
-    // seam, so the dead-code lint would be noise.
-    #[allow(dead_code)]
-    pub(crate) fn sdl_window(&self) -> &sdl2::video::Window {
-        &self.inner
+    /// Splits the wrapper into the raw SDL window and the shared SDL context.
+    ///
+    /// Consumed by [`crate::render::RenderContext`], which must own the SDL window
+    /// because SDL binds a renderer to it.
+    pub(crate) fn into_parts(self) -> (sdl2::video::Window, Rc<SdlContext>) {
+        let Window {
+            inner, _context, ..
+        } = self;
+        (inner, _context)
     }
 }
 
