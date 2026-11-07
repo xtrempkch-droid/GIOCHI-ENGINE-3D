@@ -1,6 +1,6 @@
 # Estado — GIOCHI-ENGINE
 
-## Última fase concluída: 4 — Assets + Audio
+## Última fase concluída: 5 — Scene + Engine (fachada)
 Data: 2026-11-07
 
 ## Gates validados
@@ -10,103 +10,97 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 158 testes, 0 falhas
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 182 testes, 0 falhas
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
-- [x] `cargo doc --workspace --no-deps --document-private-items`
+- [x] `cargo doc --workspace --no-deps --document-private-items` (sem warnings)
 
 Verificações manuais da fase:
 
-- `cargo run -p giochi-engine --example audio_test -- --beep --frames 5` (x11):
-  dispositivo de áudio **real** disponível, WAV procedural gerado em runtime,
-  `bipe #1 (via --beep)` impresso, saída com 0 e `modo silencioso: false`.
-- `tests/assets_audio_smoke.rs` (driver `dummy`): `player.png` lido para um buffer
-  do chamador (magia PNG conferida), buffer curto retorna `ASSET` sem truncar,
-  **2 loads do mesmo caminho = 1 textura no registry**, caminho diferente = 2ª
-  entrada, `destroy_texture` por fora do cache faz o próximo load recriar (com
-  handle novo), `clear_resource_cache` zera o registry. Com dispositivo presente:
-  WAV real carrega/toca/destrói, double-destroy reportado, `load_music("")`
-  retorna `INVALID_ARGUMENT`; sem dispositivo: tudo degrada para `AUDIO` sem
-  panic.
-- `scripts/gates.sh` verde.
+- `cargo run -p giochi-demo -- --verify` (x11): 1 frame pelo loop do `Engine`,
+  `texturas vivas: 1, sons vivos: 1, áudio: ativo`.
+- `cargo run -p giochi-engine --example mini_game -- --frames 600` (sem input):
+  368 frames, **fim de jogo** com pontuação 0 — o caminho game over → `Quit`
+  funciona e para o loop.
+- `cargo run -p giochi-engine --example mini_game -- --auto --frames 600`:
+  600 frames completos, **pontuação final 120** — tiro, colisão e pontuação
+  comprovados; jogo sobrevivível e jogável.
+- `tests/engine_smoke.rs` (driver `dummy`): pilha vazia → push (`on_enter`) →
+  push → pop (`on_exit`) → replace (`exit`+`enter`); loop real com frame limit de
+  40 (40 renders, `updates == stats.steps`); `Quit` para o loop e deixa
+  `is_running() == false`; pilha vazia roda e desenha; sem handles vazando.
 
-## Entregue na fase 4
+## Entregue na fase 5
 
-- `assets/loader.rs`: `asset_size` (rejeita caminho vazio, não-arquivo e > 64 MiB),
-  `read_asset(path, &mut [u8])` que **falha** em vez de truncar quando o buffer é
-  curto, `read_asset_vec`, `asset_name`, `MAX_ASSET_SIZE = 64 MiB` — 8 testes.
-- `assets/manager.rs`: `ResourceManager` com cache `HashMap<String, TextureHandle>`
-  em `RefCell`, `load_texture(&TextureRegistry, path)` (2 loads = 1 upload),
-  `get_texture`, `is_texture_cached`, `cached_texture_count`,
-  `live_texture_count`, `clear`, `read_asset`. Handles obsoletos (textura destruída
-  por fora) são detetados e recarregados — 3 testes unitários + cobertura de cache
-  no teste de integração.
-- `audio/sound.rs`: `SoundHandle`, `MusicHandle`, `MusicState`,
-  `LOOPS_INFINITE`, `MAX_VOLUME = 128`, `SAMPLE_RATE`, `CHUNK_SIZE`,
-  `MIXING_CHANNELS`, `clamp_volume` — 3 testes, com asserções de constantes em
-  tempo de compilação.
-- `audio/mixer.rs`: `AudioSystem` sobre `sdl2::mixer` com
-  `HandleRegistry<Chunk>`/`HandleRegistry<Music<'static>>`; `load_sound`,
-  `destroy_sound`, `play_sound`, `stop_all_sounds`, `load_music`,
-  `destroy_music` (para a música antes de liberar), `play_music`, `pause_music`,
-  `resume_music`, `stop_music`, `set_volume`/`volume`, `is_music_playing`,
-  `music_state`, `sound_count`, `music_count`, `has_sound`, `has_music`, `clear`.
-  `AudioSystem::silent()` e modo silencioso quando não há dispositivo — 7 testes.
-- `platform/sdl.rs`: subsistema de áudio opcional (`Platform::audio_subsystem()`);
-  sem dispositivo gera aviso, não erro.
-- `render/renderer.rs`: `RenderContext` agora possui o `ResourceManager` e expõe
-  `load_texture` (com cache), `cached_texture`, `cached_texture_count`,
-  `resources()`, `resources_mut()`, `clear_resource_cache()`.
-- `examples/audio_test.rs`: WAV 16-bit estéreo **sintetizado em runtime**
-  (frequência 660 Hz, envelope de 20 ms), ESPAÇO toca, setas mudam o volume, M
-  silencia, `--beep` toca uma vez no arranque e `--frames N` limita a execução.
-- `tests/assets_audio_smoke.rs`: integração headless de loader, cache e áudio.
-- `docs/DECISIONS.md`: ADR-021 (modo silencioso), ADR-022 (cache por string exata +
-  validação de handle obsoleto), ADR-023 (`Chunk`/`Music` nos handle registries).
-- `docs/C_ABI_CONTRACT.md`: `giochi_audio_available`, semântica de `loops`,
-  volume e liberação de música.
+- `scene/scene.rs`: `trait Scene` com `on_enter`/`on_exit`/`update(Time, &Input,
+  &mut AudioSystem)`/`render(&mut RenderContext)`/`transition()`;
+  `SceneTransition` (`Continue`/`Quit`/`Replace`/`Push`/`Pop`) e `EmptyScene`
+  (contador de callbacks para testes) — 4 testes.
+- `scene/state.rs`: `SceneManager` com `push`/`pop`/`replace`/`clear`/`current`/
+  `current_mut`/`depth`/`is_empty`, chamando `on_enter`/`on_exit` exatamente uma vez
+  por cena — 10 testes.
+- `core/engine.rs`: `Engine` (fachada) dono de `Platform`, `RenderContext`,
+  `AudioSystem`, `Input`, `SceneManager`, `GameLoop`, relógio e `RunStats`;
+  `Engine::new(config)`, `with_scene`, `run`, `run_current`, `push_scene`,
+  `replace_scene`, `pop_scene`, `request_quit`, `is_running`, `reset_quit`,
+  `set_frame_limit`/`clear_frame_limit`, `run_stats`, `set_clear_color`,
+  acessores (`render`, `audio`, `input`, `scenes`, `resources`, `platform`,
+  `game_loop`, `fixed_timestep`) e `Drop` que limpa cenas/áudio/texturas —
+  14 testes.
+- `RunStats` C-shaped (`frames`, `steps`, `elapsed`, `_reserved`) com `fps`,
+  `step_rate` e `frame_time_ms`.
+- `giochi-demo` refatorado para usar `Engine` + `Scene`: sprite móvel com WASD,
+  arrasto com botão direito, companheiro que quica, bipe no ESPAÇO, grid de fundo,
+  marcador de "áudio carregado" e flags `--frames N` / `--verify`.
+- `examples/mini_game.rs`: space shooter completo (ship, drones, balas,
+  colisões, vidas, pontuação, dificuldade progressiva, game over, som procedural de
+  tiro) usando todos os módulos; `--frames N` e `--auto` (auto-play para verificação
+  por script).
+- `tests/engine_smoke.rs`: integração headless do loop e da pilha de cenas.
+- `docs/DECISIONS.md`: ADR-024 (engine empresta subsistemas; cenas não os possuem),
+  ADR-025 (transições como pedido aplicado após o frame), ADR-026 (loop único com
+  frame limit no `Engine`).
+- `docs/C_ABI_CONTRACT.md`: contrato de callbacks (quando `update`/`render`/`on_enter`/
+  `on_exit` são chamados), lifetime de cena em execução e semântica de transições.
 
-## Próxima fase: 5 — Scene + Engine (fachada)
+## Próxima fase: 6 — Polimento + CI + Docs
 
-`scene/scene.rs` (`trait Scene` com `on_enter`/`on_exit`/`update`/`render`),
-`scene/state.rs` (`SceneManager` com `push`/`pop`/`replace`/`current_mut`),
-`core/engine.rs` (`Engine::new(config)`, `engine.run(Box<dyn Scene>)`), `giochi-demo`
-refatorado para usar `Engine` e exemplo `mini_game` (Pong ou space shooter) usando
-todos os módulos. Aceite: `mini_game` jogável em x86_64; cross-check ARM64 passa.
+`.github/workflows/{ci,release,cross-compile}.yml`, `.github/ISSUE_TEMPLATE/`,
+`PULL_REQUEST_TEMPLATE.md`, `dependabot.yml`; `docs/ARCHITECTURE.md`,
+`docs/KMSDRM.md`, `docs/API_GUIDE.md`; `README.md` completo com badges,
+pré-requisitos, build nativo + cross e KMSDRM; `CHANGELOG.md` 0.1.0 e
+`CONTRIBUTING.md` revisado; `cargo doc` limpo. Aceite: CI verde (ou validação local
+documentada) e README cobrindo build/execução em x86_64 e ARM64.
 
 ## Bloqueios / pendências
 
 - Nenhum bloqueio de gate.
 - CMake 4.2.3 × `cmake_minimum_required(VERSION 3.0.x)` do SDL2 vendorizado:
   workaround em `.cargo/config.toml` (ADR-014).
-- `sdl2` compila com `unsafe_textures` (ADR-017), sob o pressuposto de um único
-  canvas por processo (ADR-018).
+- `sdl2` compila com `unsafe_textures` (ADR-017); um único canvas por processo
+  (ADR-018).
 - O caminho "ao vivo" do gamepad não é exercitável sem hardware (ADR-020).
-- Nesta máquina o `kmsdrm` não inicializa (sessão gráfica detém DRM master); é o
-  caso coberto pelo fallback do ADR-015. O dispositivo de áudio **existe**, então
-  o caminho real de mixer foi verificado; o modo silencioso é coberto por
-  `AudioSystem::silent()` e pelo teste de integração.
-- `ResourceManager` não tem API C-shaped de `i32` nesta fase: o requisito do prompt
-  (`load_texture(handle_out, path) -> i32`) é satisfeito na capi (fase 7) sobre
-  `ResourceManager::load_texture`, que é a forma idiomática em Rust. Registrado
-  aqui para não parecer omissão.
+- Nesta máquina o `kmsdrm` não inicializa (sessão gráfica detém DRM master) — caso
+  coberto pelo fallback do ADR-015. O dispositivo de áudio existe, então o caminho
+  real de mixer foi verificado.
+- `SceneTransition::Replace`/`Push` não podem ser aplicados pelo engine (o enum não
+  carrega payload); a troca de cena é feita por `Engine::push_scene`/
+  `replace_scene`. Documentado no ADR-025.
 
 ## Notas de arquitetura
 
-- `src/error.rs` não estava na estrutura original do prompt; módulo de topo para
-  não violar as regras de dependência (ADR-011).
+- `src/error.rs` não estava na estrutura original do prompt; módulo de topo para não
+  violar as regras de dependência (ADR-011).
 - `EngineConfig.title` é `[u8; 64]` (ADR-007); `KeyCode`/`MouseButton`/
   `GamepadAxis`/`GamepadButton` são `u32` com valores SDL (ADR-009); ABI v1
-  singleton (ADR-012).
+  singleton (ADR-012); wrappers públicos têm `_reserved` (ADR-013).
 - Ordem obrigatória por frame: `poll_events()` → `input.update(&events)` →
-  `game_loop.advance()` → `scene.update()` → `render` → `present()`.
-- Fluxo de posse do render: `Window` → `into_render_context()` → `RenderContext`
-  (canvas + `TextureRegistry` + `ResourceManager` + `Camera`) — ADR-018.
-- `TextureRegistry::create_texture` e `RenderContext::create_texture` **ignoram** o
-  cache (cada chamada faz upload); `RenderContext::load_texture` usa o cache. A
-  distinção é intencional: a primeira é a primitiva, a segunda a política.
-- `AssetSystem`/`AudioSystem` degradam em vez de impedir o arranque (ADR-015,
-  ADR-021): o jogo continua sem som e os erros são explícitos.
-- `core` não importa `sdl2`; `render` não conhece `scene`; `math` não depende de
+  `game_loop.advance()` → `scene.update()` → `clear` → `scene.render()` →
+  `present()` → `transition()` → `sleep`.
+- `Engine` é o único dono de `Platform`/`RenderContext`/`AudioSystem`/`Input`/
+  `SceneManager`; cenas recebem empréstimos por parâmetro e nunca guardam nada
+  (ADR-024). O `Drop` do `Engine` limpa cenas, áudio, cache e texturas.
+- `render` não conhece `scene` (a dependência é `core::engine` → `scene` →
+  `render`/`input`/`audio`); `core` não importa `sdl2`; `math` não depende de
   módulos internos; `handle_registry` é `pub(crate)`.
-- Fase 6 é dona de `.github/workflows/*`, dos templates de issue/PR e do README
-  completo; o diretório existe vazio de propósito.
+- Próximas fases: 6 (CI/docs), 7 (capi com cbindgen + testes C/Python), 8 (binding
+  Lua com `mini_game.lua` e subcomando `giochi-demo lua`).

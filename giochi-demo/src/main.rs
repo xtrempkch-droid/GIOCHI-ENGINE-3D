@@ -1,41 +1,35 @@
 //! GIOCHI-ENGINE demo binary.
 //!
-//! Phase 1: opens a 1280x720 window, runs the fixed-timestep loop and closes on
-//! `Escape` or on a window-close request. Nothing is drawn yet, so the window
-//! stays black; phase 2 adds the 2D renderer and replaces this loop with
-//! [`giochi_engine::Engine`] in phase 5.
-//!
-//! Usage:
+//! Runs a small interactive scene through the [`Engine`] facade, so the demo
+//! exercises the same path a real game takes: platform → window → renderer →
+//! input/audio → scene stack → fixed-timestep loop.
 //!
 //! ```text
-//! cargo run -p giochi-demo                # runs until Escape / window close
-//! cargo run -p giochi-demo -- --frames 60 # runs 60 frames, then exits
+//! cargo run -p giochi-demo                  # interactive, ESC quits
+//! cargo run -p giochi-demo -- --frames 120  # deterministic run for smoke tests
 //! ```
 //!
-//! On a desktop session the engine auto-selects KMSDRM and falls back to the
-//! desktop driver. Set `SDL_VIDEODRIVER=x11` (or `wayland`) to skip the fallback.
+//! The scene is deliberately small: a textured sprite you can move with WASD or the
+//! mouse, a bouncing companion square and a beep on `Space`. It is the living proof
+//! that every module works together.
 
 use std::process::ExitCode;
 
+use giochi_engine::input::keyboard::{KEY_A, KEY_D, KEY_S, KEY_SPACE, KEY_W};
+use giochi_engine::input::mouse::MOUSE_RIGHT;
 use giochi_engine::{
-    quit_signal, FrameClock, GameLoop, Platform, Time, WindowConfig, FIXED_TIMESTEP,
+    AudioSystem, Color, Engine, EngineConfig, Input, RenderContext, Scene, Sprite, Time, Vec2,
 };
 
-const WINDOW_WIDTH: u32 = 1280;
-const WINDOW_HEIGHT: u32 = 720;
 const WINDOW_TITLE: &str = "GIOCHI-ENGINE";
-
-/// Parsed command line.
-#[derive(Debug, Default)]
-struct Args {
-    /// Stop after this many frames; `None` runs until the user quits.
-    frames: Option<u64>,
-}
+const SPRITE_SIZE: f32 = 64.0;
+const PLAYER_SPEED: f32 = 320.0;
 
 fn main() -> ExitCode {
     env_logger::init();
 
-    match run(parse_args(std::env::args().skip(1))) {
+    let options = Options::parse();
+    match run(options) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("erro: {error}");
@@ -44,129 +38,299 @@ fn main() -> ExitCode {
     }
 }
 
-fn parse_args(args: impl Iterator<Item = String>) -> Args {
-    let mut parsed = Args::default();
-    let mut args = args.peekable();
-
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--frames" => {
-                if let Some(value) = args.next().and_then(|v| v.parse().ok()) {
-                    parsed.frames = Some(value);
-                }
-            }
-            other => {
-                if let Some(value) = other.strip_prefix("--frames=") {
-                    parsed.frames = value.parse().ok();
-                }
-            }
-        }
-    }
-
-    parsed
+/// Command line options.
+#[derive(Debug, Default)]
+struct Options {
+    frames: Option<u64>,
+    verify: bool,
 }
 
-fn run(args: Args) -> Result<(), String> {
+impl Options {
+    fn parse() -> Self {
+        let mut options = Self::default();
+        let mut args = std::env::args().skip(1);
+
+        while let Some(arg) = args.next() {
+            if let Some(value) = arg.strip_prefix("--frames=") {
+                options.frames = value.parse().ok();
+            } else if arg == "--frames" {
+                options.frames = args.next().and_then(|value| value.parse().ok());
+            } else if arg == "--verify" {
+                options.verify = true;
+            }
+        }
+
+        options
+    }
+}
+
+fn asset(name: &str) -> String {
+    format!("{}/../assets/{name}", env!("CARGO_MANIFEST_DIR"))
+}
+
+fn run(options: Options) -> Result<(), String> {
     println!("giochi-engine bootstrap OK");
 
-    let platform = Platform::new().map_err(|error| error.to_string())?;
-    log::info!(
-        "video driver '{}', selection {:?}",
-        platform.video_driver_name(),
-        platform.video_driver_choice()
-    );
+    let config = EngineConfig::new(1280, 720, WINDOW_TITLE);
+    let mut engine = Engine::new(config).map_err(|error| error.to_string())?;
 
-    let mut window = platform
-        .create_window(WindowConfig::new(WINDOW_WIDTH, WINDOW_HEIGHT), WINDOW_TITLE)
-        .map_err(|error| error.to_string())?;
+    let scene = DemoScene::new(&mut engine).map_err(|error| error.to_string())?;
+    engine.push_scene(Box::new(scene));
 
-    let (width, height) = window.size();
-    println!("janela {width}x{height} — ESC ou fechar a janela para sair");
-
-    window
-        .set_title(WINDOW_TITLE)
-        .map_err(|error| error.to_string())?;
-
-    let mut game_loop = GameLoop::new();
-    let mut clock = FrameClock::new();
-    let mut time = Time::new();
-    let mut frame = 0u64;
-    let started = std::time::Instant::now();
-
-    while game_loop.is_running() {
-        let frame_time = clock.tick();
-        let work_started = std::time::Instant::now();
-
-        for event in platform.poll_events() {
-            game_loop.handle_quit_signal(quit_signal(&event));
-        }
-
-        let steps = game_loop.advance(frame_time);
-
-        for _ in 0..steps {
-            time.advance(FIXED_TIMESTEP);
-            update(&time);
-        }
-
-        // Phase 2 presents the frame here; with no drawing, SDL keeps the window
-        // black.
-        frame += 1;
-        if args.frames.is_some_and(|limit| frame >= limit) {
-            break;
-        }
-
-        // `sleep_ms` takes the work done in *this* iteration, not the whole frame
-        // period, so the sleep is not counted against its own budget.
-        platform.delay_ms(game_loop.sleep_ms(work_started.elapsed().as_secs_f32()));
+    // `--verify` proves the whole pipeline from a script: one frame, then report.
+    let frames = options
+        .frames
+        .or(if options.verify { Some(1) } else { None });
+    if let Some(limit) = frames {
+        engine.set_frame_limit(limit);
     }
 
-    let wall = started.elapsed().as_secs_f64();
+    engine.run_current().map_err(|error| error.to_string())?;
+
+    let stats = engine.run_stats();
     println!(
-        "encerrado: {frame} iterações, {} passos simulados, {:.1} fps reais",
-        time.frame_count,
-        if wall > 0.0 { frame as f64 / wall } else { 0.0 }
+        "encerrado: {} frames, {} passos, {:.1} fps, cenas restantes: {}",
+        stats.frames,
+        stats.steps,
+        stats.fps(),
+        engine.scenes().depth()
     );
+
+    if options.verify {
+        println!(
+            "texturas vivas: {}, sons vivos: {}, áudio: {}",
+            engine.render().texture_count(),
+            engine.audio().sound_count(),
+            if engine.audio().is_available() {
+                "ativo"
+            } else {
+                "silencioso"
+            }
+        );
+    }
 
     Ok(())
 }
 
-/// One fixed simulation step.
-///
-/// Phase 1 has no scene; phase 5 replaces this with `Scene::update`.
-fn update(_time: &Time) {}
+/// The demo scene: a movable sprite plus a bouncing square.
+struct DemoScene {
+    player_sprite: Sprite,
+    companion: Sprite,
+    companion_velocity: Vec2,
+    beep: u64,
+    bounds: Vec2,
+}
+
+impl DemoScene {
+    fn new(engine: &mut Engine) -> Result<Self, giochi_engine::GiochiError> {
+        let player = engine.render_mut().load_texture(&asset("player.png"))?;
+
+        let (width, height) = engine.render().size();
+        let spawn = Vec2::new(
+            width as f32 * 0.5 - SPRITE_SIZE * 0.5,
+            height as f32 * 0.5 - SPRITE_SIZE * 0.5,
+        );
+
+        // The beep is optional: without an audio device the handle stays 0 and
+        // `play_sound` reports the reason.
+        let beep = match audio_load_beep(engine.audio_mut()) {
+            Ok(handle) => handle,
+            Err(error) => {
+                log::warn!("som indisponível: {error}");
+                0
+            }
+        };
+
+        Ok(Self {
+            player_sprite: Sprite::new(player, spawn.x, spawn.y, SPRITE_SIZE, SPRITE_SIZE),
+            companion: Sprite::new(player, 96.0, 96.0, 48.0, 48.0),
+            companion_velocity: Vec2::new(180.0, 140.0),
+            beep,
+            bounds: Vec2::new(width as f32, height as f32),
+        })
+    }
+}
+
+impl Scene for DemoScene {
+    fn on_enter(&mut self) {
+        log::info!("DemoScene on_enter");
+    }
+
+    fn on_exit(&mut self) {
+        log::info!("DemoScene on_exit");
+    }
+
+    fn update(&mut self, time: Time, input: &Input, audio: &mut AudioSystem) {
+        // Keyboard movement, normalised so diagonals are not faster.
+        let mut direction = Vec2::ZERO;
+        if input.key_down(KEY_A) {
+            direction.x -= 1.0;
+        }
+        if input.key_down(KEY_D) {
+            direction.x += 1.0;
+        }
+        if input.key_down(KEY_W) {
+            direction.y -= 1.0;
+        }
+        if input.key_down(KEY_S) {
+            direction.y += 1.0;
+        }
+
+        if direction.length() > 0.0 {
+            let normalised = direction * (1.0 / direction.length());
+            self.player_sprite.translate(
+                normalised.x * PLAYER_SPEED * time.delta,
+                normalised.y * PLAYER_SPEED * time.delta,
+            );
+        }
+
+        if input.key_pressed(KEY_SPACE) && self.beep != 0 {
+            // A silent engine returns an error here; the demo keeps playing.
+            if let Err(error) = audio.play_sound(self.beep, 0) {
+                log::debug!("sem áudio: {error}");
+            }
+        }
+
+        // Holding the right button drags the sprite to the cursor.
+        if input.mouse().is_down(MOUSE_RIGHT) {
+            let (mouse_x, mouse_y) = input.mouse().position();
+            self.player_sprite.x = mouse_x - SPRITE_SIZE * 0.5;
+            self.player_sprite.y = mouse_y - SPRITE_SIZE * 0.5;
+        }
+
+        // Keep the player on screen.
+        let width = self.bounds.x;
+        let height = self.bounds.y;
+        self.player_sprite.x = self
+            .player_sprite
+            .x
+            .clamp(0.0, (width - SPRITE_SIZE).max(0.0));
+        self.player_sprite.y = self
+            .player_sprite
+            .y
+            .clamp(0.0, (height - SPRITE_SIZE).max(0.0));
+
+        // The companion bounces, which shows sub-pixel motion from fixed steps.
+        self.companion.x += self.companion_velocity.x * time.delta;
+        self.companion.y += self.companion_velocity.y * time.delta;
+
+        if self.companion.x < 0.0 {
+            self.companion.x = 0.0;
+            self.companion_velocity.x = self.companion_velocity.x.abs();
+        } else if self.companion.x > width - self.companion.w {
+            self.companion.x = width - self.companion.w;
+            self.companion_velocity.x = -self.companion_velocity.x.abs();
+        }
+        if self.companion.y < 0.0 {
+            self.companion.y = 0.0;
+            self.companion_velocity.y = self.companion_velocity.y.abs();
+        } else if self.companion.y > height - self.companion.h {
+            self.companion.y = height - self.companion.h;
+            self.companion_velocity.y = -self.companion_velocity.y.abs();
+        }
+    }
+
+    fn render(&mut self, renderer: &mut RenderContext) {
+        // The engine already cleared the screen; draw the scene contents only.
+        let (width, height) = renderer.size();
+
+        for x in (0..width).step_by(128) {
+            renderer.draw_rect(
+                giochi_engine::Rect::new(x as f32, 0.0, 1.0, height as f32),
+                Color::rgb(26, 30, 42),
+            );
+        }
+
+        let _ = renderer.draw_sprite(&self.companion);
+        let _ = renderer.draw_sprite(&self.player_sprite);
+
+        // Corner marker: changes colour when the beep handle is valid, which makes
+        // "audio loaded" visible in a screenshot-free smoke run.
+        renderer.draw_rect(
+            giochi_engine::Rect::new(width as f32 - 24.0, height as f32 - 24.0, 16.0, 16.0),
+            if self.beep != 0 {
+                Color::rgb(70, 200, 120)
+            } else {
+                Color::rgb(120, 60, 60)
+            },
+        );
+    }
+
+    fn transition(&mut self) -> giochi_engine::SceneTransition {
+        // The engine owns the frame limit and the quit flag; this scene never asks
+        // for a transition of its own.
+        giochi_engine::SceneTransition::Continue
+    }
+}
+
+/// Loads the beep used by the demo, generating it when it does not exist yet.
+fn audio_load_beep(audio: &mut AudioSystem) -> Result<u64, giochi_engine::GiochiError> {
+    let path = std::env::temp_dir().join("giochi-demo-beep.wav");
+    if !path.exists() {
+        write_beep_wav(&path)?;
+    }
+    audio.load_sound(path.to_str().unwrap_or_default())
+}
+
+/// Writes a short 16-bit stereo WAV tone.
+fn write_beep_wav(path: &std::path::Path) -> Result<(), giochi_engine::GiochiError> {
+    const SAMPLE_RATE: u32 = 44_100;
+    const FRAMES: u32 = SAMPLE_RATE / 8;
+
+    let mut samples = Vec::with_capacity(FRAMES as usize * 4);
+    for frame in 0..FRAMES {
+        let t = frame as f32 / SAMPLE_RATE as f32;
+        let value = (t * 880.0 * std::f32::consts::TAU).sin() * 0.2;
+        let sample = (value * f32::from(i16::MAX)) as i16;
+        samples.extend_from_slice(&sample.to_le_bytes());
+        samples.extend_from_slice(&sample.to_le_bytes());
+    }
+
+    let data_len = samples.len() as u32;
+    let mut wav = Vec::with_capacity(44 + samples.len());
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+    wav.extend_from_slice(b"WAVE");
+    wav.extend_from_slice(b"fmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&SAMPLE_RATE.to_le_bytes());
+    wav.extend_from_slice(&(SAMPLE_RATE * 4).to_le_bytes());
+    wav.extend_from_slice(&4u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_len.to_le_bytes());
+    wav.extend_from_slice(&samples);
+
+    std::fs::write(path, wav).map_err(|error| {
+        giochi_engine::GiochiError::Asset(format!("failed to write beep: {error}"))
+    })
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn args(items: &[&str]) -> Args {
-        parse_args(items.iter().map(|item| (*item).to_string()))
+    #[test]
+    fn options_default_to_an_interactive_run() {
+        let options = Options::default();
+
+        assert_eq!(options.frames, None);
+        assert!(!options.verify);
     }
 
     #[test]
-    fn no_arguments_means_run_forever() {
-        assert_eq!(args(&[]).frames, None);
-    }
+    fn the_beep_wav_is_a_valid_riff_file() {
+        let path =
+            std::env::temp_dir().join(format!("giochi-demo-test-{}.wav", std::process::id()));
 
-    #[test]
-    fn frames_flag_with_separate_value_is_parsed() {
-        assert_eq!(args(&["--frames", "30"]).frames, Some(30));
-    }
+        write_beep_wav(&path).expect("write");
+        let bytes = std::fs::read(&path).expect("read");
 
-    #[test]
-    fn frames_flag_with_equals_is_parsed() {
-        assert_eq!(args(&["--frames=45"]).frames, Some(45));
-    }
-
-    #[test]
-    fn invalid_or_missing_frame_values_are_ignored() {
-        assert_eq!(args(&["--frames"]).frames, None);
-        assert_eq!(args(&["--frames", "abc"]).frames, None);
-        assert_eq!(args(&["--frames", "0"]).frames, Some(0));
-    }
-
-    #[test]
-    fn unknown_arguments_do_not_panic() {
-        assert_eq!(args(&["--verbose", "x"]).frames, None);
+        assert_eq!(&bytes[..4], b"RIFF");
+        assert_eq!(&bytes[8..12], b"WAVE");
+        assert!(bytes.len() > 44);
+        let _ = std::fs::remove_file(&path);
     }
 }

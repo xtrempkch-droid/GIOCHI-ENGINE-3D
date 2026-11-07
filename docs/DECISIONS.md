@@ -28,6 +28,9 @@ add a new ADR that states what it replaces.
 | 021 | Missing audio device degrades to silent mode | Accepted |
 | 022 | The resource cache is keyed by the exact path string | Accepted |
 | 023 | `Chunk`/`Music` are stored behind `Rc` in the handle registry | Accepted |
+| 024 | The engine lends its subsystems to scenes; scenes never own them | Accepted |
+| 025 | Scene transitions are requests applied after the frame | Accepted |
+| 026 | `Engine::run_current` is the single loop; `--frames` lives in the engine | Accepted |
 
 ---
 
@@ -491,3 +494,99 @@ stale sound handle can never play a new sound.
 **Consequences.** Destroying a music handle also halts playback, because the mixer
 must never keep a pointer to a freed `Mix_Music`. That is enforced in
 `AudioSystem::destroy_music`.
+
+---
+
+## ADR-024 — The engine lends its subsystems to scenes; scenes never own them
+
+**Context.** A scene needs the renderer, the input snapshot and the audio system.
+Three designs exist: the scene owns them, the scene receives a context struct, or
+the engine passes each one as a method parameter.
+
+**Decision.** Every `Scene` callback receives exactly what it needs, borrowed from
+the engine:
+
+```text
+update(&mut self, Time, &Input, &mut AudioSystem)
+render(&mut self, &mut RenderContext)
+```
+
+Nothing is stored in the scene. The `Engine` remains the single owner.
+
+**Why.**
+* A `SceneContext` struct would have to bundle `&mut` references with lifetimes,
+  which is exactly what R1 forbids on anything user-visible and what makes the C ABI
+  singleton design necessary anyway (ADR-012).
+* Letting the scene own the renderer would make the scene unmovable and the stack
+  unflexible (`SceneManager` stores `Box<dyn Scene>`).
+* Passing parameters keeps every scene a plain struct with no engine plumbing.
+
+**Consequences.** `update` has four parameters. A scene that wants to play a sound
+must do it in `update` (or store the handle and play it there); `render` cannot
+reach audio, which is the right split: rendering is read-only for game state.
+
+**Audio was added in phase 5.** Phase 0–4 declared `update(&mut self, Time, &Input)`.
+The `mini_game` example immediately showed the gap: a scene could load a sound
+handle but had no legal way to play it. Widening the signature before the C ABI and
+the Lua binding exist is a one-crate edit; doing it later would break both.
+
+---
+
+## ADR-025 — Scene transitions are requests applied after the frame
+
+**Context.** A scene must be able to end the game, pop itself (return to a menu) or
+replace itself. Doing that from inside `render` would free the scene while it is
+still drawing.
+
+**Decision.** `Scene::transition()` is polled **after** `render` + `present`, and the
+engine applies the answer:
+
+| `SceneTransition` | Engine action |
+|---|---|
+| `Continue` | nothing |
+| `Quit` | sets the loop's quit flag and leaves `is_running()` false |
+| `Pop` | pops the top scene (its `on_exit` runs) |
+| `Replace` / `Push` | logged as unusable from a transition value |
+
+**Why `Replace`/`Push` cannot be applied.** A transition is a plain `enum`
+(`#[repr(C)]`, no payload), so it cannot carry a `Box<dyn Scene>`. A scene that wants
+to switch does it explicitly through `Engine::push_scene`/`replace_scene`, which take
+the new scene. The transition enum stays ABI-friendly (a `u32` in C) and the awkward
+"enum with a boxed payload" disappears.
+
+**Runaway guard.** More than 10 000 transitions in one run returns
+`GiochiError::Scene` instead of spinning forever. That only happens if a scene
+returns a transition every single frame *and* the engine kept applying it, which is
+a scene bug the engine reports rather than hangs on.
+
+**Consequences.** A scene cannot free itself mid-frame. `Quit` reaches a coherent
+state: after `run_current` returns, `is_running()` is `false` — a bug the phase-5
+integration test caught in the first implementation, where the loop broke out but
+left the flag set.
+
+---
+
+## ADR-026 — `Engine::run_current` is the single loop; `--frames` lives in the engine
+
+**Context.** Every example and the demo need "run N frames and exit" so they can be
+verified from a script. Implementing that per binary duplicates the loop and lets
+each one drift.
+
+**Decision.** `Engine` owns the loop and the frame limit:
+
+* `Engine::run_current()` runs the scene stack; `Engine::run(scene)` replaces the
+  stack first;
+* `Engine::set_frame_limit(n)` / `clear_frame_limit()` control the automatic stop;
+* `Engine::run_stats()` reports frames, steps, elapsed time and derived rates;
+* `Engine::reset_quit()` re-arms the loop after a quit, for hosts that run one scene,
+  return to their own UI, then run another.
+
+**Why in the engine and not in the demo.** The frame limit is the mechanism every
+smoke test depends on, so it must be in the library — otherwise `giochi-demo`,
+`mini_game`, `audio_test` and `input_test` would each reimplement it and only the
+tested one would be correct.
+
+**Consequences.** `run_current` clears the limit only when the caller says so; the
+limit persists across `reset_quit`, which is what a test wants. `giochi-demo --verify`
+uses it to prove the full pipeline (texture loaded, sound loaded, audio device state)
+in one frame.

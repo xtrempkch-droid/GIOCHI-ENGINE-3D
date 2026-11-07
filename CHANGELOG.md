@@ -8,6 +8,39 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Phase 5 — scenes and the `Engine` facade: `trait Scene` with
+  `on_enter`/`on_exit`/`update`/`render`/`transition`, `SceneManager` with
+  `push`/`pop`/`replace`/`clear` (calling `on_enter`/`on_exit` exactly once per
+  scene), and `Engine`, which owns the platform, renderer, audio, input and scene
+  stack and drives them through the fixed-timestep loop.
+- `Engine::run`, `run_current`, `push_scene`/`replace_scene`/`pop_scene`,
+  `set_frame_limit`, `reset_quit`, `run_stats` and a `Drop` that releases scenes,
+  audio, cached resources and textures in dependency order.
+- `SceneTransition` (`Continue`/`Quit`/`Replace`/`Push`/`Pop`) applied by the engine
+  **after** the frame is presented, so a scene is never freed mid-render, plus a
+  runaway guard that reports a scene transitioning every frame.
+- `RunStats` (`frames`, `steps`, `elapsed`) with derived `fps`, `step_rate` and
+  `frame_time_ms`.
+- `giochi-demo` rebuilt on `Engine` + `Scene`: movable sprite, bouncing companion,
+  beep, background grid and `--verify` for one-frame pipeline checks.
+- Example `mini_game`: a complete space shooter (movement, shooting, collision,
+  lives, score, progressive difficulty, game over, procedurally generated shot
+  sound) using every module, with `--frames` and `--auto`.
+- `tests/engine_smoke.rs`: headless integration test of the loop, the scene stack
+  lifecycle and the transition paths.
+
+### Changed
+
+- `Scene::update` now receives `&mut AudioSystem` in addition to `Time` and
+  `&Input` (ADR-024). Scenes had no legal way to play a sound they had loaded.
+
+### Fixed
+
+- `SceneTransition::Quit` broke out of the loop without stopping it, leaving
+  `Engine::is_running()` true; it now requests a quit so the state is coherent.
+
+### Added — phase 4
+
 - Phase 4 — assets and audio: `asset_size`/`read_asset` reading into a
   caller-owned buffer (never truncating, 64 MiB cap) and `ResourceManager`, a
   path-keyed texture cache where loading the same path twice performs **one**

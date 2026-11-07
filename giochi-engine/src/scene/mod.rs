@@ -5,5 +5,5 @@
 pub mod scene;
 pub mod state;
 
-pub use scene::{Scene, SceneHandle};
+pub use scene::{EmptyScene, Scene, SceneHandle, SceneTransition};
 pub use state::SceneManager;

@@ -4,11 +4,11 @@ A **2D** game engine in Rust on top of SDL2, designed from day one to be consume
 from any language through a C ABI. Primary target: `aarch64-unknown-linux-gnu`
 (Linux consoles with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 
-> **Status: phase 4 (assets + audio).** The workspace, the C ABI contract, the value
-> types, the SDL2 platform layer, the fixed-timestep loop, the 2D renderer with
-> opaque texture handles, keyboard/mouse/gamepad input, the asset cache and the
-> audio mixer exist. Scenes and the `Engine` facade land in phase 5 — see
-> [PROGRESS.md](PROGRESS.md).
+> **Status: phase 5 (scenes + `Engine`).** The workspace, the C ABI contract, the
+> value types, the SDL2 platform layer, the fixed-timestep loop, the 2D renderer with
+> opaque texture handles, keyboard/mouse/gamepad input, the asset cache, the audio
+> mixer, the scene stack and the `Engine` facade all exist. CI, release packaging and
+> the remaining guides land in phase 6 — see [PROGRESS.md](PROGRESS.md).
 
 ## Why "C-shaped" Rust?
 
@@ -65,6 +65,7 @@ cargo run -p giochi-engine --example hello_rect      # three rectangles
 cargo run -p giochi-engine --example moving_sprite   # bouncing sprite + camera
 cargo run -p giochi-engine --example input_test      # WASD, mouse, gamepad
 cargo run -p giochi-engine --example audio_test      # Space plays a synthesised beep
+cargo run -p giochi-engine --example mini_game       # complete space shooter
 ```
 
 All examples accept `--frames N` to run for a fixed number of frames, which is how
@@ -129,6 +130,45 @@ built with `AudioSystem::new(&platform)?`.
 If no audio device is available the engine logs a warning and keeps running in
 silent mode: `audio.is_available()` is `false` and load/play return an
 `GIOCHI_ERROR_AUDIO` error instead of aborting the game.
+
+### A game, in one file
+
+`Engine` owns the platform, renderer, audio, input and the scene stack; a scene is a
+plain struct implementing four callbacks.
+
+```rust
+use giochi_engine::{
+    AudioSystem, Engine, EngineConfig, Input, RenderContext, Scene, Time,
+};
+
+struct Game { /* your state */ }
+
+impl Scene for Game {
+    fn on_enter(&mut self) { /* load textures and sounds */ }
+
+    fn update(&mut self, time: Time, input: &Input, audio: &mut AudioSystem) {
+        // fixed timestep: `time.delta` is constant, so simulation is deterministic
+    }
+
+    fn render(&mut self, renderer: &mut RenderContext) {
+        // the engine already cleared the screen and will present after this returns
+    }
+
+    fn on_exit(&mut self) { /* destroy every handle you created */ }
+}
+
+fn main() -> Result<(), giochi_engine::GiochiError> {
+    let mut engine = Engine::new(EngineConfig::new(960, 540, "my game"))?;
+    engine.set_frame_limit(600); // optional: stop after 600 frames
+    engine.run(Box::new(Game { /* ... */ }))?;
+    Ok(())
+}
+```
+
+Scenes never own engine objects: the engine lends the renderer and the mixer for the
+duration of the call (ADR-024). A scene can ask to stop with
+`SceneTransition::Quit`, or be swapped with `Engine::push_scene`/`replace_scene`.
+`Engine::run_stats()` reports frames, steps and the achieved rate.
 
 ### Video driver
 

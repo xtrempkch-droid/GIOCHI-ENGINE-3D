@@ -263,6 +263,37 @@ Callbacks must not unwind (in C++ terms: must not throw) and must not call
 `giochi_engine_shutdown`. Rendering inside `render` uses the same
 `giochi_render_*` functions as the main thread.
 
+#### Callback contract
+
+| Callback | When | Requirements |
+|---|---|---|
+| `on_enter` | once, when the scene is pushed or replaces another | may be `NULL`; load resources here |
+| `on_exit` | once, when the scene is popped or replaced | may be `NULL`; destroy every handle created in `on_enter` |
+| `update` | once per **fixed** simulation step | required; `t->delta` is the fixed timestep, not the display frame time |
+| `render` | once per display frame, after the screen was cleared and before it is presented | required; do not present |
+
+`update` may run zero, one or several times per `render`. A scene must not assume a
+1:1 ratio, and must not read input in `render` to drive simulation.
+
+The engine calls `on_enter`/`on_exit` exactly once per scene and only while that
+scene is on top of the stack. A scene below an overlay keeps its state and receives
+no callbacks until the overlay is popped; it is **not** re-entered.
+
+#### Scene lifetime and destroying a running scene
+
+`giochi_scene_create` returns a handle; `giochi_engine_run_scene` blocks until the
+scene quits. Destroying the handle of a scene that is currently running is an error
+(`GIOCHI_ERROR_SCENE`) — stop the engine first. Destroying a scene that is not
+running is always safe.
+
+#### Transitions
+
+A `Scene` in the Rust API can ask for a transition (`Continue`/`Quit`/`Pop`); the C
+ABI models this with `giochi_engine_request_quit()` and `giochi_engine_is_running()`,
+which is what a callback calls when it wants the loop to stop. There is no
+transition enum in ABI v1: `Quit` is the only transition a C scene needs, and
+push/pop/replace are driven by the host through `giochi_engine_run_scene`.
+
 ---
 
 ## 4. Error codes
@@ -319,6 +350,13 @@ int32_t giochi_engine_is_running(void);   /* 1/0                  (phase 5) */
   textures, sounds, music and scenes first for deterministic behaviour.
 * `giochi_engine_run` pumps events, runs fixed-timestep updates and renders until
   `Escape`, the window close button or `giochi_engine_request_quit`.
+* The engine clears the screen before each frame and presents after it; a scene's
+  `render` callback only issues draw calls.
+* `giochi_engine_run_scene` on an engine with no scene runs the loop and clears the
+  screen. That is legal and is what a "loading" screen does.
+* `giochi_engine_is_running` returns `0` after a run that ended through
+  `giochi_engine_request_quit`, `Escape` or the window close button — the state is
+  coherent for a host that checks it before running again.
 
 **Video driver negotiation** (implemented in phase 1, in Rust, as
 `Platform::new`):

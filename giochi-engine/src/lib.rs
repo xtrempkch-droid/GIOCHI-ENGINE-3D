@@ -64,7 +64,7 @@ pub const fn version_packed() -> u32 {
 
 pub use crate::assets::{asset_size, read_asset, ResourceManager, MAX_ASSET_SIZE};
 pub use crate::audio::{AudioSystem, MusicHandle, MusicState, SoundHandle};
-pub use crate::core::engine::{Engine, EngineConfig};
+pub use crate::core::engine::{Engine, EngineConfig, RunStats, DEFAULT_CLEAR_COLOR};
 pub use crate::core::game_loop::{GameLoop, FIXED_TIMESTEP, MAX_FRAME_TIME};
 pub use crate::core::time::{FrameClock, Time};
 pub use crate::error::{codes, GiochiError, GiochiResult};
@@ -75,7 +75,7 @@ pub use crate::platform::window::{Window, WindowConfig};
 pub use crate::render::{
     Camera, RenderContext, Sprite, TextureHandle, TextureRegistry, TextureSize,
 };
-pub use crate::scene::{Scene, SceneHandle, SceneManager};
+pub use crate::scene::{EmptyScene, Scene, SceneHandle, SceneManager, SceneTransition};
 
 #[cfg(test)]
 mod tests {
