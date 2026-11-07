@@ -40,6 +40,7 @@ dest="/opt/giochi"
 frames=300
 skip_build=0
 skip_c_smoke=0
+force_low_battery=0
 
 usage() {
     cat <<'USAGE'
@@ -51,6 +52,7 @@ Validate the engine on a real console over SSH, then hand the screen back.
   --frames N         frames per run (default 300)
   --skip-build       reuse an existing target/aarch64-unknown-linux-gnu/release
   --skip-c-smoke     do not cross-compile and run the C consumer
+  --force-low-battery  run even when the battery cannot carry the session
   -h, --help         this text
 USAGE
 }
@@ -68,6 +70,7 @@ while [[ $# -gt 0 ]]; do
         --frames) frames="${2:-}"; shift 2 ;;
         --skip-build) skip_build=1; shift ;;
         --skip-c-smoke) skip_c_smoke=1; shift ;;
+        --force-low-battery) force_low_battery=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -94,6 +97,58 @@ echo "  host:    $(cat /etc/hostname 2>/dev/null || echo '?')"
 echo "  kernel:  $(uname -r) $(uname -m)"
 echo "  drm:     $(ls /dev/dri 2>/dev/null | tr '\n' ' ')"
 REMOTE
+
+# A brown-out on this class of device does not just end the run: the rootfs does
+# not survive one, and the deploy plus the SSH key go with it (docs/KMSDRM.md
+# section 8.10). Running GLES at 0 mAh is therefore a destructive act, not a
+# risky one, so the battery is checked before anything is written to the flash.
+echo
+echo "==> checking the battery"
+battery=$(remote <<'REMOTE' || true
+for d in /sys/class/power_supply/*/; do
+    [ "$(cat "$d/type" 2>/dev/null)" = "Battery" ] || continue
+    capacity=$(cat "$d/capacity" 2>/dev/null)
+    status=$(cat "$d/status" 2>/dev/null)
+    voltage=$(cat "$d/voltage_avg" 2>/dev/null)
+    minimum=$(cat "$d/voltage_min_design" 2>/dev/null)
+    printf '%s %s %s %s' "${capacity:-?}" "${status:-?}" "${voltage:-?}" "${minimum:-?}"
+    break
+done
+REMOTE
+)
+read -r batt_capacity batt_status batt_voltage batt_minimum <<<"$battery"
+
+charging=$(remote <<'REMOTE' || true
+for d in /sys/class/power_supply/*/; do
+    case "$(cat "$d/type" 2>/dev/null)" in
+        Mains|USB|USB_C) [ "$(cat "$d/online" 2>/dev/null)" = "1" ] && echo yes && exit 0;;
+    esac
+done
+echo no
+REMOTE
+)
+
+if [[ -n "${batt_capacity:-}" && "$batt_capacity" != "?" ]]; then
+    echo "  battery: ${batt_capacity}% ${batt_status}, ${batt_voltage} uV (design minimum ${batt_minimum} uV), charging: $charging"
+    # `<= 5% and not charging` is the condition that was measured to matter. The
+    # voltage check catches a pack that still reports a percentage while already
+    # below its design minimum, which is what a worn cell does.
+    below_minimum=0
+    if [[ "$batt_voltage" =~ ^[0-9]+$ && "$batt_minimum" =~ ^[0-9]+$ ]]; then
+        [[ "$batt_voltage" -lt "$batt_minimum" ]] && below_minimum=1
+    fi
+    if [[ "$charging" != "yes" ]] && { [[ "$batt_capacity" -le 5 ]] || [[ "$below_minimum" == "1" ]]; }; then
+        if [[ "$force_low_battery" == "0" ]]; then
+            die "the battery cannot carry this run. Charge the device, then re-run.
+       Running GLES now risks a brown-out, and a brown-out wipes the rootfs --
+       which is where the deploy and the SSH key live. Use --force-low-battery to
+       override."
+        fi
+        echo "  WARNING: continuing because --force-low-battery was given"
+    fi
+else
+    echo "  no battery reported; skipping the check"
+fi
 
 if [[ "$skip_build" == "0" ]]; then
     echo
@@ -225,7 +280,7 @@ echo "==> deploying to $host:$dest"
 remote "$dest" <<'REMOTE'
 set -e
 dest="$1"
-mkdir -p "$dest/assets" "$dest/lib" "$dest/lua"
+mkdir -p "$dest/assets" "$dest/lib" "$dest/lua" "$dest/bin"
 printf '%s' "$dest"
 REMOTE
 
@@ -239,6 +294,14 @@ scp -q -o BatchMode=yes \
 if [[ "$skip_c_smoke" == "0" ]]; then
     scp -q -o BatchMode=yes "$c_smoke" "$host:$dest/lib/c_smoke"
 fi
+
+# The 3D examples are separate binaries, not subcommands of giochi-demo: they
+# need a GL context and the 2D demo deliberately never asks for one.
+for example in cube_demo mini_fps ball_balance; do
+    [[ -x "$target_dir/examples/$example" ]] ||
+        die "$target_dir/examples/$example is missing; build with 'scripts/build-aarch64.sh --release --examples'"
+    scp -q -o BatchMode=yes "$target_dir/examples/$example" "$host:$dest/bin/$example"
+done
 
 echo "==> releasing the console (the launcher holds DRM master)"
 console_released=1
@@ -382,6 +445,47 @@ cd "$1" || exit 1
 LD_LIBRARY_PATH="$1/lib:${LD_LIBRARY_PATH:-}" ./lib/c_smoke 2>&1
 REMOTE
     then :; else failures=$((failures + 1)); fi
+fi
+
+report "3D cube_demo --frames $frames"
+if remote "$dest" "$frames" <<'REMOTE'
+cd "$1/bin" || exit 1
+./cube_demo --frames "$2" 2>&1
+REMOTE
+then :; else failures=$((failures + 1)); fi
+
+report "3D mini_fps --frames $frames --auto"
+if remote "$dest" "$frames" <<'REMOTE'
+cd "$1/bin" || exit 1
+./mini_fps --frames "$2" --auto 2>&1
+REMOTE
+then :; else failures=$((failures + 1)); fi
+
+# The balance game is the latency check a human can actually make, so it is run
+# often enough to be trusted. `--auto` because nobody is holding the stick here;
+# what is asserted is that the ball ended up where the script pushed it, which is
+# the same claim the unit tests make about the physics and this one makes about
+# the whole binary.
+report "3D ball_balance --frames $frames --auto"
+balance_log="$work/balance.log"
+if remote "$dest" "$frames" <<'REMOTE' >"$balance_log" 2>&1
+cd "$1/bin" || exit 1
+./ball_balance --frames "$2" --auto 2>&1
+REMOTE
+then
+    sed -e 's/^/  /' -e 's/^  /  /' "$balance_log"
+    ball_x=$(sed -n 's/.*bola em (\([+-][0-9.]*\),.*/\1/p' "$balance_log" | tail -1)
+    if grep -q "no GL error" "$balance_log"; then :; else
+        echo "  FAIL ball_balance reported a GL error" >&2
+        failures=$((failures + 1))
+    fi
+    if [[ -n "$ball_x" ]] && awk -v x="$ball_x" 'BEGIN { exit !(x > 0.5) }'; then :; else
+        echo "  FAIL the script pushes right; the ball ended at x='${ball_x:-missing}'" >&2
+        failures=$((failures + 1))
+    fi
+else
+    sed -e 's/^/  /' "$balance_log" >&2
+    failures=$((failures + 1))
 fi
 
 report "resources"
