@@ -171,6 +171,23 @@ impl RenderContext {
         self.textures.len()
     }
 
+    /// Name of the renderer backend the SDL actually opened.
+    ///
+    /// Asking is not the same as getting: an unknown `SDL_RENDER_DRIVER` falls
+    /// back silently, and on an embedded board the difference is between the
+    /// accelerated backend and the software one. Loading `libEGL` says nothing —
+    /// the `kmsdrm` video driver uses EGL/GBM to present whatever the renderer
+    /// is, so the only honest source is `SDL_GetRendererInfo`.
+    pub fn renderer_name(&self) -> &'static str {
+        self.canvas.info().name
+    }
+
+    /// Whether the backend reported hardware acceleration.
+    pub fn renderer_is_accelerated(&self) -> bool {
+        // `SDL_RENDERER_ACCELERATED`
+        self.canvas.info().flags & 0x0000_0002 != 0
+    }
+
     /// Drawable size in physical pixels.
     pub fn size(&self) -> (u32, u32) {
         self.canvas.window().size()
@@ -226,6 +243,52 @@ impl RenderContext {
         }
     }
 
+    /// Draws the outline of `rect`, one pixel thick.
+    ///
+    /// `draw_rect` fills; a border drawn as four filled rectangles costs four
+    /// calls per element and does not line up on the corners.
+    pub fn stroke_rect(&mut self, rect: Rect, color: Color) {
+        let Some(dst) = to_sdl_rect(rect) else {
+            return;
+        };
+        self.canvas.set_draw_color(to_sdl_color(color));
+        if let Err(err) = self.canvas.draw_rect(dst) {
+            log::error!("stroke_rect failed: {err}");
+        }
+    }
+
+    /// Fills many rectangles with one colour in a single backend call.
+    ///
+    /// Rounded corners and circles are rasterised as 1-pixel-high spans, so one
+    /// call per span would mean hundreds of backend round-trips per element.
+    /// Empty rectangles are skipped by the backend.
+    pub fn fill_rects(&mut self, rects: &[Rect], color: Color) {
+        let converted: Vec<sdl2::rect::Rect> =
+            rects.iter().filter_map(|r| to_sdl_rect(*r)).collect();
+        if converted.is_empty() {
+            return;
+        }
+        self.canvas.set_draw_color(to_sdl_color(color));
+        if let Err(err) = self.canvas.fill_rects(&converted) {
+            log::error!("fill_rects failed: {err}");
+        }
+    }
+
+    /// Draws a one-pixel line between two points.
+    ///
+    /// Icon paths and rounded corners are polylines; approximating them with
+    /// 1-pixel rectangles serrates the diagonals twice (once by the rasteriser,
+    /// once by the approximation).
+    pub fn draw_line(&mut self, from: Vec2, to: Vec2, color: Color) {
+        self.canvas.set_draw_color(to_sdl_color(color));
+        if let Err(err) = self.canvas.draw_line(
+            (from.x.round() as i32, from.y.round() as i32),
+            (to.x.round() as i32, to.y.round() as i32),
+        ) {
+            log::error!("draw_line failed: {err}");
+        }
+    }
+
     /// Copies `src` of `texture` into `dst` (both screen space).
     ///
     /// A zero-sized `src` means "the whole texture". An invalid handle or an empty
@@ -249,6 +312,45 @@ impl RenderContext {
         self.canvas
             .copy(&texture, src, dst)
             .map_err(|err| GiochiError::Render(format!("draw_texture failed: {err}")))
+    }
+
+    /// Copies `src` into `dst` with rotation and optional mirroring.
+    ///
+    /// `angle_degrees` is clockwise, like SDL's `RenderCopyEx`. This is what
+    /// makes a portrait panel possible: the UI is laid out in landscape and each
+    /// element is rotated into device space, and a texture — text is a texture —
+    /// has to rotate the same way. Rotating the *bitmap* in software instead
+    /// would resample the glyphs and change their pixels.
+    pub fn draw_texture_ex(
+        &mut self,
+        texture: TextureHandle,
+        src: Rect,
+        dst: Rect,
+        angle_degrees: f32,
+        flip_horizontal: bool,
+        flip_vertical: bool,
+    ) -> Result<(), GiochiError> {
+        let texture = self
+            .textures
+            .resolve(texture)
+            .ok_or(GiochiError::InvalidHandle(texture))?;
+
+        let Some(dst) = to_sdl_rect(dst) else {
+            return Ok(());
+        };
+        let src = to_sdl_rect(src);
+
+        self.canvas
+            .copy_ex(
+                &texture,
+                src,
+                dst,
+                f64::from(angle_degrees),
+                None,
+                flip_horizontal,
+                flip_vertical,
+            )
+            .map_err(|err| GiochiError::Render(format!("draw_texture_ex failed: {err}")))
     }
 
     /// Draws `sprite`, converting its world-space rectangle through the camera.
@@ -292,9 +394,18 @@ fn build_canvas(window: SdlWindow, vsync: bool) -> Result<WindowCanvas, GiochiEr
         builder = builder.present_vsync();
     }
 
-    builder
+    let mut canvas = builder
         .build()
-        .map_err(|err| GiochiError::Render(format!("failed to create the 2D renderer: {err}")))
+        .map_err(|err| GiochiError::Render(format!("failed to create the 2D renderer: {err}")))?;
+
+    // O padrão do SDL é `BlendMode::None`, que **ignora o alfa**: um retângulo
+    // `rgba(..., 30)` sai sólido. Texturas já nascem em `Blend` neste crate; o
+    // alvo não nasce, e o resultado é uma UI com contornos e brilhos opacos.
+    //
+    // Medido ao portar o launcher: sem esta linha, 316 cores em vez de 321 e as
+    // linhas de 12 % de opacidade viravam bordas duras.
+    canvas.set_blend_mode(sdl2::render::BlendMode::Blend);
+    Ok(canvas)
 }
 
 /// Converts an engine color into SDL's color type.

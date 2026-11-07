@@ -24,7 +24,11 @@ repository = "https://github.com/xtrempkch-droid/GIOCHI-SYSTEM"
 # `unsafe_textures` drops the lifetime from `sdl2::render::Texture`, which is what
 # lets textures live in an opaque `u64` handle registry instead of being borrowed
 # from the canvas. See ADR-017 in docs/DECISIONS.md.
-sdl2 = { version = "0.38", features = ["bundled", "image", "mixer", "ttf", "unsafe_textures"] }
+# `bundled` deixou de ser obrigatório aqui: no aparelho o SDL2 vem da imagem
+# (Buildroot, com KMSDRM) e compilar do código-fonte exigiria cmake e uma segunda
+# cópia no rootfs. Cada crate escolhe com a feature `sdl2-system`. O padrão
+# continua sendo `bundled`, então quem não pede nada não muda de comportamento.
+sdl2 = { version = "0.38", default-features = false, features = ["image", "mixer", "ttf", "unsafe_textures"] }
 glam = "0.29"
 anyhow = "1.0"
 thiserror = "2.0"

@@ -12,3 +12,12 @@ repository.workspace = true
 sdl2 = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
+
+[features]
+# Compila o SDL2 do código-fonte — o padrão, e o que o CI usa em x86_64.
+default = ["sdl2-bundled"]
+sdl2-bundled = ["sdl2/bundled"]
+# Usa o SDL2 do sistema via pkg-config. É o caminho para embarcado, cuja imagem
+# já traz o SDL2 com KMSDRM — e é o que permite cross-compilar para aarch64 sem
+# compilar uma segunda cópia da biblioteca.
+sdl2-system = ["sdl2/use-pkgconfig"]

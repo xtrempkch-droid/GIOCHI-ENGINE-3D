@@ -53,6 +53,37 @@ Verificações manuais da fase:
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
 
+## Release `v0.2.0` — verificada e em draft
+Data: 2026-11-07
+
+A tag `v0.2.0` foi criada, o workflow `Release` correu verde e a release está
+publicada **como draft**, à espera de revisão humana — que é o que o próprio
+workflow faz de propósito.
+
+Publicar não foi imediato: a verificação do arquivo apanhou **dois bugs reais** no
+workflow, que nunca tinham executado porque o passo de verificação foi escrito depois
+de a `v0.1.1` já estar publicada.
+
+1. **O job `release` não fazia checkout.** Ficava sem `scripts/verify-release-artifact.sh` e
+   falhava com "No such file or directory".
+2. **`cargo build --workspace --examples` filtra os targets em vez de os acrescentar.**
+   Compilava os exemplos e as dependências deles, e **saltava** o `giochi-demo` e o
+   cdylib `libgiochi`. Os dois ficaram artefactos de 0.1.1 enquanto o `giochi.h` dizia
+   0.2.0. Foi a verificação do arquivo — que compara o header do arquivo com a biblioteca
+   do arquivo — que o apanhou, com `giochi_abi_version() == GIOCHI_ABI_VERSION` a dar
+   1 contra 2.
+3. **O job de publicação não tinha SDL2.** O `libgiochi.so` tem `NEEDED` para SDL2,
+   SDL2_image e SDL2_mixer, portanto compilar e correr o consumidor C sem elas dá uma
+   parede de "undefined reference to SDL_*".
+
+Depois das três correcções, a verificação local do arquivo passa de ponta a ponta:
+header 0.2.0, **73 símbolos `giochi_*` exportados**, `c_smoke (OK (abi 2, engine
+0.2.0))`, e o demo e o jogo Lua continuam a funcionar com os PNG apagados.
+
+Os três exemplos 3D passam a viajar em `bin/` nos dois arquivos, e o job ARM64 verifica
+que são realmente AArch64 — 3D como biblioteca partilhada que ninguém consegue correr é
+meia entrega.
+
 ## Entregue na fase 14 — C ABI 3D, parte II (`GIOCHI_ABI_VERSION 2`)
 Data: 2026-11-07
 
