@@ -247,6 +247,7 @@ REMOTE
 trap restore_console EXIT INT TERM
 
 c_smoke="$work/c_smoke"
+c_smoke_3d="$work/c_smoke_3d"
 if [[ "$skip_c_smoke" == "0" ]]; then
     command -v aarch64-linux-gnu-gcc >/dev/null 2>&1 ||
         die "aarch64-linux-gnu-gcc not found; pass --skip-c-smoke to run without the C consumer"
@@ -273,6 +274,17 @@ if [[ "$skip_c_smoke" == "0" ]]; then
         -o "$c_smoke"
     file "$c_smoke" | grep -q 'ARM aarch64' ||
         die "$c_smoke is not an AArch64 executable"
+
+    # Part II (3D, ABI version 2). Same library, same header: this is the proof that a C
+    # consumer of the 3D API works on the console and not just on the build machine.
+    aarch64-linux-gnu-gcc -std=c11 -Wall -Wextra -Werror \
+        -I giochi-engine-capi/include \
+        giochi-engine-capi/tests/c_smoke_3d.c \
+        -L "$target_dir" -lgiochi \
+        "${link_flags[@]}" \
+        -o "$c_smoke_3d"
+    file "$c_smoke_3d" | grep -q 'ARM aarch64' ||
+        die "$c_smoke_3d is not an AArch64 executable"
 fi
 
 echo
@@ -293,6 +305,7 @@ scp -q -o BatchMode=yes \
     "$target_dir/libgiochi.so" "$host:$dest/lib/libgiochi.so"
 if [[ "$skip_c_smoke" == "0" ]]; then
     scp -q -o BatchMode=yes "$c_smoke" "$host:$dest/lib/c_smoke"
+    scp -q -o BatchMode=yes "$c_smoke_3d" "$host:$dest/lib/c_smoke_3d"
 fi
 
 # The 3D examples are separate binaries, not subcommands of giochi-demo: they
@@ -443,6 +456,18 @@ if [[ "$skip_c_smoke" == "0" ]]; then
     if remote "$dest" <<'REMOTE'
 cd "$1" || exit 1
 LD_LIBRARY_PATH="$1/lib:${LD_LIBRARY_PATH:-}" ./lib/c_smoke 2>&1
+REMOTE
+    then :; else failures=$((failures + 1)); fi
+fi
+
+# The C consumer of part II. Runs after the examples so the DRM master is already free;
+# it creates its own 3D engine, draws three frames of a lit cube and tears down, which is
+# the whole ABI v2 surface exercised from a language that is not Rust.
+if [[ "$skip_c_smoke" == "0" ]]; then
+    report "c_smoke_3d (ABI v2, C consumer)"
+    if remote "$dest" <<'REMOTE'
+cd "$1" || exit 1
+LD_LIBRARY_PATH="$1/lib:${LD_LIBRARY_PATH:-}" ./lib/c_smoke_3d 2>&1
 REMOTE
     then :; else failures=$((failures + 1)); fi
 fi

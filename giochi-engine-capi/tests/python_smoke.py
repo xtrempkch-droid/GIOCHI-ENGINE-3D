@@ -227,7 +227,11 @@ def main() -> int:
             message = lib.giochi_get_last_error().decode(errors="replace")
             failures.append(f"{what} ({message})")
 
-    check(lib.giochi_abi_version() == 1, "abi version")
+    # Part I was written against 1; this script ships with the library, so it names the
+    # current number. A consumer that predates part II should test `>= 1` instead, which
+    # is the compatibility rule in giochi.h.
+    check(lib.giochi_abi_version() == 2, "abi version")
+    check(lib.giochi_abi_version() >= 1, "abi version is at least part I")
     check(lib.giochi_engine_version() > 0, "engine version")
     check(lib.giochi_get_last_error() == b"", "last error starts empty")
 

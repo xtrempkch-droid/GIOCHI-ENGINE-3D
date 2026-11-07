@@ -1,7 +1,7 @@
 # GIOCHI-ENGINE — C ABI Contract
 
 **Contract version: `GIOCHI_ABI_VERSION 1` for part I (2D), `2` for part II (3D).**
-**Engine version: `0.1.1`**
+**Engine version: `0.2.0`**
 **Status: authoritative.** This document is the law of the project. If a Rust type
 cannot be expressed in the C form below, the *type* is redesigned — the contract
 is never relaxed.
@@ -614,20 +614,23 @@ int32_t     giochi_scene_destroy(GiochiScene scene);                     /* phas
 | Every error path sets the thread-local message | `state::fail` / `invalid_argument` / `unavailable`, asserted throughout `tests/rust_ffi.rs` |
 | No function unwinds across the boundary | every export is wrapped in `state::guard` (`catch_unwind`) |
 | `rust_ffi`, `c_smoke` and `python_smoke` exercise version, lifecycle, texture, render and scene paths | `cargo test -p giochi-engine-capi` and `scripts/ffi-smoke.sh` |
-| `GIOCHI_ABI_VERSION` is `1` and matches `giochi_abi_version()` | `tests::abi_version_matches_contract` |
+| `GIOCHI_ABI_VERSION` matches `giochi_abi_version()` and is `>= giochi_engine::ABI_VERSION` | `tests::abi_version_matches_contract`, plus a `const` assertion in `abi_types.rs` |
+| A part I consumer keeps working after part II ships — it tests `>= 1`, never `== 1` | `c_smoke.c`, which asserts exactly that |
 | The C structs have the documented size and alignment | `tests/rust_ffi.rs::abi_type_layouts_match_the_contract` and `giochi-engine/tests/abi_layout.rs` |
 
 ---
 
 # Part II — 3D (ABI version 2, phases 9–14)
 
-**Status: specified, not yet exported.** This part is written *before* the code, which
-is the rule that made part I work: a type that cannot be expressed here gets redesigned
-now, not after six phases of callers depend on it. The functions below land in phase 14;
-the types are fixed here so the Rust structs can be written against them.
+**Status: exported, `GIOCHI_ABI_VERSION 2`.** This part was written *before* the code,
+which is the rule that made part I work: a type that cannot be expressed here gets
+redesigned now, not after six phases of callers depend on it. It was revised once during
+phase 14, when the implementation showed that `giochi_renderer3d_draw_mesh` could not work
+without a colour (§10.7) — part II had not shipped, so that was the moment to fix it.
 
-`GIOCHI_ABI_VERSION` becomes **2** when phase 14 ships. Version 1 consumers keep
-working: part I is unchanged, and every 3D symbol is additive.
+Version 1 consumers keep working: part I is unchanged, and every 3D symbol is additive.
+The version rule for a consumer is "at least the version I was built for", which is what
+`c_smoke.c` asserts.
 
 ## 8. How 3D differs from 2D at the boundary
 
@@ -768,16 +771,20 @@ void            giochi_engine3d_destroy(GiochiEngine3D* engine);
 int32_t         giochi_engine3d_begin_frame(GiochiEngine3D* engine);
 int32_t         giochi_engine3d_end_frame(GiochiEngine3D* engine);
 
-/* 10.2 Camera — by value in, no allocation */
-GiochiCamera3D  giochi_camera3d_new(void);
-void            giochi_camera3d_look_at(GiochiCamera3D* camera,
-                                        GiochiVec3 position, GiochiVec3 target);
+/* 10.2 Camera and transforms — by value, no allocation */
+GiochiCamera3D    giochi_camera3d_new(void);
+void              giochi_camera3d_look_at(GiochiCamera3D* camera,
+                                          GiochiVec3 position, GiochiVec3 target);
+GiochiTransform3D giochi_transform3d_identity(void);
+GiochiTransform3D giochi_transform3d_from_translation(GiochiVec3 translation);
 
 /* 10.3 Meshes and shaders */
 int32_t giochi_mesh_load_obj(const char* path, GiochiMeshHandle* out);
+int32_t giochi_mesh_create_cube(float size, GiochiMeshHandle* out);
 int32_t giochi_mesh_destroy(GiochiMeshHandle mesh);
 int32_t giochi_shader_load(const char* vert_path, const char* frag_path,
                            GiochiShaderHandle* out);
+int32_t giochi_shader_builtin(int32_t which, GiochiShaderHandle* out);
 int32_t giochi_shader_destroy(GiochiShaderHandle shader);
 
 /* 10.4 Drawing */
@@ -786,13 +793,65 @@ int32_t giochi_renderer3d_draw_mesh(GiochiEngine3D* engine,
                                     GiochiMeshHandle mesh,
                                     GiochiShaderHandle shader,
                                     const GiochiTransform3D* model,
-                                    const GiochiCamera3D* camera);
+                                    const GiochiCamera3D* camera,
+                                    GiochiColor3D color);
 ```
 
 Every one returns `int32_t` and reports through `giochi_get_last_error()`, unchanged from
 part I. `giochi_engine3d_create` is the single exception: it returns `NULL` on failure,
 because a caller cannot use an error code without an engine to read it from — the same
 pattern SDL uses for `SDL_CreateWindow`.
+
+### 10.5 Where the engine argument is implicit
+
+`giochi_mesh_*` and `giochi_shader_*` take no engine. Meshes and shaders are GL objects
+that belong to the renderer that made them, so they have to act on *some* engine; the
+rule is that they act on the **most recently created engine on this thread**. Creating a
+second engine on the same thread is refused (`NULL`, `GIOCHI_ERROR_INVALID_ARGUMENT`)
+rather than silently retargeting them, so "most recently created" is always "the only
+one". This mirrors part I, where `giochi_texture_*` also takes no handle (ADR-012).
+
+### 10.6 Built-in shaders
+
+```c
+#define GIOCHI_SHADER_FLAT     0   /* one Lambert term; the phase 11 default */
+#define GIOCHI_SHADER_TEXTURED 1   /* texture2D plus the same term */
+#define GIOCHI_SHADER_PHONG    2   /* directional Blinn-Phong, phase 13 */
+```
+
+`giochi_shader_builtin` compiles one of the three the crate ships (`include_str!`ed from
+`shaders/*.vert`/`.frag`), so a C caller draws something without writing GLSL. §11 still
+holds: there is no function that takes shader **source** as a string, and
+`giochi_shader_load` is the only way to supply your own.
+
+`GIOCHI_SHADER_PHONG` reads the engine's light, which part II does not expose yet — the
+default (a white sun, ambient 0.3, specular 0.25 at 24) is what a caller gets. §9.4a
+already specifies the C form for `giochi_renderer3d_set_light`; it is the one function
+left for a later revision.
+
+### 10.7 Why `draw_mesh` takes a colour
+
+An earlier draft of this section did not have the `GiochiColor3D` parameter, on the
+assumption that a mesh would carry its own. It cannot: a mesh in part II is geometry with
+no material, and `flat`/`phong` shade it with `u_color`. Without the parameter every draw
+would take the background colour and be invisible. Part II has not shipped, so the
+signature is fixed here rather than worked around with hidden state — the alternative,
+`giochi_renderer3d_set_color`, would make the colour an implicit property of the call
+order.
+
+### 10.8 `GiochiWindowConfig`
+
+```c
+typedef struct GiochiWindowConfig {
+    uint32_t width;          /* physical pixels */
+    uint32_t height;
+    uint32_t fullscreen;     /* 0 = windowed; KMSDRM is fullscreen regardless */
+    uint32_t _reserved[8];
+} GiochiWindowConfig;        /* size 44, align 4 */
+```
+
+The same type the Rust side calls `WindowConfig`, so there is nothing to keep in step.
+`giochi_engine3d_create(NULL)` uses 1280x720.
 
 ## 11. What part II deliberately does not have
 

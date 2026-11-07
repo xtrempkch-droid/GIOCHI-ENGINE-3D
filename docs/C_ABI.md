@@ -257,15 +257,123 @@ into the engine's lifecycle functions.
 
 ---
 
-## 9. Verification
+## 9. Part II: 3D (ABI version 2)
 
-```bash
-cargo test -p giochi-engine-capi        # unit tests + tests/rust_ffi.rs
-scripts/gen-header.sh --check           # the committed header is current
-scripts/ffi-smoke.sh                    # C and Python consumers, end to end
+Everything above describes part I and is unchanged. Part II adds a 3D renderer on the
+same library and the same header; `giochi_abi_version()` returns `2`, and a part I
+program written against `1` keeps working unchanged.
+
+The difference that matters in practice: **the 3D engine is a pointer the caller owns**,
+not a process-wide singleton. It holds a GL context, so its layout is nobody's business
+(ADR-039) and every function takes or returns it explicitly.
+
+### 9.1 The smallest complete program
+
+```c
+#include <stdio.h>
+#include "giochi.h"
+
+int main(void)
+{
+    GiochiEngine3D *engine = giochi_engine3d_create(NULL);   /* 1280x720 */
+    if (!engine) {
+        fprintf(stderr, "%s\n", giochi_get_last_error());
+        return 1;
+    }
+
+    GiochiMeshHandle cube = 0;
+    GiochiShaderHandle shader = 0;
+    giochi_mesh_create_cube(1.0f, &cube);
+    giochi_shader_builtin(GIOCHI_SHADER_PHONG, &shader);
+
+    GiochiCamera3D camera = giochi_camera3d_new();
+    GiochiVec3 eye = {0.0f, 1.6f, 2.4f, {0}};
+    GiochiVec3 at  = {0.0f, 0.0f, 0.0f, {0}};
+    giochi_camera3d_look_at(&camera, eye, at);
+
+    GiochiTransform3D model = giochi_transform3d_identity();
+    GiochiColor3D sky  = {0.07f, 0.09f, 0.14f, 1.0f, {0}};
+    GiochiColor3D tint = {0.85f, 0.62f, 0.35f, 1.0f, {0}};
+
+    for (int frame = 0; frame < 300; frame++) {
+        giochi_engine3d_begin_frame(engine);
+        giochi_renderer3d_clear(engine, sky);
+        giochi_renderer3d_draw_mesh(engine, cube, shader, &model, &camera, tint);
+        giochi_engine3d_end_frame(engine);
+    }
+
+    giochi_mesh_destroy(cube);
+    giochi_shader_destroy(shader);
+    giochi_engine3d_destroy(engine);
+    return 0;
+}
 ```
 
-`scripts/ffi-smoke.sh` builds `libgiochi.so`, compiles `c_smoke.c` with
-`-Wall -Wextra -Werror`, runs it, then runs the Python consumer — both with
-`SDL_VIDEODRIVER=dummy`. CI runs the same three commands, so a change that breaks a
-real consumer fails the build.
+`giochi_engine3d_create(NULL)` works because the defaults are sensible; pass a
+`GiochiWindowConfig` to choose a size. On KMSDRM the panel's native mode wins regardless
+(ADR-035), which is why nothing in this API lets you assume the size you asked for.
+
+### 9.2 The four functions that take no engine
+
+`giochi_mesh_*` and `giochi_shader_*` have no engine parameter. A mesh is a GL object
+belonging to the renderer that created it, so they act on the **most recently created
+engine on the calling thread**. Creating a second engine on that thread is refused
+(`NULL`) rather than allowed to retarget them, so there is never an ambiguity.
+
+This mirrors part I, where `giochi_texture_create` also takes no handle. If you need
+several independent scenes, render them into one engine.
+
+### 9.3 Two traps worth naming
+
+**A zeroed transform draws nothing.** `GiochiTransform3D t = {0};` has scale `(0,0,0)`.
+Use `giochi_transform3d_identity()` or `giochi_transform3d_from_translation()`.
+
+**An unset camera has `aspect == 0.0`, and that is correct.** It means "ask the
+drawable", so the projection follows the panel. Setting it by hand is only right if you
+are rendering to something that is not the window.
+
+### 9.4 Shaders are files or built-ins, never strings
+
+There is no function that takes GLSL source (R10, and §11 of the contract). You either
+use one of the three the library ships:
+
+| Constant | Shader | Use |
+|---|---|---|
+| `GIOCHI_SHADER_FLAT` | one Lambert term, no texture | coloured geometry |
+| `GIOCHI_SHADER_TEXTURED` | `texture2D` plus the same term | textured geometry |
+| `GIOCHI_SHADER_PHONG` | directional Blinn-Phong | a scene with light and shade |
+
+or point `giochi_shader_load` at a `.vert`/`.frag` pair on disk. The compiler's own log
+comes back through `giochi_get_last_error()`, which is the only thing that makes a shader
+bug findable.
+
+`GIOCHI_SHADER_PHONG` reads the engine's built-in sun (white, ambient 0.3, specular 0.25
+at exponent 24). Part II does not expose `giochi_renderer3d_set_light` yet; its C form is
+already specified in `docs/C_ABI_CONTRACT.md` §9.4a.
+
+### 9.5 Freeing things
+
+| Created with | Freed with |
+|---|---|
+| `giochi_engine3d_create` | `giochi_engine3d_destroy` |
+| `giochi_mesh_create_cube` / `giochi_mesh_load_obj` | `giochi_mesh_destroy` |
+| `giochi_shader_builtin` / `giochi_shader_load` | `giochi_shader_destroy` |
+
+Destroying a handle twice returns `GIOCHI_ERROR_INVALID_HANDLE`; it is not ignored, and
+it is not a crash either. `giochi_engine3d_destroy` releases the GL context and the
+window; handles you made become meaningless at that point, so free them first if you want
+the engine to report leaks — it logs a warning when objects outlive the context.
+
+## 10. Verification
+
+```bash
+cargo test -p giochi-engine-capi            # unit tests + rust_ffi.rs + rust_ffi_3d.rs
+scripts/gen-header.sh --check               # the committed header is current
+scripts/ffi-smoke.sh                        # C and Python consumers, 2D and 3D
+```
+
+`scripts/ffi-smoke.sh` builds `libgiochi.so`, compiles `c_smoke.c` and `c_smoke_3d.c`
+with `-Wall -Wextra -Werror`, runs both, then runs the two Python consumers. Part I runs
+under `SDL_VIDEODRIVER=dummy`; the 3D ones force `offscreen`, because `dummy` has no
+OpenGL at all, and treat exit `77` as "this machine has no Mesa" rather than a failure.
+CI runs the same commands, so a change that breaks a real consumer fails the build.

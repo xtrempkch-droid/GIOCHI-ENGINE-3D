@@ -137,11 +137,14 @@ fn c_abi_end_to_end() {
     std::env::set_var("SDL_VIDEODRIVER", "dummy");
 
     // ---- version and diagnostics ------------------------------------------------
-    assert_eq!(giochi_abi_version(), 1);
+    // Part I was written against ABI 1 and must keep working now that part II (3D) has
+    // shipped; the rule is "at least", never equality (docs/C_ABI_CONTRACT.md §7).
+    assert!(giochi_abi_version() >= 1);
+    assert_eq!(giochi_abi_version(), GIOCHI_ABI_VERSION);
     assert_eq!(
         giochi_engine_version() >> 8,
-        0x0001,
-        "the 0.1.x line packs to major 0, minor 1"
+        0x0002,
+        "the 0.2.x line packs to major 0, minor 2"
     );
     assert_eq!(message(), "");
 

@@ -198,8 +198,12 @@ static void noop_render(void *user_data)
 int main(void)
 {
     /* ---- version ---------------------------------------------------------- */
-    CHECK(giochi_abi_version() == 1);
-    CHECK(GIOCHI_ABI_VERSION == 1);
+    /* This program was written against part I and must keep working now that part II
+     * (3D) has shipped and the version moved to 2. The rule a consumer follows is "at
+     * least the version I was built for", never equality -- see giochi.h. Asserting
+     * equality here would make every part I program fail the day a part is added. */
+    CHECK(giochi_abi_version() >= 1);
+    CHECK(giochi_abi_version() == GIOCHI_ABI_VERSION);
     CHECK(giochi_engine_version() > 0);
     CHECK(giochi_get_last_error() != NULL);
     CHECK(giochi_get_last_error()[0] == '\0');

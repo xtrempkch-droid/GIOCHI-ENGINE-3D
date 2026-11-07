@@ -1,13 +1,12 @@
 # Estado — GIOCHI-ENGINE
 
-## Última entrega: fase 13 — iluminação direcional (Phong)
+## Última entrega: fase 14 — C ABI 3D (parte II, `GIOCHI_ABI_VERSION 2`)
 Data: 2026-11-07
 
-## Última fase concluída: 13 — Iluminação Phong
-Fase anterior: 12 — Câmera com controlo + mini_fps
+## Última fase concluída: 14 — C ABI 3D (v2)
+Fase anterior: 13 — Iluminação Phong
 
-**Fases 0–8 (2D) concluídas. Extensão v2.1 (3D) em andamento: fases 9 a 13 concluídas.
-Falta a fase 14, a C ABI 3D (v2).**
+**TODAS as fases concluídas: 0–8 (2D) e 9–14 (extensão 3D). Versão 0.2.0.**
 
 ## Status 2D (Fases 0–8)
 
@@ -21,7 +20,7 @@ extensão v2.1). Gates 2D revalidados a cada fase 3D.
 - [x] Fase 11 — Pipeline de mesh + shaders
 - [x] Fase 12 — Câmera com controlo + `mini_fps`
 - [x] Fase 13 — Iluminação Phong
-- [ ] Fase 14 — C ABI 3D (v2)
+- [x] Fase 14 — C ABI 3D (v2)
 
 ## Gates validados
 
@@ -30,12 +29,13 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 408 testes, 0 falhas
-      (209 das fases 0–8 + 199 da crate 3D)
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 424 testes, 0 falhas
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
 - [x] `cargo doc --workspace --no-deps --document-private-items` (0 warnings)
 - [x] `scripts/gen-header.sh --check` — `giochi.h` em sincronia com o crate
-- [x] `scripts/ffi-smoke.sh` — consumidores C e Python (fase 7, mantidos verdes)
+- [x] `scripts/ffi-smoke.sh` — **quatro** consumidores reais: `c_smoke.c`, `python_smoke.py`,
+      `c_smoke_3d.c` e `python_smoke_3d.py`, todos verdes contra o `libgiochi.so` e o
+      `giochi.h` gerados (`abi 2, engine 0.2.0`)
 - [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --test context_smoke`
       — 3 testes contra GLES real (Mesa/EGL), incluindo leitura de pixel
 - [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --test lighting`
@@ -52,6 +52,61 @@ Verificações manuais da fase:
   recolha pelo GC, `giochi.quit()`, propagação de erro, `app:step`, `arg`).
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
+
+## Entregue na fase 14 — C ABI 3D, parte II (`GIOCHI_ABI_VERSION 2`)
+Data: 2026-11-07
+
+Pedido: expor o 3D via C ABI, regenerar `giochi.h` com a versão 2, e prová-lo com
+consumidores que não são Rust.
+
+### O que existe
+
+- `giochi-engine-capi/src/lib3d.rs` — 16 funções e o tipo opaco `GiochiEngine3D`.
+- `giochi.h` (1331 linhas) com `#define GIOCHI_ABI_VERSION 2`, a declaração opaca
+  `typedef struct GiochiEngine3D GiochiEngine3D;`, e os tipos de valor 3D
+  (`GiochiVec3` 28 B, `GiochiQuat` 32 B, `GiochiColor3D` 32 B, `GiochiTransform3D`
+  104 B, `GiochiCamera3D` 116 B, `GiochiWindowConfig` 44 B).
+- `GIOCHI_SHADER_FLAT` / `_TEXTURED` / `_PHONG`.
+- Quatro consumidores reais, todos verdes: `c_smoke.c` e `python_smoke.py` (parte I,
+  provando que não regrediram), `c_smoke_3d.c` e `python_smoke_3d.py` (parte II).
+- `tests/rust_ffi_3d.rs` — 8 testes, incluindo o layout dos tipos e o ciclo completo.
+- `docs/C_ABI.md` §9 (tutorial 3D completo), ADR-041, contrato §10 revisto.
+
+### Três decisões tomadas ao implementar
+
+1. **O engine implícito.** `giochi_mesh_*` e `giochi_shader_*` não levam engine no
+   contrato, mas um mesh é um objecto GL e destruí-lo exige o contexto que o criou. A
+   regra passou a ser "o engine criado mais recentemente nesta thread", e **criar um
+   segundo engine na mesma thread é recusado**. Sem essa recusa, "mais recente" seria
+   uma regra que o chamador podia quebrar por acidente: criar A, criar B, destruir um
+   mesh de A, e o destroy olhava para o registry de B e dizia `INVALID_HANDLE` para um
+   handle perfeitamente válido. Com um engine por thread o mapeamento é bijecção.
+   (ADR-041)
+2. **`draw_mesh` ganhou um `GiochiColor3D`.** O contrato não o tinha. Um mesh na parte II
+   é geometria sem material, portanto sem cor todos os draws usavam a cor de fundo e
+   ficavam invisíveis. A parte II ainda não tinha saído — é exactamente a altura em que
+   um contrato se corrige em vez de se contornar com estado escondido. (contrato §10.7)
+3. **A versão passou a ser `>=`, não `==`.** O `c_smoke.c` da parte I afirmava
+   `giochi_abi_version() == 1` e ficou vermelho assim que a versão subiu para 2 — o que é
+   o comportamento correcto de um teste a apanhar uma regra errada. Um consumidor da
+   parte I tem de testar "pelo menos a versão com que fui compilado"; é isso que está
+   agora escrito, no teste e no `giochi.h`.
+
+### Adições ao contrato além da tabela §10
+
+- `giochi_transform3d_identity` e `giochi_transform3d_from_translation`: um
+  `GiochiTransform3D` zerado tem **escala zero** e não desenha nada — uma armadilha que em
+  Rust não existe (`Default` é o identidade) mas que em C se escreve sem dar por isso.
+- `giochi_mesh_create_cube` e `giochi_shader_builtin`: sem elas, o menor programa C 3D
+  precisava de um OBJ e de três ficheiros GLSL em disco. O §11 já dizia "ficheiros ou
+  built-ins", portanto a segunda metade estava por cumprir.
+
+### Nota de verificação
+
+Validado em x86_64 (Mesa/EGL, `offscreen`) com os quatro consumidores. **Não validado no
+PX30** porque o aparelho estava inacessível durante a fase; o
+`scripts/hardware-check.sh` passou a compilar, instalar e correr `c_smoke_3d` no console,
+portanto a validação acontece no próximo deploy.
 
 ## Validação de `ball_balance` no PX30 (Mali-G31) — dois bugs encontrados
 Data: 2026-11-07
@@ -682,6 +737,11 @@ As oito fases do prompt mestre estão completas. Trabalho futuro, por ordem de v
 
 ## Bloqueios / pendências
 
+- **Nenhuma fase por fazer. O plano do prompt mestre está completo (0 → 14).**
+- **C ABI 3D validada em x86_64 mas ainda não no PX30.** Os quatro consumidores C e Python
+  correm contra o `libgiochi.so` real em Mesa/EGL; o `c_smoke_3d` e os três exemplos 3D
+  são compilados, instalados e corridos pelo `scripts/hardware-check.sh`, mas o aparelho
+  estava inacessível (bateria) durante a fase 14.
 - Nenhum bloqueio de gate.
 - **`ball_balance` está no aparelho e validado no Mali-G31.** Os três exemplos 3D
   estão em `/opt/giochi/bin/` e correram no hardware: `cube_demo`, `mini_fps` (com

@@ -68,6 +68,7 @@ mod assets;
 mod audio;
 mod engine;
 mod input;
+mod lib3d;
 mod render;
 mod scene;
 mod state;
@@ -78,7 +79,7 @@ pub use abi_types::{
     GIOCHI_ERROR_AUDIO, GIOCHI_ERROR_INTERNAL, GIOCHI_ERROR_INVALID_ARGUMENT,
     GIOCHI_ERROR_INVALID_HANDLE, GIOCHI_ERROR_NOT_INITIALIZED, GIOCHI_ERROR_OK,
     GIOCHI_ERROR_PLATFORM, GIOCHI_ERROR_RENDER, GIOCHI_ERROR_SCENE, GIOCHI_ERROR_UNSUPPORTED,
-    GIOCHI_MAX_ASSET_SIZE,
+    GIOCHI_MAX_ASSET_SIZE, GIOCHI_SHADER_FLAT, GIOCHI_SHADER_PHONG, GIOCHI_SHADER_TEXTURED,
 };
 pub use assets::{giochi_asset_read, giochi_asset_size};
 pub use audio::{
@@ -98,6 +99,13 @@ pub use input::{
     giochi_input_key_down, giochi_input_key_pressed, giochi_input_key_released,
     giochi_input_mouse_down, giochi_input_mouse_wheel, giochi_input_mouse_x, giochi_input_mouse_y,
 };
+pub use lib3d::{
+    giochi_camera3d_look_at, giochi_camera3d_new, giochi_engine3d_begin_frame,
+    giochi_engine3d_create, giochi_engine3d_destroy, giochi_engine3d_end_frame,
+    giochi_mesh_create_cube, giochi_mesh_destroy, giochi_mesh_load_obj, giochi_renderer3d_clear,
+    giochi_renderer3d_draw_mesh, giochi_shader_builtin, giochi_shader_destroy, giochi_shader_load,
+    giochi_transform3d_from_translation, giochi_transform3d_identity, GiochiEngine3D,
+};
 pub use render::{
     giochi_camera_get, giochi_camera_set, giochi_render_clear, giochi_render_draw_rect,
     giochi_render_draw_texture, giochi_render_present, giochi_render_size, giochi_sprite_draw,
@@ -106,6 +114,18 @@ pub use render::{
 };
 pub use scene::{giochi_engine_scene_depth, giochi_scene_create, giochi_scene_destroy};
 pub use version::{giochi_abi_version, giochi_engine_version, giochi_get_last_error};
+
+/// Part II value types, under the names `giochi.h` uses.
+///
+/// The header gets `GiochiVec3` and friends from `cbindgen`'s `export.rename`; these
+/// aliases give a Rust consumer of this crate the same vocabulary, so a test can read
+/// like the C it stands in for. They are the very same `#[repr(C)]` types, which is why
+/// asserting their size here asserts the header's layout.
+pub use giochi_engine::WindowConfig as GiochiWindowConfig;
+pub use giochi_engine_3d::math3d::{
+    Camera3D as GiochiCamera3D, Color3D as GiochiColor3D, Quat as GiochiQuat,
+    Transform3D as GiochiTransform3D, Vec3 as GiochiVec3,
+};
 
 /// Numeric error codes, re-exported so Rust callers do not need the engine crate.
 pub use giochi_engine::error::codes;
@@ -116,8 +136,8 @@ mod tests {
 
     #[test]
     fn abi_version_matches_contract() {
-        assert_eq!(giochi_abi_version(), 1);
-        assert_eq!(GIOCHI_ABI_VERSION, 1);
+        assert_eq!(giochi_abi_version(), 2);
+        assert_eq!(GIOCHI_ABI_VERSION, 2);
     }
 
     #[test]

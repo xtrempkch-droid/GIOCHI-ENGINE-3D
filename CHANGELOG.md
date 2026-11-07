@@ -6,6 +6,74 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Nothing yet.
+
+## [0.2.0] - 2026-11-07
+
+3D arrives, and with it part II of the C ABI. Nothing in part I changes: a 2D program
+built against 0.1.x keeps working, and `giochi_abi_version()` now says 2.
+
+### Added — part II of the C ABI (`GIOCHI_ABI_VERSION 2`)
+
+The 3D engine is an **opaque pointer the caller owns**, unlike the 2D singleton, because it
+holds a GL context whose layout has no C representation and changes between releases
+(ADR-039).
+
+- `giochi_engine3d_create` / `_destroy` / `_begin_frame` / `_end_frame`.
+- `giochi_camera3d_new` / `_look_at`, `giochi_transform3d_identity`,
+  `giochi_transform3d_from_translation`. The last two exist because a zeroed
+  `GiochiTransform3D` has **zero scale** and draws nothing — the trap a C caller walks into
+  and a Rust one cannot.
+- `giochi_mesh_create_cube`, `giochi_mesh_load_obj`, `giochi_mesh_destroy`,
+  `giochi_shader_builtin`, `giochi_shader_load`, `giochi_shader_destroy`.
+  The four that take no engine act on the most recently created engine on the calling
+  thread; a second engine on the same thread is refused rather than allowed to retarget
+  them (ADR-041).
+- `giochi_renderer3d_clear`, `giochi_renderer3d_draw_mesh`.
+- `GiochiWindowConfig`, `GiochiVec3`, `GiochiQuat`, `GiochiColor3D`,
+  `GiochiTransform3D`, `GiochiCamera3D` in `giochi.h`, with their documented sizes.
+- `GIOCHI_SHADER_FLAT`, `GIOCHI_SHADER_TEXTURED`, `GIOCHI_SHADER_PHONG`.
+
+`giochi_renderer3d_draw_mesh` takes a `GiochiColor3D` the contract draft did not have.
+A mesh in part II is geometry with no material, so without it every draw would take the
+background colour and be invisible. Part II had not shipped, which is exactly when a
+contract is allowed to be fixed rather than worked around (contract §10.7).
+
+### Added — 3D rendering (`giochi-engine-3d`)
+
+- GLES 2.0 over EGL, 3.0 opt-in, with the requested-version fix for drivers that ignore
+  `SDL_GL_MAJOR_VERSION` (ADR-038).
+- `Vec3`, `Quat`, `Mat4`, `Transform3D`, `Camera3D`, `CameraController`.
+- Mesh pipeline: cube, plane, UV sphere and OBJ loading, with and without VAOs.
+- Directional Blinn-Phong lighting, `DirectionalLight`, `Mat4::normal_matrix`.
+- `cube_demo`, `mini_fps`, `ball_balance` — the last one built to measure input latency on
+  a real console.
+
+### Changed
+
+- `GIOCHI_ABI_VERSION` is `2`. The rule for a consumer is "at least the version I was
+  built for", never equality; `c_smoke.c` asserts it that way so a part I program does not
+  break the day a part is added.
+- `README.md` and `docs/C_ABI.md` describe both parts.
+- `scripts/hardware-check.sh` deploys the 3D examples and the 3D C consumer, and refuses
+  to run at all on a battery that cannot carry a session — a brown-out on the PX30 wipes
+  the rootfs, which is where the deploy lives.
+
+### Fixed
+
+- `Mat4::transform_point` does not divide by `w` (it mirrors `glam`'s `transform_point3`,
+  which asserts an affine bottom row), so on a projection matrix it returned clip
+  coordinates that look like ordinary numbers. `Mat4::project_point` divides and returns
+  `None` behind the eye; `transform_point` is now documented as affine-only.
+- The balance game measured frame work *after* the buffer swap, so every frame was
+  charged the vsync wait and the hitch indicator reported the panel refreshing instead of
+  the game stuttering. Real cost on the Mali-G31: 1.0 ms p50, 3.8 ms p99.
+- Its two latency indicators were outside the camera's field of view on the console's 4:3
+  panel, which is narrower than the 16:9 window they were placed against.
+- Phase 13's acceptance criterion was unobservable: `mini_fps` drew 2 m obstacles from a
+  1.7 m eye, so no top face was ever on screen. It now draws low crates and reports the
+  count.
+
 ### Added — Phase 13, directional lighting
 
 - `DirectionalLight`: one light per frame, held by the renderer. `#[repr(C)]`, primitive

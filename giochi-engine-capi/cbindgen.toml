@@ -24,7 +24,7 @@ documentation_length = "full"
 usize_is_size_t = true
 
 header = """/*
- * GIOCHI-ENGINE C ABI, version 1.
+ * GIOCHI-ENGINE C ABI, version 2.
  *
  * Link against libgiochi.so (or libgiochi.a) and call giochi_engine_init() before
  * anything else. Every fallible function returns 0 on success and a negative code
@@ -37,14 +37,29 @@ header = """/*
  *
  * The engine is single-threaded: call everything from the thread that called
  * giochi_engine_init(). giochi_get_last_error() is the only exception.
- */"""
+ *
+ * Version 2 adds part II (3D) in docs/C_ABI_CONTRACT.md sections 8-12. Nothing in part I
+ * changed, so a consumer written against version 1 keeps working; it should accept
+ * giochi_abi_version() >= 1 rather than == 1.
+ *
+ * The 3D engine is an opaque pointer the caller owns (ADR-039), unlike the 2D singleton.
+ * giochi_mesh_* and giochi_shader_* take no engine: they act on the most recently created
+ * engine on the calling thread, and creating a second one is refused.
+ */
+
+/* Part II: the 3D engine has no C representation, so callers only ever see a pointer. */
+typedef struct GiochiEngine3D GiochiEngine3D;"""
 
 [parse]
 parse_deps = true
-include = ["giochi-engine"]
+include = ["giochi-engine", "giochi-engine-3d"]
 
 [export]
 prefix = ""
+# `GiochiEngine3D` is declared by hand in the header above: it holds a `glow::Context`, a
+# `Window` and a `Platform`, so emitting a struct body would be a lie that changes shape
+# between releases (ADR-039).
+exclude = ["GiochiEngine3D"]
 
 [export.rename]
 "Vec2" = "GiochiVec2"
@@ -53,7 +68,16 @@ prefix = ""
 "Sprite" = "GiochiSprite"
 "Camera" = "GiochiCamera"
 "Time" = "GiochiTime"
+"WindowConfig" = "GiochiWindowConfig"
 "TextureHandle" = "GiochiTexture"
 "SoundHandle" = "GiochiSound"
 "MusicHandle" = "GiochiMusic"
 "SceneHandle" = "GiochiScene"
+# Part II (3D, `GIOCHI_ABI_VERSION 2`). `Vec3` is `GiochiVec3` and not `GiochiVec2`; the
+# 2D `Vec2` keeps its own name, so a header including both is unambiguous.
+"Vec3" = "GiochiVec3"
+"Quat" = "GiochiQuat"
+"Color3D" = "GiochiColor3D"
+"Transform3D" = "GiochiTransform3D"
+"Camera3D" = "GiochiCamera3D"
+"DirectionalLight" = "GiochiDirectionalLight"

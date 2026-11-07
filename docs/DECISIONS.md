@@ -1063,3 +1063,45 @@ and asserts the shading rather than the call sequence: a sphere is brighter abov
 centre than below it under a downward light, that relationship inverts when the light
 does, the specular term raises the peak, a red light zeroes the green and blue channels,
 and a cube saturates under a downward light while going black under an upward one.
+
+---
+
+## ADR-041 — Four part-II functions act on an implicit "current 3D engine"
+
+**Context.** The contract spells the mesh and shader calls without an engine parameter:
+
+```c
+int32_t giochi_mesh_load_obj(const char* path, GiochiMeshHandle* out);
+int32_t giochi_mesh_destroy(GiochiMeshHandle mesh);
+int32_t giochi_shader_load(const char* vert, const char* frag, GiochiShaderHandle* out);
+int32_t giochi_shader_destroy(GiochiShaderHandle shader);
+```
+
+But a mesh is a GL object: the vertex/index buffers were created by a particular
+`RenderContext3D`, and destroying one needs that context current. So these four functions
+have to know *which* engine they act on, and the signature deliberately does not say.
+
+The alternatives were both worse. Changing the signatures breaks the contract that part I
+proved is worth keeping stable, and it makes every call four words longer for a parameter
+that is almost always the same value. A process-wide registry of (handle → engine) would
+be a second source of truth that has to stay in step with the renderer's own registry, and
+would silently leak when an engine is destroyed with handles outstanding.
+
+**Decision.** They act on the **most recently created engine on the calling thread**, held
+in a thread-local pointer set by `giochi_engine3d_create` and cleared by
+`giochi_engine3d_destroy`. Creating a second engine on the same thread is **refused**
+(`NULL`, `GIOCHI_ERROR_INVALID_ARGUMENT`) rather than allowed to retarget them.
+
+**Why refusing is the important half.** Without it, "most recently created" would be a
+rule a caller could break by accident: create engine A, create engine B, destroy a mesh
+made by A, and the destroy would look in B's registry, find nothing, and report
+`INVALID_HANDLE` for a handle that is perfectly valid. With one engine per thread the
+mapping is a bijection and the implicit parameter is unambiguous. The cost is that a
+thread cannot drive two independent 3D scenes; that is the same cost part I already
+accepted (ADR-012), and the workaround is the same — one engine, two views.
+
+**Consequences.** A caller that wants several engines uses several threads, one each. That
+is a legitimate pattern and the thread-local makes it work without any locking. The five
+functions that *do* take an engine pointer (`begin_frame`, `end_frame`, `clear`,
+`draw_mesh`, `destroy`) still validate nothing about the pointer's provenance beyond
+non-NULL: an opaque handle in C is only ever as good as its owner's bookkeeping.

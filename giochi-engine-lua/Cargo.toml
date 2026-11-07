@@ -9,5 +9,5 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-giochi-engine = { path = "../giochi-engine", version = "0.1.1" }
+giochi-engine = { path = "../giochi-engine", version = "0.2.0" }
 mlua = { workspace = true }

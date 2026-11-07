@@ -104,8 +104,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build libgiochi and run the C and Python smoke tests
-        # Compiles c_smoke.c with -Wall -Wextra -Werror against the generated header,
-        # runs it, then runs python_smoke.py (ctypes, standard library only).
+        # Compiles c_smoke.c and c_smoke_3d.c with -Wall -Wextra -Werror against the
+        # generated header, runs both, then runs python_smoke.py and python_smoke_3d.py
+        # (ctypes, standard library only). The two 3D consumers need a real GL driver, so
+        # the script runs them under SDL_VIDEODRIVER=offscreen and treats exit 77 as
+        # "this runner has no Mesa" rather than a failure.
         run: ./scripts/ffi-smoke.sh
 
   cross-check:

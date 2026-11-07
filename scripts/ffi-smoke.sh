@@ -53,5 +53,41 @@ else
         python3 giochi-engine-capi/tests/python_smoke.py "$target_dir"
 fi
 
+# Part II (3D) needs a real GL driver. `dummy` has none at all -- SDL refuses the window
+# with "OpenGL support is either not configured in SDL" -- so this section forces
+# `offscreen`, which provides a full EGL/GLES stack with no display attached. Both tests
+# exit 77 when the driver has no GL, so a machine without Mesa reports "skipped" instead
+# of failing and blaming the ABI.
+echo "==> C 3D smoke test"
+cc -std=c11 -Wall -Wextra -Werror \
+    -I giochi-engine-capi/include \
+    giochi-engine-capi/tests/c_smoke_3d.c \
+    -L "$target_dir" -lgiochi \
+    -Wl,-rpath,"$target_dir" \
+    -o "$work/c_smoke_3d"
+if SDL_VIDEODRIVER=offscreen "$work/c_smoke_3d"; then :; else
+    status=$?
+    if [[ "$status" == 77 ]]; then
+        echo "    3D skipped: no OpenGL ES driver on this machine"
+    else
+        exit "$status"
+    fi
+fi
+
+echo "==> Python 3D smoke test"
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "    python3 not found; skipped"
+else
+    if SDL_VIDEODRIVER=offscreen \
+        python3 giochi-engine-capi/tests/python_smoke_3d.py "$target_dir"; then :; else
+        status=$?
+        if [[ "$status" == 77 ]]; then
+            echo "    3D skipped: no OpenGL ES driver on this machine"
+        else
+            exit "$status"
+        fi
+    fi
+fi
+
 echo
 echo "FFI smoke tests passed."

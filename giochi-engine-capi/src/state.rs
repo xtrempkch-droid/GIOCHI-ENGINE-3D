@@ -90,6 +90,12 @@ pub(crate) fn last_error_pointer() -> *const c_char {
     LAST_ERROR.with(|slot| slot.borrow().as_ptr())
 }
 
+/// The thread's last error message as a `String`, for tests that assert on its wording.
+#[cfg(test)]
+pub(crate) fn last_error_text() -> String {
+    LAST_ERROR.with(|slot| slot.borrow().to_string_lossy().into_owned())
+}
+
 /// Records `err` and returns its ABI code.
 pub(crate) fn fail(err: &GiochiError) -> i32 {
     set_last_error(&err.to_string());

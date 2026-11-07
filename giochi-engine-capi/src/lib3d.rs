@@ -1,0 +1,876 @@
+//! 3D at the C boundary — part II of the ABI, `GIOCHI_ABI_VERSION 2`.
+//!
+//! Specified in `docs/C_ABI_CONTRACT.md` §8–§12 and explained in `docs/C_ABI.md`.
+//!
+//! ```c
+//! GiochiEngine3D* engine = giochi_engine3d_create(NULL);
+//! GiochiMeshHandle cube;
+//! GiochiShaderHandle shader;
+//! giochi_mesh_create_cube(1.0f, &cube);
+//! giochi_shader_builtin(GIOCHI_SHADER_PHONG, &shader);
+//!
+//! GiochiCamera3D camera = giochi_camera3d_new();
+//! giochi_camera3d_look_at(&camera, (GiochiVec3){0.0f, 2.0f, 3.0f, {0}},
+//!                         (GiochiVec3){0.0f, 0.0f, 0.0f, {0}});
+//!
+//! giochi_engine3d_begin_frame(engine);
+//! giochi_renderer3d_clear(engine, (GiochiColor3D){0.07f, 0.09f, 0.14f, 1.0f, {0}});
+//! GiochiTransform3D model = giochi_transform3d_identity();
+//! giochi_renderer3d_draw_mesh(engine, cube, shader, &model, &camera,
+//!                             (GiochiColor3D){0.85f, 0.62f, 0.35f, 1.0f, {0}});
+//! giochi_engine3d_end_frame(engine);
+//!
+//! giochi_mesh_destroy(cube);
+//! giochi_shader_destroy(shader);
+//! giochi_engine3d_destroy(engine);
+//! ```
+//!
+//! # Why 3D is an opaque pointer and 2D is a singleton
+//!
+//! ADR-039. `RenderContext3D` owns a `glow::Context` and an SDL `GLContext`, neither of
+//! which has a C representation, and its size changes between releases. A caller that
+//! could see the layout would break on the next minor version. Part I's global
+//! functions cannot describe that, so part II hands the caller a pointer and keeps the
+//! layout to itself.
+//!
+//! # One engine per thread
+//!
+//! `giochi_mesh_*` and `giochi_shader_*` take no engine (§10.5): a mesh is a GL object
+//! belonging to the renderer that made it, so those four functions act on the most
+//! recently created engine on the current thread. Creating a second one is refused
+//! rather than allowed to retarget them, which keeps "most recently created" meaning
+//! "the only one".
+
+use core::ffi::c_char;
+use std::cell::Cell;
+
+use giochi_engine::error::codes;
+use giochi_engine::platform::window::{Window, WindowConfig};
+use giochi_engine::platform::Platform;
+use giochi_engine_3d::context::{self as context3d, GlesVersion};
+use giochi_engine_3d::math3d::{Camera3D, Color3D, Transform3D, Vec3};
+use giochi_engine_3d::shader::BuiltinShader;
+use giochi_engine_3d::{Error3D, RenderContext3D};
+
+use crate::state::{self, guard};
+
+/// Window title used when the caller does not care. There is no title field in
+/// `GiochiWindowConfig`; a 3D console app is fullscreen and nobody reads it.
+const WINDOW_TITLE: &str = "GIOCHI 3D";
+
+/// Requested size when `giochi_engine3d_create` is given `NULL`.
+const DEFAULT_WIDTH: u32 = 1280;
+const DEFAULT_HEIGHT: u32 = 720;
+
+/// The 3D engine, as C sees it: an incomplete type.
+///
+/// Deliberately **not** `#[repr(C)]` — it holds a `Platform`, a `Window` and a
+/// `RenderContext3D`, none of which has a C representation, and the layout changes
+/// whenever any of them does. `giochi.h` forward-declares it and every function takes or
+/// returns a pointer (ADR-039).
+pub struct GiochiEngine3D {
+    /// Kept alive because the window and the GL context belong to it.
+    _platform: Platform,
+    /// The drawable. KMSDRM binds the panel's native mode and ignores the requested
+    /// size (ADR-035), which is why the size is read back rather than assumed.
+    window: Window,
+    render: RenderContext3D,
+}
+
+thread_local! {
+    /// The engine created by `giochi_engine3d_create` on this thread.
+    ///
+    /// Exists for §10.5: the mesh and shader functions have no engine parameter, so they
+    /// need to know which renderer's registry to touch. Set by `create`, cleared by
+    /// `destroy`, and a second `create` on the same thread is refused — so a non-null
+    /// value here always means exactly one live engine, and the pointer is valid for as
+    /// long as the caller has not destroyed it.
+    static CURRENT_3D: Cell<*mut GiochiEngine3D> = const { Cell::new(core::ptr::null_mut()) };
+}
+
+/// Maps a 3D error onto the numeric ABI code.
+///
+/// Exhaustive rather than wildcarded: `Error3D` is not `#[non_exhaustive]`, so a new
+/// variant must be classified here rather than silently degrading to `INTERNAL`.
+fn error_code(err: &Error3D) -> i32 {
+    match err {
+        Error3D::InvalidHandle(_) => codes::INVALID_HANDLE,
+        Error3D::InvalidArgument(_) => codes::INVALID_ARGUMENT,
+        Error3D::Platform(_) => codes::PLATFORM,
+        // A context that fails to create and a shader that fails to compile are both
+        // rendering failures from the caller's point of view; the message distinguishes
+        // them and the shader one carries the driver log.
+        Error3D::Context(_) | Error3D::GlObject(_) | Error3D::Shader { .. } => codes::RENDER,
+        Error3D::Asset(_) => codes::ASSET,
+    }
+}
+
+/// Stores `err` as the thread's last error and returns its code.
+fn fail3d(err: &Error3D) -> i32 {
+    state::set_last_error(&err.to_string());
+    error_code(err)
+}
+
+/// Runs `body` with the current thread's engine.
+///
+/// `Err` is `NOT_INITIALIZED` when there is none — the same code part I uses for a call
+/// before `giochi_engine_init`.
+fn with_current<R>(body: impl FnOnce(&mut GiochiEngine3D) -> R) -> Result<R, i32> {
+    let pointer = CURRENT_3D.with(Cell::get);
+    if pointer.is_null() {
+        return Err(codes::NOT_INITIALIZED);
+    }
+
+    // SAFETY: the pointer came from `Box::into_raw` in `create` and is only cleared in
+    // `destroy`, which runs at most once per engine. The caller owns the pointer and
+    // passing a stale one is the same use-after-free any opaque C handle has. No two
+    // `&mut` exist at once: no function here calls another that borrows the engine.
+    Ok(body(unsafe { &mut *pointer }))
+}
+
+/// Turns a caller-supplied `const char*` into a `String`, or reports why not.
+fn string_or_error(pointer: *const c_char, what: &str) -> Option<String> {
+    match state::cstr(pointer) {
+        Some(text) => Some(text),
+        None => {
+            state::set_last_error(&format!("{what} must be a non-NULL, valid UTF-8 string"));
+            None
+        }
+    }
+}
+
+// ---- 10.1 lifecycle ------------------------------------------------------
+
+/// Creates the 3D engine: SDL, an OpenGL-ES window, and the renderer.
+///
+/// `config` may be `NULL`, which uses 1280x720 windowed. Returns `NULL` on failure; the
+/// reason is in [`giochi_get_last_error`](crate::giochi_get_last_error) because there is
+/// no engine to ask.
+///
+/// Only one engine may exist per thread (§10.5). Creating a second one without an
+/// intervening [`giochi_engine3d_destroy`] fails rather than retargeting the mesh and
+/// shader functions.
+///
+/// # C ABI
+///
+/// ```c
+/// GiochiEngine3D* giochi_engine3d_create(const GiochiWindowConfig* config);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_engine3d_create(config: *const WindowConfig) -> *mut GiochiEngine3D {
+    guard(core::ptr::null_mut(), || {
+        if !CURRENT_3D.with(Cell::get).is_null() {
+            state::set_last_error(
+                "a 3D engine already exists on this thread; \
+                 call giochi_engine3d_destroy before creating another",
+            );
+            return core::ptr::null_mut();
+        }
+
+        let config = if config.is_null() {
+            WindowConfig::new(DEFAULT_WIDTH, DEFAULT_HEIGHT)
+        } else {
+            // SAFETY: non-NULL pointer to a caller-provided `WindowConfig`. It is copied
+            // field by field and never retained.
+            unsafe { *config }
+        };
+
+        let platform = match Platform::new() {
+            Ok(platform) => platform,
+            Err(err) => {
+                state::fail(&err);
+                return core::ptr::null_mut();
+            }
+        };
+
+        // Before the window: the `SDL_GL_*` attributes are process-global and read when
+        // the window is created, not when the context is.
+        if let Err(err) = context3d::configure_attributes(&platform, GlesVersion::Gles2) {
+            state::set_last_error(&err.to_string());
+            return core::ptr::null_mut();
+        }
+
+        let window = match Window::new_opengl(&platform, config, WINDOW_TITLE) {
+            Ok(window) => window,
+            Err(err) => {
+                state::fail(&err);
+                return core::ptr::null_mut();
+            }
+        };
+
+        let gl = match context3d::create(&window) {
+            Ok(gl) => gl,
+            Err(err) => {
+                state::set_last_error(&err.to_string());
+                return core::ptr::null_mut();
+            }
+        };
+
+        let (width, height) = window.drawable_size();
+        if (width, height) != (config.width, config.height) {
+            // KMSDRM is fullscreen-only and binds the panel's mode, so the drawable is
+            // often not what was asked for. Saying so once beats debugging a scene laid
+            // out for a screen that does not exist.
+            log::info!(
+                "3D: requested {}x{}, backend opened {width}x{height}",
+                config.width,
+                config.height
+            );
+        }
+
+        let engine = Box::new(GiochiEngine3D {
+            _platform: platform,
+            window,
+            render: RenderContext3D::new(gl),
+        });
+
+        let pointer = Box::into_raw(engine);
+        CURRENT_3D.with(|cell| cell.set(pointer));
+        pointer
+    })
+}
+
+/// Destroys the 3D engine, releasing every mesh, shader and the GL context.
+///
+/// `NULL` is a no-op. Handles created by the engine become invalid; part II does not
+/// track them after the engine is gone, exactly as part I does not.
+///
+/// # C ABI
+///
+/// ```c
+/// void giochi_engine3d_destroy(GiochiEngine3D* engine);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_engine3d_destroy(engine: *mut GiochiEngine3D) {
+    guard((), || {
+        if engine.is_null() {
+            return;
+        }
+
+        let current = CURRENT_3D.with(Cell::get);
+        if !current.is_null() && current != engine {
+            state::set_last_error(
+                "giochi_engine3d_destroy was given an engine that is not the one this \
+                 thread created",
+            );
+            return;
+        }
+
+        // Clear before dropping: if a destructor panics, the slot must not keep pointing
+        // at freed memory.
+        CURRENT_3D.with(|cell| cell.set(core::ptr::null_mut()));
+
+        // SAFETY: the pointer came from `Box::into_raw` in `create`, this is the only
+        // place it is reconstructed, and the slot above guarantees it happens once.
+        let mut engine = unsafe { Box::from_raw(engine) };
+        if !engine.render.release_all() {
+            log::warn!("3D engine destroyed with GL objects still referenced elsewhere");
+        }
+    })
+}
+
+/// Applies the GL state, sets the viewport from the real drawable size and clears.
+///
+/// Every frame starts here. The viewport comes from the window, not from the requested
+/// configuration, because on KMSDRM the two differ (ADR-035).
+///
+/// # C ABI
+///
+/// ```c
+/// int32_t giochi_engine3d_begin_frame(GiochiEngine3D* engine);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_engine3d_begin_frame(engine: *mut GiochiEngine3D) -> i32 {
+    guard(codes::INTERNAL, || {
+        if engine.is_null() {
+            state::invalid_argument("engine must not be NULL");
+            return codes::INVALID_ARGUMENT;
+        }
+
+        // SAFETY: non-NULL pointer the caller owns, asserted above to be the thread's
+        // current engine by the same rule the other functions use.
+        let engine = unsafe { &mut *engine };
+        engine.render.begin_frame(&engine.window);
+        codes::OK
+    })
+}
+
+/// Presents the frame: swaps the back buffer and blocks until vsync on KMSDRM.
+///
+/// The block is why frame timing must be measured **before** this call, not after — see
+/// `docs/3D.md` §7, where reading the clock afterwards made the balance game report the
+/// panel's refresh rate as its own cost.
+///
+/// # C ABI
+///
+/// ```c
+/// int32_t giochi_engine3d_end_frame(GiochiEngine3D* engine);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_engine3d_end_frame(engine: *mut GiochiEngine3D) -> i32 {
+    guard(codes::INTERNAL, || {
+        if engine.is_null() {
+            state::invalid_argument("engine must not be NULL");
+            return codes::INVALID_ARGUMENT;
+        }
+
+        // SAFETY: as in `begin_frame`.
+        let engine = unsafe { &mut *engine };
+        engine.render.end_frame(&engine.window);
+        codes::OK
+    })
+}
+
+// ---- 10.2 camera and transforms -----------------------------------------
+
+/// Returns a camera at the origin looking down -Z, 60° vertical FOV.
+///
+/// `aspect` is `0.0`, meaning "ask the drawable": on a console the panel's real size is
+/// authoritative (ADR-035).
+///
+/// # C ABI
+///
+/// ```c
+/// GiochiCamera3D giochi_camera3d_new(void);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_camera3d_new() -> Camera3D {
+    guard(Camera3D::new(), Camera3D::new)
+}
+
+/// Points `camera` from `position` at `target`.
+///
+/// Returns nothing because there is nothing useful to return: an unusable camera (up
+/// parallel to the view direction, or `position == target`) is reported by
+/// [`giochi_renderer3d_draw_mesh`], which is the call that needs a view matrix.
+///
+/// # C ABI
+///
+/// ```c
+/// void giochi_camera3d_look_at(GiochiCamera3D* camera,
+///                              GiochiVec3 position, GiochiVec3 target);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_camera3d_look_at(camera: *mut Camera3D, position: Vec3, target: Vec3) {
+    guard((), || {
+        if camera.is_null() {
+            state::invalid_argument("camera must not be NULL");
+            return;
+        }
+
+        // SAFETY: non-NULL pointer to a caller-provided `GiochiCamera3D`. The reserved
+        // tail is preserved: a caller that zeroes it gets it back zeroed.
+        let camera = unsafe { &mut *camera };
+        camera.position = position;
+        camera.target = target;
+    })
+}
+
+/// Returns the identity transform: no translation, no rotation, unit scale.
+///
+/// A zeroed `GiochiTransform3D` has **zero scale**, which draws nothing. This is the
+/// value to start from.
+///
+/// # C ABI
+///
+/// ```c
+/// GiochiTransform3D giochi_transform3d_identity(void);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_transform3d_identity() -> Transform3D {
+    guard(Transform3D::IDENTITY, || Transform3D::IDENTITY)
+}
+
+/// Returns a transform that only translates.
+///
+/// # C ABI
+///
+/// ```c
+/// GiochiTransform3D giochi_transform3d_from_translation(GiochiVec3 translation);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_transform3d_from_translation(translation: Vec3) -> Transform3D {
+    guard(Transform3D::from_translation(translation), || {
+        Transform3D::from_translation(translation)
+    })
+}
+
+// ---- 10.3 meshes and shaders --------------------------------------------
+
+/// Loads a Wavefront OBJ file as a mesh.
+///
+/// Writes the handle to `out` and returns `GIOCHI_ERROR_OK`, or writes nothing and
+/// returns a negative code. The mesh belongs to this thread's engine (§10.5) and must be
+/// released with [`giochi_mesh_destroy`].
+///
+/// # C ABI
+///
+/// ```c
+/// int32_t giochi_mesh_load_obj(const char* path, GiochiMeshHandle* out);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_mesh_load_obj(path: *const c_char, out: *mut u64) -> i32 {
+    guard(codes::INTERNAL, || {
+        if out.is_null() {
+            state::invalid_argument("out must not be NULL");
+            return codes::INVALID_ARGUMENT;
+        }
+        let Some(path) = string_or_error(path, "mesh path") else {
+            return codes::INVALID_ARGUMENT;
+        };
+
+        match with_current(|engine| engine.render.load_obj_mesh(std::path::Path::new(&path))) {
+            Err(code) => {
+                if code == codes::NOT_INITIALIZED {
+                    state::set_last_error(
+                        "giochi_mesh_load_obj needs a 3D engine; call giochi_engine3d_create first",
+                    );
+                }
+                code
+            }
+            Ok(Ok(handle)) => {
+                // SAFETY: non-NULL, checked above, and the contract says it points at
+                // one `GiochiMeshHandle` the caller owns.
+                unsafe { *out = handle };
+                codes::OK
+            }
+            Ok(Err(err)) => fail3d(&err),
+        }
+    })
+}
+
+/// Creates a cube centred on the origin with the given edge length.
+///
+/// The same mesh `create_cube_mesh` builds on the Rust side, indexed and with outward
+/// winding. Exists so a C program can draw something without shipping an OBJ.
+///
+/// # C ABI
+///
+/// ```c
+/// int32_t giochi_mesh_create_cube(float size, GiochiMeshHandle* out);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_mesh_create_cube(size: f32, out: *mut u64) -> i32 {
+    guard(codes::INTERNAL, || {
+        if out.is_null() {
+            state::invalid_argument("out must not be NULL");
+            return codes::INVALID_ARGUMENT;
+        }
+
+        match with_current(|engine| engine.render.create_cube_mesh(size)) {
+            Err(code) => {
+                if code == codes::NOT_INITIALIZED {
+                    state::set_last_error(
+                        "giochi_mesh_create_cube needs a 3D engine; call giochi_engine3d_create first",
+                    );
+                }
+                code
+            }
+            Ok(Ok(handle)) => {
+                // SAFETY: as in `giochi_mesh_load_obj`.
+                unsafe { *out = handle };
+                codes::OK
+            }
+            Ok(Err(err)) => fail3d(&err),
+        }
+    })
+}
+
+/// Releases a mesh.
+///
+/// `0` and unknown handles are `GIOCHI_ERROR_INVALID_HANDLE`, matching part I: a double
+/// free is a bug in the caller and must be visible.
+///
+/// # C ABI
+///
+/// ```c
+/// int32_t giochi_mesh_destroy(GiochiMeshHandle mesh);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_mesh_destroy(mesh: u64) -> i32 {
+    guard(codes::INTERNAL, || {
+        match with_current(|engine| engine.render.destroy_mesh(mesh)) {
+            Err(code) => {
+                if code == codes::NOT_INITIALIZED {
+                    state::set_last_error(
+                        "giochi_mesh_destroy needs the 3D engine that created the mesh",
+                    );
+                }
+                code
+            }
+            Ok(true) => codes::OK,
+            Ok(false) => {
+                state::set_last_error(&format!("mesh {mesh} does not exist"));
+                codes::INVALID_HANDLE
+            }
+        }
+    })
+}
+
+/// Compiles a vertex/fragment shader pair read from disk.
+///
+/// R10: shader source lives in files, so there is no function that takes GLSL as a
+/// string (§11). On failure the error message carries the driver's own compile or link
+/// log, which is the only thing that makes a shader bug findable.
+///
+/// # C ABI
+///
+/// ```c
+/// int32_t giochi_shader_load(const char* vert_path, const char* frag_path,
+///                            GiochiShaderHandle* out);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_shader_load(
+    vert_path: *const c_char,
+    frag_path: *const c_char,
+    out: *mut u64,
+) -> i32 {
+    guard(codes::INTERNAL, || {
+        if out.is_null() {
+            state::invalid_argument("out must not be NULL");
+            return codes::INVALID_ARGUMENT;
+        }
+        let Some(vertex) = string_or_error(vert_path, "vertex shader path") else {
+            return codes::INVALID_ARGUMENT;
+        };
+        let Some(fragment) = string_or_error(frag_path, "fragment shader path") else {
+            return codes::INVALID_ARGUMENT;
+        };
+
+        match with_current(|engine| {
+            engine.render.load_shader(
+                std::path::Path::new(&vertex),
+                std::path::Path::new(&fragment),
+            )
+        }) {
+            Err(code) => {
+                if code == codes::NOT_INITIALIZED {
+                    state::set_last_error(
+                        "giochi_shader_load needs a 3D engine; call giochi_engine3d_create first",
+                    );
+                }
+                code
+            }
+            Ok(Ok(handle)) => {
+                // SAFETY: as in `giochi_mesh_load_obj`.
+                unsafe { *out = handle };
+                codes::OK
+            }
+            Ok(Err(err)) => fail3d(&err),
+        }
+    })
+}
+
+/// Compiles one of the shaders the engine ships (§10.6).
+///
+/// `which` is `GIOCHI_SHADER_FLAT`, `GIOCHI_SHADER_TEXTURED` or `GIOCHI_SHADER_PHONG`;
+/// anything else is `GIOCHI_ERROR_INVALID_ARGUMENT` rather than a guess.
+///
+/// # C ABI
+///
+/// ```c
+/// int32_t giochi_shader_builtin(int32_t which, GiochiShaderHandle* out);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_shader_builtin(which: i32, out: *mut u64) -> i32 {
+    guard(codes::INTERNAL, || {
+        if out.is_null() {
+            state::invalid_argument("out must not be NULL");
+            return codes::INVALID_ARGUMENT;
+        }
+
+        let Some(shader) = builtin_shader(which) else {
+            state::set_last_error(&format!(
+                "{which} is not a built-in shader; expected GIOCHI_SHADER_FLAT (0), \
+                 GIOCHI_SHADER_TEXTURED (1) or GIOCHI_SHADER_PHONG (2)"
+            ));
+            return codes::INVALID_ARGUMENT;
+        };
+
+        match with_current(|engine| engine.render.create_builtin_shader(shader)) {
+            Err(code) => {
+                if code == codes::NOT_INITIALIZED {
+                    state::set_last_error(
+                        "giochi_shader_builtin needs a 3D engine; call giochi_engine3d_create first",
+                    );
+                }
+                code
+            }
+            Ok(Ok(handle)) => {
+                // SAFETY: as in `giochi_mesh_load_obj`.
+                unsafe { *out = handle };
+                codes::OK
+            }
+            Ok(Err(err)) => fail3d(&err),
+        }
+    })
+}
+
+/// Releases a shader program. Mirrors [`giochi_mesh_destroy`].
+///
+/// # C ABI
+///
+/// ```c
+/// int32_t giochi_shader_destroy(GiochiShaderHandle shader);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_shader_destroy(shader: u64) -> i32 {
+    guard(codes::INTERNAL, || {
+        match with_current(|engine| engine.render.destroy_shader(shader)) {
+            Err(code) => {
+                if code == codes::NOT_INITIALIZED {
+                    state::set_last_error(
+                        "giochi_shader_destroy needs the 3D engine that created the shader",
+                    );
+                }
+                code
+            }
+            Ok(true) => codes::OK,
+            Ok(false) => {
+                state::set_last_error(&format!("shader {shader} does not exist"));
+                codes::INVALID_HANDLE
+            }
+        }
+    })
+}
+
+/// Maps a `GIOCHI_SHADER_*` constant onto the crate's enum. `None` for anything else.
+fn builtin_shader(which: i32) -> Option<BuiltinShader> {
+    match which {
+        crate::abi_types::GIOCHI_SHADER_FLAT => Some(BuiltinShader::Flat),
+        crate::abi_types::GIOCHI_SHADER_TEXTURED => Some(BuiltinShader::Textured),
+        crate::abi_types::GIOCHI_SHADER_PHONG => Some(BuiltinShader::Phong),
+        _ => None,
+    }
+}
+
+// ---- 10.4 drawing -------------------------------------------------------
+
+/// Sets the clear colour and clears colour and depth immediately.
+///
+/// Clearing here as well as in [`giochi_engine3d_begin_frame`] makes the call
+/// order-independent: `begin_frame` then `clear` re-clears with the colour just given,
+/// and `clear` then `begin_frame` leaves the colour in place for `begin_frame` to use.
+///
+/// # C ABI
+///
+/// ```c
+/// int32_t giochi_renderer3d_clear(GiochiEngine3D* engine, GiochiColor3D color);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_renderer3d_clear(engine: *mut GiochiEngine3D, color: Color3D) -> i32 {
+    guard(codes::INTERNAL, || {
+        if engine.is_null() {
+            state::invalid_argument("engine must not be NULL");
+            return codes::INVALID_ARGUMENT;
+        }
+
+        // SAFETY: non-NULL pointer the caller owns.
+        let engine = unsafe { &mut *engine };
+        engine.render.set_clear_color(color);
+        let state = engine.render.state();
+        state.clear(engine.render.glow());
+        codes::OK
+    })
+}
+
+/// Draws `mesh` with `shader` at `model`, seen through `camera`, in `color`.
+///
+/// `model` and `camera` must both be non-NULL: a NULL model is not silently the identity
+/// (§10.7), because a caller that forgot it would get a scene piled at the origin with no
+/// error.
+///
+/// Returns `GIOCHI_ERROR_INVALID_HANDLE` when either handle is unknown, and
+/// `GIOCHI_ERROR_INVALID_ARGUMENT` when the camera cannot produce a view matrix
+/// (`position == target`, or `up` parallel to the view direction).
+///
+/// # C ABI
+///
+/// ```c
+/// int32_t giochi_renderer3d_draw_mesh(GiochiEngine3D* engine,
+///                                     GiochiMeshHandle mesh,
+///                                     GiochiShaderHandle shader,
+///                                     const GiochiTransform3D* model,
+///                                     const GiochiCamera3D* camera,
+///                                     GiochiColor3D color);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_renderer3d_draw_mesh(
+    engine: *mut GiochiEngine3D,
+    mesh: u64,
+    shader: u64,
+    model: *const Transform3D,
+    camera: *const Camera3D,
+    color: Color3D,
+) -> i32 {
+    guard(codes::INTERNAL, || {
+        if engine.is_null() {
+            state::invalid_argument("engine must not be NULL");
+            return codes::INVALID_ARGUMENT;
+        }
+        if model.is_null() {
+            state::invalid_argument(
+                "model must not be NULL; use giochi_transform3d_identity() for no transform",
+            );
+            return codes::INVALID_ARGUMENT;
+        }
+        if camera.is_null() {
+            state::invalid_argument("camera must not be NULL; use giochi_camera3d_new()");
+            return codes::INVALID_ARGUMENT;
+        }
+
+        // SAFETY: all three pointers are non-NULL and caller-provided; the two structs
+        // are read, never retained.
+        let (engine, model, camera) = unsafe { (&mut *engine, &*model, &*camera) };
+
+        match engine
+            .render
+            .draw_mesh_colored(mesh, shader, model, camera, color)
+        {
+            // `false` means a handle was unknown. `Error3D` has no variant for that on
+            // the draw path, so it is reported here rather than invented upstream.
+            Ok(false) => {
+                state::set_last_error(&format!(
+                    "mesh {mesh} or shader {shader} does not exist in this engine"
+                ));
+                codes::INVALID_HANDLE
+            }
+            Ok(true) => codes::OK,
+            // A model matrix that is not finite, or a camera with no view matrix, arrives as
+            // `InvalidArgument` and maps to the code the caller expects.
+            Err(err) => fail3d(&err),
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_builtin_shader_constant_maps_to_the_matching_variant() {
+        // Pinned because the numbers are in the header: renumbering them would silently
+        // give a C caller a different shader.
+        assert_eq!(builtin_shader(0), Some(BuiltinShader::Flat));
+        assert_eq!(builtin_shader(1), Some(BuiltinShader::Textured));
+        assert_eq!(builtin_shader(2), Some(BuiltinShader::Phong));
+        assert_eq!(builtin_shader(-1), None);
+        assert_eq!(builtin_shader(3), None);
+        assert_eq!(builtin_shader(i32::MAX), None);
+    }
+
+    #[test]
+    fn the_transform_helpers_are_usable_from_c() {
+        // Rust's `Default` is the identity, so a Rust caller cannot get this wrong. A **C**
+        // caller writing `GiochiTransform3D t = {0};` gets scale (0,0,0) and draws nothing,
+        // which is the trap `giochi_transform3d_identity` exists to avoid -- and the reason
+        // the helper is worth a function rather than a comment in the header.
+        let c_style_zeroed = Transform3D {
+            position: Vec3::ZERO,
+            rotation: giochi_engine_3d::math3d::Quat::IDENTITY,
+            scale: Vec3::ZERO,
+            _reserved: [0; 4],
+        };
+        assert_eq!(c_style_zeroed.scale.x, 0.0, "the trap this function avoids");
+        assert_eq!(
+            Transform3D::default().scale.x,
+            1.0,
+            "Rust's default is safe"
+        );
+
+        let identity = giochi_transform3d_identity();
+        assert_eq!(identity.scale.x, 1.0);
+        assert_eq!(identity.scale.y, 1.0);
+        assert_eq!(identity.scale.z, 1.0);
+        assert_eq!(identity.position.x, 0.0);
+        assert_eq!(identity._reserved, [0; 4]);
+    }
+
+    #[test]
+    fn from_translation_keeps_unit_scale() {
+        let model = giochi_transform3d_from_translation(Vec3::new(1.0, 2.0, 3.0));
+
+        assert_eq!(model.position.x, 1.0);
+        assert_eq!(model.position.y, 2.0);
+        assert_eq!(model.position.z, 3.0);
+        assert_eq!(model.scale.x, 1.0, "translation must not zero the scale");
+    }
+
+    #[test]
+    fn a_new_camera_lets_the_renderer_fill_the_aspect() {
+        // 0.0 means "ask the drawable". A camera that guessed 16:9 would letterbox a
+        // console's 4:3 panel instead of using it.
+        let camera = giochi_camera3d_new();
+        assert_eq!(camera.aspect, 0.0);
+        assert!(camera.position.is_finite());
+    }
+
+    #[test]
+    fn null_pointers_are_rejected_rather_than_dereferenced() {
+        assert_eq!(
+            giochi_mesh_load_obj(core::ptr::null(), core::ptr::null_mut()),
+            codes::INVALID_ARGUMENT
+        );
+        assert_eq!(
+            giochi_mesh_create_cube(1.0, core::ptr::null_mut()),
+            codes::INVALID_ARGUMENT
+        );
+        assert_eq!(
+            giochi_shader_builtin(0, core::ptr::null_mut()),
+            codes::INVALID_ARGUMENT
+        );
+        assert_eq!(
+            giochi_renderer3d_clear(core::ptr::null_mut(), Color3D::WHITE),
+            codes::INVALID_ARGUMENT
+        );
+        assert_eq!(
+            giochi_engine3d_begin_frame(core::ptr::null_mut()),
+            codes::INVALID_ARGUMENT
+        );
+        assert_eq!(
+            giochi_engine3d_end_frame(core::ptr::null_mut()),
+            codes::INVALID_ARGUMENT
+        );
+    }
+
+    #[test]
+    fn destroying_null_is_a_no_op() {
+        // Idempotent teardown matters: a C caller that bails out of three branches should
+        // not have to remember whether it created the engine.
+        giochi_engine3d_destroy(core::ptr::null_mut());
+        assert_eq!(state::last_error_text(), "");
+    }
+
+    #[test]
+    fn the_mesh_functions_report_not_initialised_without_an_engine() {
+        // No engine has been created in this test binary, so every one of them must say so
+        // instead of dereferencing a null slot.
+        let mut handle = 0u64;
+        assert_eq!(
+            giochi_mesh_create_cube(1.0, &mut handle),
+            codes::NOT_INITIALIZED
+        );
+        assert_eq!(handle, 0, "a failed call must not write the out parameter");
+
+        assert_eq!(giochi_mesh_destroy(1), codes::NOT_INITIALIZED);
+        assert_eq!(
+            giochi_shader_builtin(0, &mut handle),
+            codes::NOT_INITIALIZED
+        );
+        assert_eq!(giochi_shader_destroy(1), codes::NOT_INITIALIZED);
+    }
+
+    #[test]
+    fn an_unknown_builtin_is_rejected_before_touching_the_engine() {
+        let mut handle = 0u64;
+        assert_eq!(
+            giochi_shader_builtin(99, &mut handle),
+            codes::INVALID_ARGUMENT
+        );
+        assert!(
+            state::last_error_text().contains("not a built-in shader"),
+            "the message must say what was expected"
+        );
+        assert_eq!(handle, 0);
+    }
+}

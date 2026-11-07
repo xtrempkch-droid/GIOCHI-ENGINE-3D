@@ -5,16 +5,19 @@
 [![Release](https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/actions/workflows/release.yml/badge.svg)](https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A **2D** game engine in Rust on top of SDL2, designed from day one to be consumed
-from any language through a C ABI. Primary target: `aarch64-unknown-linux-gnu`
-(Linux consoles with KMSDRM); development on `x86_64-unknown-linux-gnu`.
+A game engine in Rust on top of SDL2, designed from day one to be consumed from any
+language through a C ABI. **2D** through `sdl2::render`, and **3D** through OpenGL ES 2.0
+over EGL in a separate crate. Primary target: `aarch64-unknown-linux-gnu` (Linux consoles
+with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 
-> **Status: 0.1.1 — every phase (0 to 8) complete.** The workspace, the SDL2 platform
+> **Status: 0.2.0 — every phase (0 to 14) complete.** The workspace, the SDL2 platform
 > layer, the fixed-timestep loop, the 2D renderer with opaque texture handles,
 > keyboard/mouse/gamepad input, the asset cache, the audio mixer, the scene stack, the
-> `Engine` facade, the **C ABI** (`libgiochi.so` / `libgiochi.a` + generated `giochi.h`)
-> and the **Lua binding** (`giochi` module + a complete reference game), with CI,
-> release packaging and the guides. See [PROGRESS.md](PROGRESS.md).
+> `Engine` facade, the **C ABI** (`libgiochi.so` / `libgiochi.a` + generated `giochi.h`,
+> version 2), the **Lua binding** (`giochi` module + a complete reference game), and the
+> **3D crate** — GLES/EGL context, mesh pipeline, Blinn-Phong lighting, `Camera3D` with a
+> controller, and the 3D half of the C ABI — with CI, release packaging and the guides.
+> Validated on a Rockchip PX30 (Mali-G31). See [PROGRESS.md](PROGRESS.md).
 
 
 ## Why "C-shaped" Rust?
@@ -46,6 +49,7 @@ is authoritative.
 | [`giochi-engine`](giochi-engine/) | lib | Idiomatic Rust API, C-shaped data, no `unsafe` |
 | [`giochi-engine-capi`](giochi-engine-capi/) | `cdylib` + `staticlib` | `libgiochi` C ABI and generated `giochi.h` |
 | [`giochi-engine-lua`](giochi-engine-lua/) | lib | Reference binding — Lua 5.4 via mLua, no `unsafe` |
+| [`giochi-engine-3d`](giochi-engine-3d/) | lib | 3D: GLES 2.0 over EGL, meshes, shaders, lighting, camera |
 | [`giochi-demo`](giochi-demo/) | bin | The demo; `--frames`, `--verify`, `lua <script>` |
 
 ## Build
@@ -338,8 +342,9 @@ SKIP_ARM64=1 scripts/gates.sh
 2. Resources are `u64` handles with explicit create/destroy.
 3. Every public struct is `#[repr(C)]` and ends with `_reserved`.
 4. `thiserror` inside, `i32` codes plus `giochi_get_last_error()` outside.
-5. **2D only.** No `render` backend abstraction, meshes, shaders or pipelines. 3D,
-   if it ever happens, is a separate `giochi-engine-3d` crate on EGL + GLES.
+5. **`giochi-engine` stays 2D.** No `render` backend abstraction, no meshes, no shaders,
+   no pipeline in the 2D crate. 3D is a separate crate on EGL + GLES
+   ([`giochi-engine-3d`](giochi-engine-3d/)) and the two never share a canvas (ADR-037).
 
 Decisions and their rationale: [docs/DECISIONS.md](docs/DECISIONS.md). How the
 rules are actually enforced by the crate layout, and why the modules depend on each

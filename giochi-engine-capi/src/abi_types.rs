@@ -26,10 +26,20 @@ const _: () = assert!(ENGINE_TITLE_CAPACITY == 64);
 /// Version of the C ABI implemented by this library.
 ///
 /// Must stay equal to `giochi_abi_version()` and to `docs/C_ABI_CONTRACT.md`.
-pub const GIOCHI_ABI_VERSION: u32 = 1;
+pub const GIOCHI_ABI_VERSION: u32 = 2;
 
 /// Largest asset the loader accepts, in bytes (64 MiB).
 pub const GIOCHI_MAX_ASSET_SIZE: usize = 64 * 1024 * 1024;
+
+// Built-in shaders, for `giochi_shader_builtin` (`docs/C_ABI_CONTRACT.md` §10.6). The
+// numbers are in the header, so they must never be renumbered.
+
+/// Solid colour with one Lambert term. The phase 11 default.
+pub const GIOCHI_SHADER_FLAT: i32 = 0;
+/// `texture2D` sampling with the same light term.
+pub const GIOCHI_SHADER_TEXTURED: i32 = 1;
+/// Directional Blinn-Phong. Reads the engine's light, which part II does not expose yet.
+pub const GIOCHI_SHADER_PHONG: i32 = 2;
 
 // The numeric error codes are part of the ABI and must never be renumbered
 // (`docs/C_ABI_CONTRACT.md` §4). They are written as literals so `cbindgen` can put
@@ -59,7 +69,12 @@ pub const GIOCHI_ERROR_UNSUPPORTED: i32 = -9;
 /// Unexpected internal failure, including a caught panic.
 pub const GIOCHI_ERROR_INTERNAL: i32 = -99;
 
-const _: () = assert!(GIOCHI_ABI_VERSION == giochi_engine::ABI_VERSION);
+// `giochi_engine::ABI_VERSION` is the version of **part I** — the 2D surface — and part I
+// never changes. `GIOCHI_ABI_VERSION` is the version of the whole C ABI, which moved to 2
+// when part II (3D) shipped. So the invariant is "at least", not "equal": a consumer
+// checks `giochi_abi_version()` against the number it was built with, and part I callers
+// written against 1 keep working unchanged.
+const _: () = assert!(GIOCHI_ABI_VERSION >= giochi_engine::ABI_VERSION);
 const _: () = assert!(GIOCHI_MAX_ASSET_SIZE == giochi_engine::MAX_ASSET_SIZE);
 const _: () = assert!(GIOCHI_ERROR_OK == codes::OK);
 const _: () = assert!(GIOCHI_ERROR_INVALID_HANDLE == codes::INVALID_HANDLE);

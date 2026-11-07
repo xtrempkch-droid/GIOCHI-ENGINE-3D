@@ -1,5 +1,5 @@
 /*
- * GIOCHI-ENGINE C ABI, version 1.
+ * GIOCHI-ENGINE C ABI, version 2.
  *
  * Link against libgiochi.so (or libgiochi.a) and call giochi_engine_init() before
  * anything else. Every fallible function returns 0 on success and a negative code
@@ -12,7 +12,18 @@
  *
  * The engine is single-threaded: call everything from the thread that called
  * giochi_engine_init(). giochi_get_last_error() is the only exception.
+ *
+ * Version 2 adds part II (3D) in docs/C_ABI_CONTRACT.md sections 8-12. Nothing in part I
+ * changed, so a consumer written against version 1 keeps working; it should accept
+ * giochi_abi_version() >= 1 rather than == 1.
+ *
+ * The 3D engine is an opaque pointer the caller owns (ADR-039), unlike the 2D singleton.
+ * giochi_mesh_* and giochi_shader_* take no engine: they act on the most recently created
+ * engine on the calling thread, and creating a second one is refused.
  */
+
+/* Part II: the 3D engine has no C representation, so callers only ever see a pointer. */
+typedef struct GiochiEngine3D GiochiEngine3D;
 
 #ifndef GIOCHI_H
 #define GIOCHI_H
@@ -32,10 +43,19 @@
 // Version of the C ABI implemented by this library.
 //
 // Must stay equal to `giochi_abi_version()` and to `docs/C_ABI_CONTRACT.md`.
-#define GIOCHI_ABI_VERSION 1
+#define GIOCHI_ABI_VERSION 2
 
 // Largest asset the loader accepts, in bytes (64 MiB).
 #define GIOCHI_MAX_ASSET_SIZE ((64 * 1024) * 1024)
+
+// Solid colour with one Lambert term. The phase 11 default.
+#define GIOCHI_SHADER_FLAT 0
+
+// `texture2D` sampling with the same light term.
+#define GIOCHI_SHADER_TEXTURED 1
+
+// Directional Blinn-Phong. Reads the engine's light, which part II does not expose yet.
+#define GIOCHI_SHADER_PHONG 2
 
 // Success.
 #define GIOCHI_ERROR_OK 0
@@ -130,6 +150,151 @@ typedef struct GiochiEngineConfig {
 // typedef uint64_t GiochiScene;
 // ```
 typedef uint64_t GiochiScene;
+
+// Descriptor for creating the main window.
+//
+// # C ABI
+//
+// The window is created by `giochi_engine_init` in the C ABI; this struct has
+// no direct C counterpart and exists only for the Rust facade.
+//
+// Size: 44 bytes, alignment: 4 bytes.
+typedef struct GiochiWindowConfig {
+    // Width in physical pixels.
+    uint32_t width;
+    // Height in physical pixels.
+    uint32_t height;
+    // `0` = windowed, any other value = fullscreen desktop (required on KMSDRM,
+    // which has no window manager).
+    uint32_t fullscreen;
+    // Reserved for future ABI-compatible fields. Must be zero.
+    uint32_t _reserved[8];
+} GiochiWindowConfig;
+
+// A 3-component vector, `#[repr(C)]`.
+//
+// # C ABI
+//
+// ```c
+// typedef struct GiochiVec3 {
+//     float    x, y, z;
+//     uint32_t _reserved[4];
+// } GiochiVec3;                     /* size 28, align 4 */
+// ```
+typedef struct GiochiVec3 {
+    // X component.
+    float x;
+    // Y component.
+    float y;
+    // Z component.
+    float z;
+    // Reserved for future ABI-compatible fields. Must be zero.
+    uint32_t _reserved[4];
+} GiochiVec3;
+
+// A perspective camera looking from `position` towards `target`.
+//
+// # C ABI
+//
+// ```c
+// typedef struct GiochiCamera3D {
+//     GiochiVec3 position;
+//     GiochiVec3 target;
+//     GiochiVec3 up;
+//     float      fov_y;                /* radians, vertical */
+//     float      near_plane;
+//     float      far_plane;
+//     float      aspect;               /* width / height; 0 = use the drawable */
+//     uint32_t   _reserved[4];
+// } GiochiCamera3D;                  /* size 116, align 4 */
+// ```
+typedef struct GiochiCamera3D {
+    // Eye position.
+    struct GiochiVec3 position;
+    // Point the camera looks at.
+    struct GiochiVec3 target;
+    // Up direction. Must not be parallel to the view direction.
+    struct GiochiVec3 up;
+    // Vertical field of view in radians.
+    float fov_y;
+    // Near clip distance. Must be positive.
+    float near_plane;
+    // Far clip distance. Must be greater than `near_plane`.
+    float far_plane;
+    // Width divided by height. `0.0` means "use the renderer's drawable size".
+    float aspect;
+    // Reserved for future ABI-compatible fields. Must be zero.
+    uint32_t _reserved[4];
+} GiochiCamera3D;
+
+// A rotation quaternion, `#[repr(C)]`.
+//
+// # C ABI
+//
+// ```c
+// typedef struct GiochiQuat {
+//     float    x, y, z, w;
+//     uint32_t _reserved[4];
+// } GiochiQuat;                     /* size 32, align 4 */
+// ```
+typedef struct GiochiQuat {
+    // X component (imaginary).
+    float x;
+    // Y component (imaginary).
+    float y;
+    // Z component (imaginary).
+    float z;
+    // W component (real part).
+    float w;
+    // Reserved for future ABI-compatible fields. Must be zero.
+    uint32_t _reserved[4];
+} GiochiQuat;
+
+// A model transform.
+//
+// # C ABI
+//
+// ```c
+// typedef struct GiochiTransform3D {
+//     GiochiVec3 position;
+//     GiochiQuat rotation;
+//     GiochiVec3 scale;
+//     uint32_t   _reserved[4];
+// } GiochiTransform3D;              /* size 104, align 4 */
+// ```
+typedef struct GiochiTransform3D {
+    // World position.
+    struct GiochiVec3 position;
+    // Rotation about `position`.
+    struct GiochiQuat rotation;
+    // Per-axis scale, applied before the rotation.
+    struct GiochiVec3 scale;
+    // Reserved for future ABI-compatible fields. Must be zero.
+    uint32_t _reserved[4];
+} GiochiTransform3D;
+
+// Linear-agnostic float RGBA colour, one `f32` per channel.
+//
+// # C ABI
+//
+// ```c
+// typedef struct GiochiColor3D {
+//     float r, g, b, a;
+//     uint32_t _reserved[4];
+// } GiochiColor3D;
+// ```
+typedef struct GiochiColor3D {
+    // Red, `0.0..=1.0`.
+    float r;
+    // Green, `0.0..=1.0`.
+    float g;
+    // Blue, `0.0..=1.0`.
+    float b;
+    // Alpha: `0.0` transparent, `1.0` opaque.
+    float a;
+    // Reserved for future ABI-compatible fields. Must be zero.
+    uint32_t _reserved[4];
+} GiochiColor3D;
 
 // Opaque texture handle. `0` is invalid/null.
 //
@@ -717,6 +882,221 @@ float giochi_gamepad_axis(uint32_t axis);
 // ```
 int32_t giochi_gamepad_button_down(uint32_t button);
 
+// Creates the 3D engine: SDL, an OpenGL-ES window, and the renderer.
+//
+// `config` may be `NULL`, which uses 1280x720 windowed. Returns `NULL` on failure; the
+// reason is in [`giochi_get_last_error`](crate::giochi_get_last_error) because there is
+// no engine to ask.
+//
+// Only one engine may exist per thread (§10.5). Creating a second one without an
+// intervening [`giochi_engine3d_destroy`] fails rather than retargeting the mesh and
+// shader functions.
+//
+// # C ABI
+//
+// ```c
+// GiochiEngine3D* giochi_engine3d_create(const GiochiWindowConfig* config);
+// ```
+GiochiEngine3D *giochi_engine3d_create(const struct GiochiWindowConfig *config);
+
+// Destroys the 3D engine, releasing every mesh, shader and the GL context.
+//
+// `NULL` is a no-op. Handles created by the engine become invalid; part II does not
+// track them after the engine is gone, exactly as part I does not.
+//
+// # C ABI
+//
+// ```c
+// void giochi_engine3d_destroy(GiochiEngine3D* engine);
+// ```
+void giochi_engine3d_destroy(GiochiEngine3D *engine);
+
+// Applies the GL state, sets the viewport from the real drawable size and clears.
+//
+// Every frame starts here. The viewport comes from the window, not from the requested
+// configuration, because on KMSDRM the two differ (ADR-035).
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_engine3d_begin_frame(GiochiEngine3D* engine);
+// ```
+int32_t giochi_engine3d_begin_frame(GiochiEngine3D *engine);
+
+// Presents the frame: swaps the back buffer and blocks until vsync on KMSDRM.
+//
+// The block is why frame timing must be measured **before** this call, not after — see
+// `docs/3D.md` §7, where reading the clock afterwards made the balance game report the
+// panel's refresh rate as its own cost.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_engine3d_end_frame(GiochiEngine3D* engine);
+// ```
+int32_t giochi_engine3d_end_frame(GiochiEngine3D *engine);
+
+// Returns a camera at the origin looking down -Z, 60° vertical FOV.
+//
+// `aspect` is `0.0`, meaning "ask the drawable": on a console the panel's real size is
+// authoritative (ADR-035).
+//
+// # C ABI
+//
+// ```c
+// GiochiCamera3D giochi_camera3d_new(void);
+// ```
+struct GiochiCamera3D giochi_camera3d_new(void);
+
+// Points `camera` from `position` at `target`.
+//
+// Returns nothing because there is nothing useful to return: an unusable camera (up
+// parallel to the view direction, or `position == target`) is reported by
+// [`giochi_renderer3d_draw_mesh`], which is the call that needs a view matrix.
+//
+// # C ABI
+//
+// ```c
+// void giochi_camera3d_look_at(GiochiCamera3D* camera,
+//                              GiochiVec3 position, GiochiVec3 target);
+// ```
+void giochi_camera3d_look_at(struct GiochiCamera3D *camera,
+                             struct GiochiVec3 position,
+                             struct GiochiVec3 target);
+
+// Returns the identity transform: no translation, no rotation, unit scale.
+//
+// A zeroed `GiochiTransform3D` has **zero scale**, which draws nothing. This is the
+// value to start from.
+//
+// # C ABI
+//
+// ```c
+// GiochiTransform3D giochi_transform3d_identity(void);
+// ```
+struct GiochiTransform3D giochi_transform3d_identity(void);
+
+// Returns a transform that only translates.
+//
+// # C ABI
+//
+// ```c
+// GiochiTransform3D giochi_transform3d_from_translation(GiochiVec3 translation);
+// ```
+struct GiochiTransform3D giochi_transform3d_from_translation(struct GiochiVec3 translation);
+
+// Loads a Wavefront OBJ file as a mesh.
+//
+// Writes the handle to `out` and returns `GIOCHI_ERROR_OK`, or writes nothing and
+// returns a negative code. The mesh belongs to this thread's engine (§10.5) and must be
+// released with [`giochi_mesh_destroy`].
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_mesh_load_obj(const char* path, GiochiMeshHandle* out);
+// ```
+int32_t giochi_mesh_load_obj(const char *path, uint64_t *out);
+
+// Creates a cube centred on the origin with the given edge length.
+//
+// The same mesh `create_cube_mesh` builds on the Rust side, indexed and with outward
+// winding. Exists so a C program can draw something without shipping an OBJ.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_mesh_create_cube(float size, GiochiMeshHandle* out);
+// ```
+int32_t giochi_mesh_create_cube(float size, uint64_t *out);
+
+// Releases a mesh.
+//
+// `0` and unknown handles are `GIOCHI_ERROR_INVALID_HANDLE`, matching part I: a double
+// free is a bug in the caller and must be visible.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_mesh_destroy(GiochiMeshHandle mesh);
+// ```
+int32_t giochi_mesh_destroy(uint64_t mesh);
+
+// Compiles a vertex/fragment shader pair read from disk.
+//
+// R10: shader source lives in files, so there is no function that takes GLSL as a
+// string (§11). On failure the error message carries the driver's own compile or link
+// log, which is the only thing that makes a shader bug findable.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_shader_load(const char* vert_path, const char* frag_path,
+//                            GiochiShaderHandle* out);
+// ```
+int32_t giochi_shader_load(const char *vert_path, const char *frag_path, uint64_t *out);
+
+// Compiles one of the shaders the engine ships (§10.6).
+//
+// `which` is `GIOCHI_SHADER_FLAT`, `GIOCHI_SHADER_TEXTURED` or `GIOCHI_SHADER_PHONG`;
+// anything else is `GIOCHI_ERROR_INVALID_ARGUMENT` rather than a guess.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_shader_builtin(int32_t which, GiochiShaderHandle* out);
+// ```
+int32_t giochi_shader_builtin(int32_t which, uint64_t *out);
+
+// Releases a shader program. Mirrors [`giochi_mesh_destroy`].
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_shader_destroy(GiochiShaderHandle shader);
+// ```
+int32_t giochi_shader_destroy(uint64_t shader);
+
+// Sets the clear colour and clears colour and depth immediately.
+//
+// Clearing here as well as in [`giochi_engine3d_begin_frame`] makes the call
+// order-independent: `begin_frame` then `clear` re-clears with the colour just given,
+// and `clear` then `begin_frame` leaves the colour in place for `begin_frame` to use.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_renderer3d_clear(GiochiEngine3D* engine, GiochiColor3D color);
+// ```
+int32_t giochi_renderer3d_clear(GiochiEngine3D *engine, struct GiochiColor3D color);
+
+// Draws `mesh` with `shader` at `model`, seen through `camera`, in `color`.
+//
+// `model` and `camera` must both be non-NULL: a NULL model is not silently the identity
+// (§10.7), because a caller that forgot it would get a scene piled at the origin with no
+// error.
+//
+// Returns `GIOCHI_ERROR_INVALID_HANDLE` when either handle is unknown, and
+// `GIOCHI_ERROR_INVALID_ARGUMENT` when the camera cannot produce a view matrix
+// (`position == target`, or `up` parallel to the view direction).
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_renderer3d_draw_mesh(GiochiEngine3D* engine,
+//                                     GiochiMeshHandle mesh,
+//                                     GiochiShaderHandle shader,
+//                                     const GiochiTransform3D* model,
+//                                     const GiochiCamera3D* camera,
+//                                     GiochiColor3D color);
+// ```
+int32_t giochi_renderer3d_draw_mesh(GiochiEngine3D *engine,
+                                    uint64_t mesh,
+                                    uint64_t shader,
+                                    const struct GiochiTransform3D *model,
+                                    const struct GiochiCamera3D *camera,
+                                    struct GiochiColor3D color);
+
 // Creates a texture by loading an image file (PNG, JPEG, BMP, …).
 //
 // Goes through the resource cache: loading the same path twice returns the same
@@ -924,7 +1304,7 @@ uint32_t giochi_abi_version(void);
 
 // Returns the engine version packed as `major << 16 | minor << 8 | patch`.
 //
-// For version `0.1.1` this returns `0x0000_0101`.
+// For version `0.2.0` this returns `0x0000_0200`.
 //
 // # C ABI
 //
