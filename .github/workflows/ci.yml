@@ -20,7 +20,7 @@ jobs:
     name: Quality gates (x86_64)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         run: |
@@ -88,7 +88,7 @@ jobs:
     name: C and Python consumers
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         run: |
@@ -112,7 +112,7 @@ jobs:
     name: Cross-check (aarch64)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust and the ARM64 cross toolchain
         run: |
@@ -136,7 +136,7 @@ jobs:
     name: Demo, examples and the Lua game
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         run: |

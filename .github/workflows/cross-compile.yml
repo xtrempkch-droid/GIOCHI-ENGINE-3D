@@ -47,7 +47,7 @@ jobs:
     name: aarch64 cargo check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust and the ARM64 cross toolchain
         run: |
@@ -73,7 +73,7 @@ jobs:
     # `ubuntu-latest` moving releases is exactly what broke it once.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         run: |
