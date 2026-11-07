@@ -30,8 +30,8 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 400 testes, 0 falhas
-      (209 das fases 0–8 + 191 da crate 3D)
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 407 testes, 0 falhas
+      (209 das fases 0–8 + 198 da crate 3D)
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
 - [x] `cargo doc --workspace --no-deps --document-private-items` (0 warnings)
 - [x] `scripts/gen-header.sh --check` — `giochi.h` em sincronia com o crate
@@ -52,6 +52,80 @@ Verificações manuais da fase:
   recolha pelo GC, `giochi.quit()`, propagação de erro, `app:step`, `arg`).
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
+
+## Validação de `ball_balance` no PX30 (Mali-G31) — dois bugs encontrados
+Data: 2026-11-07
+
+O jogo foi finalmente executado no aparelho. Correr no hardware encontrou dois bugs que
+o desktop não podia mostrar, e ambos invalidavam exactamente aquilo para que o jogo
+existe.
+
+### 1. O relógio do trabalho por frame era lido depois do swap
+
+`end_frame` no KMSDRM bloqueia até ao vsync. Medir depois dele cobra a **todos** os
+frames os 16,7 ms de espera, portanto:
+
+- o indicador de engasgo ficava permanentemente no limiar (16,7 ms), nem verde nem
+  vermelho, sempre a dizer que o jogo ia a falhar;
+- os percentis reportados (`frame work: p50 16.67`) descreviam o painel a refrescar e
+  não o jogo.
+
+Medido depois da correcção, no Mali-G31: **p50 1,07 ms, p99 3,77 ms** em 240 frames,
+0 frames acima de 20 ms. Ou seja, o jogo tem ~13 ms de folga a 60 Hz. O `scripts/
+hardware-check.sh` agora falha se o p99 reportado se aproximar de um intervalo de
+refrescamento, para isto não voltar.
+
+O `--trace` passou a chamar ao campo `work` em vez de `dt`: é o custo do jogo, não um
+intervalo entre frames.
+
+### 2. Os dois indicadores de latência estavam fora do campo de visão
+
+O painel do console é 640×480 — **4:3**, portanto mais estreito do que uma janela
+1280×720. Os marcadores tinham sido colocados a olho num ecrã 16:9:
+
+| Marcador | ndc a 16:9 | ndc a 4:3 |
+|---|---|---|
+| Indicador de engasgo | −0,90 | **−1,21 → fora do ecrã** |
+| Marcador de input, centrado | +0,64 | +0,85 |
+| Marcador de input, stick a fundo | +0,90 | **+1,21 → fora do ecrã** |
+
+Confirmado na captura: a 640×480, **zero** pixéis azuis e **zero** verdes. O
+utilizador veria a plataforma e a bola e nenhum dos dois indicadores que explicam de
+onde vem o atraso.
+
+Correcção: a câmara e as âncoras dos marcadores passaram para
+`giochi_engine_3d::game::BalanceView`, e `every_marker_stays_on_screen` projecta os dois
+marcadores através dessa câmara a **1280×720 e 640×480**, em toda a gama do stick,
+exigindo `|ndc| < 0,85`. Depois da correcção, na captura do aparelho: marcador azul
+1482 px, indicador verde 1482 px, ambos dentro do quadro.
+
+### Instalado como aplicação do console
+
+O jogo não ficou só num directório: está registado no lançador, portanto aparece no menu
+do aparelho e arranca com o comando, sem SSH.
+
+| O quê | Onde |
+|---|---|
+| Catálogo | `/opt/giochi/apps/index.json` (entrada `equilibrio`; cópia de segurança em `index.json.bak`) |
+| Instalação | `/user/apps/equilibrio/` — `bin/ball_balance`, `metadata.json`, `capa.png` |
+| Cópia de trabalho | `/opt/giochi/bin/ball_balance` (a que os scripts de teste usam) |
+
+Verificado no aparelho: depois de reiniciar o lançador, ele arrancou o jogo sozinho —
+`/proc/<pid>/cmdline` = `/user/apps/equilibrio/bin/ball_balance`, `cwd` =
+`/user/apps/equilibrio`, RSS 20 MB, 11 % de um núcleo (bloqueado no vsync a 60 Hz). Ao
+terminar, o lançador recuperou o DRM master e voltou ao menu. O ciclo completo funciona.
+
+A `capa.png` (320×320 RGBA, o mesmo formato da do Cobrinha) é um placeholder gerado por
+código — a plataforma inclinada e a bola, nas cores do jogo. Vale a pena substituí-la.
+
+### 3. `Mat4::transform_point` não divide por `w`
+
+Encontrado ao escrever o teste acima. Espelha o `transform_point3` do `glam`, que
+**afirma** que a linha de baixo é `[0, 0, 0, 1]` — ou seja, é só para matrizes afins.
+Passar-lhe uma matriz de projecção devolve coordenadas de *clip*, que se parecem com
+números normais. Foi por isso que os marcadores fora do ecrã passaram despercebidos.
+`Mat4::project_point` faz a divisão e devolve `None` para um ponto atrás do olho; o
+`transform_point` ficou documentado como afim.
 
 ## Entregue na fase 13 — Iluminação direcional (Phong)
 Data: 2026-11-07
@@ -589,20 +663,18 @@ As oito fases do prompt mestre estão completas. Trabalho futuro, por ordem de v
 ## Bloqueios / pendências
 
 - Nenhum bloqueio de gate.
-- **`ball_balance` está construído, validado e no repositório — mas NÃO está no
-  aparelho.** Este é o único pedido do utilizador que continua por cumprir, e a causa
-  não é código. Na última verificação o `rk817-battery` lia `capacity=0`,
-  `CHARGE_NOW=0`, `voltage_avg=3498000 µV` — **abaixo** do `voltage_min_design`
-  (3 500 000 µV) — com `current_avg=-334 mA` e o carregador `rk817-charger` com
-  `online=0`: o USB-ethernet dá dados e não carrega. Como o rootfs **não sobrevive a um
-  corte de energia** (foi assim que `/opt/giochi` e `/root/.ssh/authorized_keys` se
-  perderam das outras vezes), correr GLES nessa situação é destrutivo e não apenas
-  arriscado. Depois disso o adaptador USB-ethernet desapareceu do `ip link` (o aparelho
-  foi fisicamente desligado), portanto também não há caminho de rede.
-  **Para desbloquear:** ligar a uma fonte que carregue, e depois
+- **`ball_balance` está no aparelho e validado no Mali-G31.** Os três exemplos 3D
+  estão em `/opt/giochi/bin/` e correram no hardware: `cube_demo`, `mini_fps` (com
+  Phong) e `ball_balance` (240 frames, 0 erros GL, p50 1,07 ms). Ver a secção de
+  validação acima.
+  **Cuidado ao repetir:** a bateria estava a 8 % com o carregador `online=0` (o
+  USB-ethernet dá dados e não carrega). O aparelho esteve 55 min estável a 3,75 V, o
+  que chega para um deploy, mas o rootfs **não sobrevive a um corte de energia**. Por
+  isso `scripts/hardware-check.sh` passou a ler a bateria **antes** de escrever na
+  flash e recusa correr abaixo de 5 % ou abaixo do `voltage_min_design`; há um
+  `--force-low-battery` para quando for uma decisão consciente. A sequência completa é
   `scripts/hardware-check.sh --host root@10.55.0.2 --sysroot /tmp/r35s-sysroot
-  --skip-build` — que agora verifica a bateria, copia `cube_demo`, `mini_fps` e
-  `ball_balance` para `/opt/giochi/bin/` e corre os três no Mali-G31.
+  --skip-build`.
 - **PX30 acessível de novo (13:30).** O acesso voltou; fases 10 e 11 validadas no
   Mali-G31 (ver as secções das fases). Nota operacional: o aparelho tinha perdido
   `/opt/giochi` e o `authorized_keys`, ou seja o rootfs não sobrevive a um corte de

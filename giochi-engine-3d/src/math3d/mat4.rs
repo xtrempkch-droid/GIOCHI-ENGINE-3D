@@ -233,8 +233,44 @@ impl Mat4 {
     }
 
     /// Transforms a point (including the translation column).
+    ///
+    /// **This is only correct for an affine matrix** — a model or a view matrix. It does
+    /// not divide by `w`, which `glam`'s `transform_point3` also does not (it asserts that
+    /// the bottom row is `[0, 0, 0, 1]`). Feeding it a projection matrix returns *clip*
+    /// coordinates, which look like plausible but wrong numbers rather than failing; use
+    /// [`Self::project_point`] for that.
     pub fn transform_point(self, point: Vec3) -> Vec3 {
         Vec3::from_glam(self.to_glam().transform_point3(point.to_glam()))
+    }
+
+    /// Projects a point through this matrix **with** the perspective divide.
+    ///
+    /// Returns normalised device coordinates: `x` and `y` in `-1..=1` inside the frame,
+    /// and `z` in `-1..=1` between the near and far planes (OpenGL's convention, which is
+    /// what [`Camera3D::projection_matrix`](super::Camera3D::projection_matrix) produces —
+    /// see ADR-038 on why `perspective_rh_gl` and not `perspective_rh`).
+    ///
+    /// Returns `None` when `w <= 0`, which is a point at or behind the eye. There the
+    /// divide flips the sign, so a point behind the camera would otherwise come back as a
+    /// perfectly ordinary-looking coordinate in front of it — the bug that makes an
+    /// off-screen object appear to be on screen.
+    pub fn project_point(self, point: Vec3) -> Option<Vec3> {
+        let d = self.data;
+        let (x, y, z) = (point.x, point.y, point.z);
+
+        let w = d[3] * x + d[7] * y + d[11] * z + d[15];
+        // `w <= 0.0` is false for NaN, which would then be divided by, so the finiteness
+        // check is not redundant.
+        if !w.is_finite() || w <= 0.0 {
+            return None;
+        }
+        let inverse_w = 1.0 / w;
+
+        Some(Vec3::new(
+            (d[0] * x + d[4] * y + d[8] * z + d[12]) * inverse_w,
+            (d[1] * x + d[5] * y + d[9] * z + d[13]) * inverse_w,
+            (d[2] * x + d[6] * y + d[10] * z + d[14]) * inverse_w,
+        ))
     }
 
     /// Returns `true` when every element is finite.
@@ -259,6 +295,7 @@ impl std::ops::Mul for Mat4 {
 
 #[cfg(test)]
 mod tests {
+    use super::super::Camera3D;
     use super::*;
     use core::mem::{align_of, size_of};
     use std::f32::consts::{FRAC_PI_2, PI};
@@ -607,6 +644,55 @@ mod tests {
             assert_close(normal.data[index], 0.0, "translation column");
         }
         assert_close(normal.data[15], 1.0, "w");
+    }
+
+    #[test]
+    fn project_point_divides_by_w() {
+        // An affine matrix has w = 1 everywhere, so projecting through it must agree with
+        // `transform_point`. This is the case a caller is most likely to rely on.
+        let model = Mat4::from_translation(Vec3::new(1.0, 2.0, 3.0));
+        let point = Vec3::new(-1.0, 0.5, 2.0);
+        let projected = model.project_point(point).expect("in front");
+
+        assert_close(projected.x, 0.0, "x");
+        assert_close(projected.y, 2.5, "y");
+        assert_close(projected.z, 5.0, "z");
+        assert_eq!(projected, model.transform_point(point));
+    }
+
+    #[test]
+    fn project_point_puts_the_centre_of_the_view_at_the_centre_of_the_frame() {
+        let camera = Camera3D::from_parts(Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0), Vec3::UP)
+            .with_fov_y(FRAC_PI_2)
+            .with_aspect(1.0);
+        let view_proj = camera.view_projection().expect("valid");
+
+        let on_axis = view_proj
+            .project_point(Vec3::new(0.0, 0.0, -5.0))
+            .expect("in front");
+        assert_close(on_axis.x, 0.0, "x at the centre");
+        assert_close(on_axis.y, 0.0, "y at the centre");
+
+        // At 90 degrees of vertical FOV and an aspect of 1, a point 5 units away and 5
+        // units up is exactly on the top edge of the frame: ndc.y == 1.
+        let on_edge = view_proj
+            .project_point(Vec3::new(0.0, 5.0, -5.0))
+            .expect("in front");
+        assert_close(on_edge.y, 1.0, "y on the top edge");
+    }
+
+    #[test]
+    fn project_point_refuses_a_point_behind_the_eye() {
+        // Without the `w > 0` guard the divide flips the sign and a point behind the camera
+        // comes back looking like a point in front of it, which is how an object that
+        // should be culled ends up drawn at the wrong place.
+        let camera = Camera3D::from_parts(Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0), Vec3::UP)
+            .with_fov_y(FRAC_PI_2)
+            .with_aspect(1.0);
+        let view_proj = camera.view_projection().expect("valid");
+
+        assert!(view_proj.project_point(Vec3::new(0.0, 0.0, 5.0)).is_none());
+        assert!(view_proj.project_point(Vec3::new(0.0, 0.0, 0.0)).is_none());
     }
 
     #[test]

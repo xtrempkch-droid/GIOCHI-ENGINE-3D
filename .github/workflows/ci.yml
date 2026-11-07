@@ -263,17 +263,28 @@ jobs:
           width, height = struct.unpack("<ii", data[18:26])
           assert (width, height) == (1280, 720), f"{width}x{height}"
 
-          pale = grey = 0
+          pale = grey = blue = green = 0
           for i in range(offset, len(data), 4):
               b, g, r = data[i], data[i + 1], data[i + 2]
               if r > 190 and g > 180 and b > 120:
                   pale += 1
               elif 55 < r < 90 and 62 < g < 100 and 78 < b < 120:
                   grey += 1
+              elif r < 140 and g > 140 and b > 190:
+                  blue += 1
+              elif r < 110 and g > 150 and b < 140:
+                  green += 1
 
           assert pale > 2000, f"no ball in the frame ({pale} pale pixels)"
           assert grey > 40000, f"no platform in the frame ({grey} grey pixels)"
-          print(f"ball {pale} px, platform {grey} px")
+          # The two indicators are the reason the game exists: the blue cube is the raw
+          # input, the green one is the hitch lamp. Neither is an error if it is off
+          # screen, which is how they once shipped invisible on the console's 4:3 panel --
+          # `BalanceView`'s tests check the 4:3 case, and this checks that the example
+          # actually draws what they place.
+          assert blue > 500, f"the raw-input marker is not in the frame ({blue} blue px)"
+          assert green > 500, f"the hitch indicator is not in the frame ({green} green px)"
+          print(f"ball {pale} px, platform {grey} px, input marker {blue} px, hitch {green} px")
           PY
 
       - name: 3D frame capture

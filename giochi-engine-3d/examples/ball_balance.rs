@@ -35,8 +35,8 @@ use giochi_engine::platform::sdl::{quit_signal, QuitSignal};
 use giochi_engine::platform::window::{Window, WindowConfig};
 use giochi_engine::platform::Platform;
 use giochi_engine_3d::context::{self, GlesVersion};
-use giochi_engine_3d::game::{BalanceConfig, BalanceGame};
-use giochi_engine_3d::math3d::{Camera3D, Color3D, Transform3D, Vec3};
+use giochi_engine_3d::game::{BalanceConfig, BalanceGame, BalanceView};
+use giochi_engine_3d::math3d::{Color3D, Transform3D, Vec3};
 use giochi_engine_3d::shader::BuiltinShader;
 use giochi_engine_3d::RenderContext3D;
 use sdl2::keyboard::Keycode;
@@ -219,12 +219,13 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
 
     render.set_clear_color(Color3D::new(0.07, 0.09, 0.14, 1.0));
 
-    // Fixed and high: the whole platform is visible at once, which is what a balance game
-    // needs. The aspect ratio comes from the real drawable every frame, so the 4:3 console
-    // panel frames the same way without a second constant (ADR-035).
-    let camera = Camera3D::from_parts(Vec3::new(0.0, 6.6, 7.2), Vec3::ZERO, Vec3::UP)
-        .with_fov_y(0.85)
-        .with_clip_planes(0.1, 100.0);
+    // The camera and the two indicators live in `game::BalanceView`, not here, because
+    // whether they are on screen is a checkable property and nothing was checking it: the
+    // markers were originally placed by eye against a 16:9 window, and on the console's 4:3
+    // panel the hitch indicator sat entirely outside the frame and the input marker left it
+    // at full deflection. `BalanceView` is tested at both aspect ratios.
+    let view = BalanceView::new(config.platform_size / 2.0);
+    let camera = view.camera().with_clip_planes(0.1, 100.0);
 
     let mut input = Input::new(&platform);
     let mut game = BalanceGame::new(config);
@@ -340,11 +341,7 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         render.draw_mesh_colored(
             marker_mesh,
             shader,
-            &Transform3D::from_translation(Vec3::new(
-                2.9 + stick.0 * 1.2,
-                1.1,
-                4.6 + stick.1 * 1.2,
-            )),
+            &Transform3D::from_translation(view.input_marker_position(stick)),
             &camera,
             Color3D::new(0.35, 0.75, 1.0, 1.0),
         )?;
@@ -353,7 +350,7 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         render.draw_mesh_colored(
             marker_mesh,
             shader,
-            &Transform3D::from_translation(Vec3::new(-4.1, 1.1, 4.6)),
+            &Transform3D::from_translation(view.hitch_marker_position()),
             &camera,
             stats.indicator(),
         )?;
@@ -369,6 +366,14 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             println!("quadro: {path} ({width}x{height})");
         }
 
+        // Measured **before** the swap, and this is the whole point of the indicator.
+        // `end_frame` swaps the buffers, and on KMSDRM that blocks until vsync: reading
+        // the clock after it charges every frame the 16.7 ms it waited, so the hitch
+        // indicator sits permanently on its own threshold and reports a lag that is
+        // just the display refreshing. What a player needs to know is how long the game
+        // took to produce the frame, not how long the panel took to show it.
+        let frame_millis = frame_started.elapsed().as_secs_f32() * 1000.0;
+
         render.end_frame(&window);
 
         let error = render.take_gl_error();
@@ -376,7 +381,6 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             return Err(format!("GL error 0x{error:04x} on frame {frames}").into());
         }
 
-        let frame_millis = frame_started.elapsed().as_secs_f32() * 1000.0;
         stats.record(frame_millis);
 
         // The trace is the measurement: one line per frame with the input, the tilt and
@@ -386,7 +390,7 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             let (bx, bz) = ball.position();
             let (vx, vz) = ball.velocity();
             println!(
-                "f{frames:04} dt {frame_millis:5.2}ms in ({:+.2},{:+.2}) tilt ({:+.3},{:+.3}) \
+                "f{frames:04} work {frame_millis:5.2}ms in ({:+.2},{:+.2}) tilt ({:+.3},{:+.3}) \
                  ball ({bx:+.3},{bz:+.3}) v ({vx:+.2},{vz:+.2})",
                 stick.0,
                 stick.1,
@@ -408,6 +412,10 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         }
 
         if frame_budget_ms > 0 {
+            // Pacing is the one place the post-swap time is the right number: the swap
+            // has already spent whatever the display wanted, and only the remainder up
+            // to the budget is ours to sleep. Using the pre-swap figure here would stack
+            // a delay on top of the vsync wait and halve the frame rate.
             let spent = frame_started.elapsed().as_millis() as u32;
             if spent < frame_budget_ms {
                 platform.delay_ms(frame_budget_ms - spent);

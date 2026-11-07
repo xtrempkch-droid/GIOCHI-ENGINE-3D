@@ -483,6 +483,17 @@ then
         echo "  FAIL the script pushes right; the ball ended at x='${ball_x:-missing}'" >&2
         failures=$((failures + 1))
     fi
+    # The reported work must be the game's own cost, not the vsync wait. KMSDRM's
+    # `end_frame` blocks until the panel refreshes, so a clock read after the swap
+    # charges every frame a full refresh interval -- the indicator then sits on its own
+    # threshold and reports the display rather than a stutter. Anything near 16.7 ms
+    # here means exactly that.
+    ball_p99=$(sed -n 's/.*p99 \([0-9][0-9.]*\).*/\1/p' "$balance_log" | tail -1)
+    if [[ -n "$ball_p99" ]] && awk -v v="$ball_p99" 'BEGIN { exit !(v < 10.0) }'; then :; else
+        echo "  FAIL frame work p99 is '${ball_p99:-missing}' ms; a value near a refresh" >&2
+        echo "       interval (16.7 ms at 60 Hz) means the clock is read after the swap" >&2
+        failures=$((failures + 1))
+    fi
 else
     sed -e 's/^/  /' "$balance_log" >&2
     failures=$((failures + 1))

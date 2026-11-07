@@ -5,5 +5,7 @@
 //! without a display.
 
 pub mod balance;
+pub mod view;
 
 pub use balance::{tilt_from_input, BalanceConfig, BalanceGame, Ball};
+pub use view::BalanceView;

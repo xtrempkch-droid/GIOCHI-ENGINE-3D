@@ -28,6 +28,38 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - ADR-040 records the three choices that are not obvious: one light per frame, `direction`
   follows the photons, and a CPU normal matrix.
 
+### Fixed — the balance game on the console
+
+Two bugs that only a 640×480 panel could show, both found by running the game on the
+PX30 rather than on a desktop.
+
+- **The frame-work clock was read after the swap.** KMSDRM's `end_frame` blocks until
+  vsync, so every frame was charged the 16.7 ms it waited: the hitch indicator sat
+  permanently on its own threshold and the reported percentiles described the display
+  rather than the game. Measured cost on the Mali-G31 is 1.0 ms p50 / 3.8 ms p99, against
+  the 16.7 ms it used to claim. `scripts/hardware-check.sh` now fails if the reported p99
+  is anywhere near a refresh interval.
+- **Both latency indicators were outside the camera's field of view.** The console panel
+  is 4:3 and therefore narrower than a 1280×720 window; the hitch cube projected to
+  ndc −1.2 and the input cube left the frame at full stick deflection. The camera and the
+  marker anchors moved into `game::BalanceView`, and `every_marker_stays_on_screen`
+  projects them at both aspect ratios across the whole stick range.
+- The `--trace` field is now called `work`, not `dt`, because it is the game's own cost
+  and not a frame interval.
+
+### Added — `Mat4::project_point`
+
+A correct projection: divides by `w` and returns `None` for a point behind the eye.
+`Mat4::transform_point` does not divide — it mirrors `glam`'s `transform_point3`, which
+asserts an affine bottom row — so on a projection matrix it returns clip coordinates that
+look like ordinary numbers. That is how the off-screen markers went unnoticed; the
+affine-only restriction is now documented on `transform_point`.
+
+### Added — `giochi_engine_3d::game::BalanceView`
+
+The balance game's camera and marker layout, extracted from the example so that "are the
+indicators on screen" became a test instead of an opinion.
+
 ### Fixed — 3D by the lighting work
 
 - `read_pixels`-based assertions initially passed for the wrong reason: the sample bands
