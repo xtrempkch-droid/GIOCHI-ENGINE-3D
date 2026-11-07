@@ -463,13 +463,15 @@ fn a_crates_top_face_reads_brighter_than_its_side_the_phase_13_acceptance_check(
     let shader = render
         .create_builtin_shader(BuiltinShader::Phong)
         .expect("phong");
-    // The crate `mini_fps` draws: 0.6 units, resting on the floor, seen by a walker whose
-    // eyes are 1.7 units up. These are that example's own numbers, not convenient ones.
+
+    // `mini_fps`'s crate, its eye height, and its light. The camera stands closer than the
+    // walker happens to be so the crate fills enough of the frame to sample: at the probe
+    // resolution a crate 6 units away is 20-odd pixels tall and the two faces are within a
+    // patch of each other.
     let crate_size = 0.6_f32;
     let crate_mesh = render.create_cube_mesh(crate_size).expect("cube");
-    let camera = Camera3D::from_parts(Vec3::new(0.0, 1.7, 6.0), Vec3::new(0.0, 0.3, 0.0), Vec3::UP)
+    let camera = Camera3D::from_parts(Vec3::new(0.0, 1.7, 1.6), Vec3::new(0.0, 0.3, 0.0), Vec3::UP)
         .with_clip_planes(0.1, 100.0);
-    // Exactly the light `mini_fps` sets.
     let light = DirectionalLight::sun()
         .with_direction(Vec3::new(0.4, -1.0, 0.3))
         .with_specular(0.3, 24.0);
@@ -491,26 +493,38 @@ fn a_crates_top_face_reads_brighter_than_its_side_the_phase_13_acceptance_check(
     assert_eq!(error, 0, "GL error 0x{error:04x} drawing the crate");
     let pixels = render.read_pixels(WIDTH, HEIGHT).expect("read back");
 
-    // A point on the top face and a point on the face turned towards the camera. Both are
-    // chosen from the geometry, so the patches cannot land on the wrong surface: the top
-    // face is at y = crate_size, the front at z = +half.
     let half = crate_size * 0.5;
+    // Centres of the two faces, chosen from the geometry rather than by eye: the top face
+    // is the plane y = crate_size, the front face the plane z = +half.
     let (top_x, top_y) = to_pixels(&camera, Vec3::new(0.0, crate_size, 0.0));
     let (side_x, side_y) = to_pixels(&camera, Vec3::new(0.0, crate_size * 0.5, half));
 
-    let top = patch_at(&pixels, top_x, top_y, 3);
-    let side = patch_at(&pixels, side_x, side_y, 3);
-
-    // "Face superior mais clara que lateral", as a measurement. The margin is large because
-    // the difference is: the sun is 0.89 of the way to straight up, so the top face gets
-    // ambient + 0.7 * 0.89, while the front face's normal points away from the light and
-    // gets ambient alone.
+    // Patches that overlap measure the seam between two faces and report the average of
+    // both, which is how this test first passed locally by 1 unit of luma and then failed
+    // on the runner. The framing is checked before it is trusted.
+    const PATCH: usize = 3;
+    let separation =
+        ((top_x as f64 - side_x as f64).powi(2) + (top_y as f64 - side_y as f64).powi(2)).sqrt();
     assert!(
-        top > side + 30.0,
+        separation > (PATCH * 2 + 2) as f64,
+        "the two sample patches overlap: top ({top_x},{top_y}) and front ({side_x},{side_y}) \
+         are {separation:.1} px apart, which cannot separate two {PATCH}-px patches. \
+         Move the camera closer or the crate further from the eye."
+    );
+
+    let top = patch_at(&pixels, top_x, top_y, PATCH);
+    let side = patch_at(&pixels, side_x, side_y, PATCH);
+
+    // "Face superior mais clara que lateral", as a measurement. The margin is wide because
+    // the difference is: the sun is 0.89 of the way to straight up, so the top face gets
+    // ambient + 0.7 * 0.89 while the front face's normal points away from the light and
+    // gets ambient alone -- roughly a factor of three.
+    assert!(
+        top > side * 1.5,
         "the top face must read brighter than the front face: \
          top ({top_x},{top_y})={top:.1}, front ({side_x},{side_y})={side:.1}"
     );
-    // And both must actually be on the crate, not on the black background behind it.
+    // And both must be on the crate, not on the black background behind it.
     assert!(top > 60.0, "the top patch is on the background: {top:.1}");
     assert!(
         side > 20.0,

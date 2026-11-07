@@ -74,7 +74,9 @@ unit test and not the acceptance check.
   it with the example's own numbers — crate size, eye height, and the exact light
   `mini_fps` sets — projecting a point on the top face and one on the front face with
   `Mat4::project_point` and sampling a patch around each, rather than guessing where the
-  faces landed.
+  faces landed. Its first version had the two patches 6 px apart, so both sampled the seam
+  and reported a blend; the framing is now asserted (`separation > 2 * patch + 2`) and the
+  threshold is a ratio (3.3× measured against 1.5× required) rather than a difference.
 
 ### Fixed — 3D by the lighting work
 
