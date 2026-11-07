@@ -182,17 +182,27 @@ jobs:
           test -f artifacts/giochi-engine-aarch64-unknown-linux-gnu/giochi-engine-aarch64-unknown-linux-gnu.tar.gz
 
       - name: Verify the x86_64 archive by running it
-        # A well-formed tarball is not a working one. 0.1.0 shipped four portability
-        # bugs that a run would have caught, which is why the release is a draft --
-        # this makes that review a gate instead of a good intention.
+        # A well-formed tarball is not a working one. 0.1.0 shipped four portability bugs
+        # that a run would have caught. This is now a blocking gate inside the same job
+        # that creates the release, which is why the release is no longer a draft: the
+        # check runs the archive's own demo, Lua game and C consumer against the archive's
+        # own library, and it refuses to continue when any of them fails. It earned that
+        # trust on its first real run, where it caught a 0.1.1 library under a 0.2.0
+        # header and two workflow bugs that had never executed before.
         run: |
           set -euo pipefail
           ./scripts/verify-release-artifact.sh \
             artifacts/giochi-engine-x86_64-unknown-linux-gnu/giochi-engine-x86_64-unknown-linux-gnu.tar.gz
 
       - name: Verify the ARM64 archive layout
-        # The binary cannot execute on this runner, so check the structure and prove
-        # the ELF really is AArch64 rather than a host binary with a misleading name.
+        # The binary cannot execute on this runner, so check the structure and prove the
+        # ELF really is AArch64 rather than a host binary with a misleading name.
+        #
+        # This is the limit of what CI can know about the console, so validating the
+        # ARM64 archive on a device is a maintainer step: run
+        # `scripts/hardware-check.sh --skip-build` against the real hardware and record
+        # the result in PROGRESS.md **before** pushing the tag. That is what makes the
+        # automation above safe to trust without a human gating the publish.
         run: |
           set -euo pipefail
           archive=artifacts/giochi-engine-aarch64-unknown-linux-gnu/giochi-engine-aarch64-unknown-linux-gnu.tar.gz
@@ -220,6 +230,8 @@ jobs:
             artifacts/giochi-engine-x86_64-unknown-linux-gnu/giochi-engine-x86_64-unknown-linux-gnu.tar.gz
             artifacts/giochi-engine-aarch64-unknown-linux-gnu/giochi-engine-aarch64-unknown-linux-gnu.tar.gz
           body_path: release-notes.md
-          draft: true
+          # Not a draft: the two verification steps above are the gate, and they block.
+          # A draft only helps if a human remembers to run the thing; these run it.
+          draft: false
           generate_release_notes: true
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
