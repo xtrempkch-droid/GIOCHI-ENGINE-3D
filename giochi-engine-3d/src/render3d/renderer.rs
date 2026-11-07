@@ -13,6 +13,7 @@ use crate::error::{Error3D, Result3D};
 use crate::math3d::{Camera3D, Color3D, Transform3D};
 use crate::mesh::{Mesh, Vertex};
 use crate::registry::HandleRegistry;
+use crate::render3d::DirectionalLight;
 use crate::shader::{BuiltinShader, Program};
 
 /// Opaque handle to a mesh. `0` is invalid.
@@ -38,6 +39,8 @@ pub struct RenderContext3D {
     state: GlState,
     /// Viewport size in physical pixels, updated by `begin_frame`.
     drawable_size: (u32, u32),
+    /// The one light every draw in the frame is shaded with.
+    light: DirectionalLight,
     meshes: HandleRegistry<Mesh>,
     shaders: HandleRegistry<Program>,
 }
@@ -49,6 +52,7 @@ impl std::fmt::Debug for RenderContext3D {
             .field("adapter", &self.gl.adapter())
             .field("state", &self.state)
             .field("drawable_size", &self.drawable_size)
+            .field("light", &self.light)
             .field("meshes", &self.meshes.len())
             .field("shaders", &self.shaders.len())
             .finish_non_exhaustive()
@@ -67,6 +71,7 @@ impl RenderContext3D {
             gl,
             state,
             drawable_size: (1, 1),
+            light: DirectionalLight::sun(),
             meshes: HandleRegistry::new(),
             shaders: HandleRegistry::new(),
         }
@@ -90,6 +95,21 @@ impl RenderContext3D {
     /// Sets the colour the next frame is cleared with.
     pub fn set_clear_color(&mut self, color: Color3D) {
         self.state.clear_color = color.clamped();
+    }
+
+    /// Replaces the light every draw in the frame is shaded with.
+    ///
+    /// Sanitised here rather than at draw time so the cost is paid once per change: the
+    /// per-draw path uploads already-valid numbers. Setting a light only affects
+    /// shaders that read it ([`BuiltinShader::reads_lighting`]); on the others the
+    /// uniforms are not present and the upload is skipped.
+    pub fn set_light(&mut self, light: DirectionalLight) {
+        self.light = light.sanitised();
+    }
+
+    /// The current light, as the shader sees it (already sanitised).
+    pub fn light(&self) -> DirectionalLight {
+        self.light
     }
 
     /// Applies the state, sets the viewport and clears colour and depth.
@@ -419,11 +439,61 @@ impl RenderContext3D {
 
     // ---- drawing ---------------------------------------------------------
 
+    /// Uploads the matrices and the light for one draw, binding `program` first.
+    ///
+    /// Shared by both draw entry points: a uniform that one of them forgets is a scene
+    /// that is lit differently depending on which function drew it, which is close to
+    /// impossible to spot on a console.
+    fn bind_and_upload(
+        &self,
+        program: &Program,
+        model: &Transform3D,
+        camera: &Camera3D,
+    ) -> Result3D<()> {
+        // The camera may legitimately be unresolved (aspect 0.0), and silently drawing
+        // with a stale projection is how a frame ends up subtly wrong on a console.
+        let resolved = camera.with_drawable_size(self.drawable_size.0, self.drawable_size.1);
+        let view_proj = resolved
+            .view_projection()
+            .map_err(|reason| Error3D::InvalidArgument(reason.to_owned()))?;
+
+        let gl = self.gl.glow();
+        program.bind(gl);
+        program.set_mat4(gl, "u_view_proj", &view_proj);
+
+        let model_matrix = model.matrix();
+        program.set_mat4(gl, "u_model", &model_matrix);
+        // Phong reads normals through this; the flat and textured shaders do not have
+        // the uniform, and `set_mat4` skips an unknown name.
+        program.set_mat4(gl, "u_normal_matrix", &model_matrix.normal_matrix());
+
+        // Lighting. `u_light_color` is a `vec3`, so it goes through `set_vec3` and not
+        // `set_color`: `glUniform4fv` on a `vec3` uniform is GL_INVALID_OPERATION, and
+        // the scene would render black with the error only surfacing in `take_gl_error`.
+        let light = self.light;
+        program.set_vec3(gl, "u_light_direction", light.direction);
+        program.set_vec3(
+            gl,
+            "u_light_color",
+            crate::math3d::Vec3::new(light.color.r, light.color.g, light.color.b),
+        );
+        program.set_f32(gl, "u_ambient_strength", light.ambient);
+        program.set_f32(gl, "u_specular_strength", light.specular);
+        program.set_f32(gl, "u_shininess", light.shininess);
+        program.set_vec3(gl, "u_camera_position", resolved.position);
+
+        Ok(())
+    }
+
     /// Draws `mesh` with `shader` at `model`, seen through `camera`.
     ///
     /// Uniforms are set every call rather than cached per (mesh, shader) pair: with a
     /// handful of draws per frame the bookkeeping would cost more than the two
     /// `glUniformMatrix4fv` calls it saves, and stale-model bugs are expensive.
+    ///
+    /// The colour is the clear colour, which makes a quick "does it draw" testable
+    /// without choosing a colour first. Use [`RenderContext3D::draw_mesh_colored`] for
+    /// anything real.
     ///
     /// Returns `false` when either handle is unknown, so a caller can tell "drew
     /// nothing" from "drew a degenerate frame".
@@ -441,23 +511,16 @@ impl RenderContext3D {
             return Ok(false);
         };
 
-        // The camera may legitimately be unresolved (aspect 0.0), and silently drawing
-        // with a stale projection is how a frame ends up subtly wrong on a console.
-        let resolved = camera.with_drawable_size(self.drawable_size.0, self.drawable_size.1);
-        let view_proj = resolved
-            .view_projection()
-            .map_err(|reason| Error3D::InvalidArgument(reason.to_owned()))?;
+        self.bind_and_upload(&program, model, camera)?;
 
-        program.bind(self.gl.glow());
-        program.set_mat4(self.gl.glow(), "u_view_proj", &view_proj);
-        program.set_mat4(self.gl.glow(), "u_model", &model.matrix());
         // The flat shader reads `u_color`; a textured one reads `u_tint`. Setting both
         // is free (a missing uniform is cached as `None` and skipped).
+        let gl = self.gl.glow();
         let colour = self.state.clear_color;
-        program.set_color(self.gl.glow(), "u_color", colour);
-        program.set_color(self.gl.glow(), "u_tint", Color3D::WHITE);
+        program.set_color(gl, "u_color", colour);
+        program.set_color(gl, "u_tint", Color3D::WHITE);
 
-        mesh.draw(self.gl.glow(), &program);
+        mesh.draw(gl, &program);
 
         Ok(true)
     }
@@ -478,14 +541,7 @@ impl RenderContext3D {
             return Ok(false);
         };
 
-        let resolved = camera.with_drawable_size(self.drawable_size.0, self.drawable_size.1);
-        let view_proj = resolved
-            .view_projection()
-            .map_err(|reason| Error3D::InvalidArgument(reason.to_owned()))?;
-
-        program.bind(self.gl.glow());
-        program.set_mat4(self.gl.glow(), "u_view_proj", &view_proj);
-        program.set_mat4(self.gl.glow(), "u_model", &model.matrix());
+        self.bind_and_upload(&program, model, camera)?;
         program.set_color(self.gl.glow(), "u_color", colour.clamped());
 
         mesh.draw(self.gl.glow(), &program);

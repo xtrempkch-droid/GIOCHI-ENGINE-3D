@@ -1014,3 +1014,52 @@ global 2D canvas, `giochi_engine3d_*` is an instance the caller owns.
 (`giochi_engine3d_create` / `_destroy`). That is the correct trade: a 3D engine owns a
 GPU context, and pretending otherwise would hide the expensive object behind global
 state.
+
+---
+
+## ADR-040 — Lighting is one directional light on the renderer, Blinn-Phong, with a CPU normal matrix
+
+**Context.** Phase 13 asks for directional Phong (ambient + diffuse + specular). Three
+choices are not obvious and each has a cheap-looking alternative that fails later.
+
+1. *Where the light lives.* Per mesh, per shader, per draw call, or per frame?
+2. *What "direction" means.* The vector the light travels, or the vector towards it?
+3. *How normals reach world space.* `mat3(u_model)` as the phase 11 flat shader already
+   did, or an inverse-transpose computed somewhere.
+
+**Decision.**
+
+**One light, on `RenderContext3D`, sanitised on assignment.** `set_light` stores a
+clamped `DirectionalLight`; every draw uploads it. Per-mesh lights would need a
+registry, a handle and a lifetime for something every scene in this repository sets
+once, and the per-draw cost is five uniforms either way. A scene that needs more than
+one light bakes the extra ones into its vertex colours, which is what GLES 2.0 games of
+this size have always done.
+
+**`direction` points the way the light travels.** The shader negates it once. The
+alternative convention is equally common, and that is exactly why it is written down
+twice — in the struct docs and in `docs/3D.md` — instead of being inferred from the
+shader.
+
+**The normal matrix is `transpose(inverse(mat3(model)))`, computed on the CPU in
+`Mat4::normal_matrix()`.** GLSL ES 1.00 has no `inverse()`, so it cannot be done in the
+shader; `mat3(u_model)` is what the `flat` shader uses and is only accidentally correct
+because nothing in phases 9–12 scaled an object non-uniformly. A singular model matrix
+(a collapsing animation passing through a zero scale) yields the identity and a warning,
+matching `Mat4::inverse`.
+
+**Blinn-Phong (half vector) rather than classic Phong (`reflect`).** One `normalize`
+instead of a `reflect` and a `pow`, and it does not degenerate when the eye sits near
+the mirror direction — which is precisely where a player looking at a highlight is.
+
+**Consequences.** `BuiltinShader::Phong` is additive: `flat` and `textured` are byte
+identical to phase 11, so the validated 2D and 3D paths cannot regress because a light
+was added. `mini_fps` switched to `phong`; `ball_balance` kept `flat` because its CI
+colour thresholds are tuned to it and the ball is a sphere seen through a uniform
+scale, where the flat shader's `mat3(u_model)` is exact.
+
+**Verified by.** `giochi-engine-3d/tests/lighting.rs`, which reads the framebuffer back
+and asserts the shading rather than the call sequence: a sphere is brighter above its
+centre than below it under a downward light, that relationship inverts when the light
+does, the specular term raises the peak, a red light zeroes the green and blue channels,
+and a cube saturates under a downward light while going black under an upward one.

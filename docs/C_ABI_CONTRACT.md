@@ -713,6 +713,34 @@ typedef struct GiochiCamera3D {
 `aspect == 0.0` means "ask the renderer", which is what a console wants: the panel's
 real size is authoritative, the same rule ADR-035 established for 2D.
 
+### 9.4a `GiochiDirectionalLight`
+
+```c
+typedef struct GiochiDirectionalLight {
+    GiochiVec3 direction;        /* the way the light travels, normalised */
+    GiochiColor3D color;         /* colour and intensity; values above 1 blow out */
+    float      ambient;          /* 0..1 */
+    float      specular;         /* >= 0 */
+    float      shininess;        /* >= 1, the specular exponent */
+    uint32_t   _reserved[4];
+} GiochiDirectionalLight;        /* size 88, align 4 */
+```
+
+Phase 13 introduced this for `BuiltinShader::Phong`. It is written here even though no
+part-II function takes one yet, because rule R5 is that the C form is decided *now*: it
+is `#[repr(C)]` with primitive members only, so adding
+`giochi_renderer3d_set_light(GiochiEngine3D*, const GiochiDirectionalLight*)` later is a
+header change and nothing else.
+
+`direction` follows the photons, not the eye: `(0, -1, 0)` lights a floor from above.
+A reader who assumes the opposite convention gets a scene lit from underneath, which is
+why the field carries the comment.
+
+`giochi_renderer3d_set_light` would sanitise on entry exactly as the Rust
+`RenderContext3D::set_light` does, so a C caller cannot produce a black frame by zeroing
+`shininess` (where `pow(x, 0)` is 1 everywhere) or by passing a zero-length direction
+(which normalises to NaN).
+
 ### 9.5 Handles
 
 3D resources follow the same `u64`, `0`-is-invalid rule as 2D. They live in a **separate**

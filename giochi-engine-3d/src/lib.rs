@@ -55,7 +55,7 @@ mod error;
 mod registry;
 
 pub use error::{Error3D, Result3D};
-pub use render3d::RenderContext3D;
+pub use render3d::{DirectionalLight, RenderContext3D};
 
 /// Semantic version of the crate, as declared in `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

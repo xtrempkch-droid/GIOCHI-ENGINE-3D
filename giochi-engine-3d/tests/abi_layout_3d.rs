@@ -12,6 +12,7 @@
 use std::mem::{align_of, size_of};
 
 use giochi_engine_3d::math3d::{Camera3D, Color3D, Mat4, Quat, Transform3D, Vec3};
+use giochi_engine_3d::DirectionalLight;
 
 #[test]
 fn vec3_is_28_bytes_aligned_to_4() {
@@ -83,6 +84,27 @@ fn the_reserved_tail_is_four_u32_everywhere() {
     assert_eq!(Transform3D::default()._reserved, [0; 4]);
     assert_eq!(Camera3D::default()._reserved, [0; 4]);
     assert_eq!(Mat4::default()._reserved, [0; 4]);
+    assert_eq!(DirectionalLight::sun()._reserved, [0; 4]);
+    assert_eq!(DirectionalLight::default()._reserved, [0; 4]);
+    assert_eq!(
+        DirectionalLight::sun()
+            .with_direction(Vec3::UP)
+            .sanitised()
+            ._reserved,
+        [0; 4]
+    );
+}
+
+#[test]
+fn a_directional_light_is_88_bytes_aligned_to_4() {
+    // `docs/C_ABI_CONTRACT.md` section 9.4a names this size. `Vec3` and `Color3D` each
+    // carry their own reserved tail, so the sum is not the naive 12 + 16 + 12 + 16.
+    assert_eq!(size_of::<DirectionalLight>(), 88);
+    assert_eq!(align_of::<DirectionalLight>(), 4);
+    assert_eq!(
+        size_of::<DirectionalLight>(),
+        size_of::<Vec3>() + size_of::<Color3D>() + 3 * size_of::<f32>() + 16
+    );
 }
 
 #[test]
@@ -98,6 +120,10 @@ fn no_gl_type_appears_in_a_public_struct() {
         (size_of::<Transform3D>(), align_of::<Transform3D>()),
         (size_of::<Camera3D>(), align_of::<Camera3D>()),
         (size_of::<Mat4>(), align_of::<Mat4>()),
+        (
+            size_of::<DirectionalLight>(),
+            align_of::<DirectionalLight>(),
+        ),
     ] {
         assert_eq!(align, 4, "a SIMD type would raise this to 8 or 16");
         assert_eq!(size % 4, 0, "a SIMD type would pad this");

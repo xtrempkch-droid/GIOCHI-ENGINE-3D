@@ -9,7 +9,7 @@
 //! Storage is column-major to match GL's uniform layout, so `as_ptr()` can be handed to
 //! `glUniformMatrix4fv` without a transpose.
 
-use glam::Mat4 as GlamMat4;
+use glam::{Mat3 as GlamMat3, Mat4 as GlamMat4};
 
 use super::{Quat, Vec3};
 
@@ -191,6 +191,45 @@ impl Mat4 {
     pub fn is_invertible(self) -> bool {
         let determinant = self.to_glam().determinant();
         determinant != 0.0 && determinant.is_finite()
+    }
+
+    /// The matrix that carries **normals** into the same space as [`Self::transform_point`].
+    ///
+    /// A normal is a direction, so it takes the model's rotation — but not a
+    /// non-uniform scale. Squashing a sphere on X doubles the length of the normals on
+    /// the sides and leaves the top and bottom alone, which tips every normal towards
+    /// the squashed axis: a lit sphere ends up shaded as though it were a different
+    /// shape. The inverse-transpose of the upper 3×3 cancels exactly that, and for a
+    /// rotation (or a uniform scale, which only changes length and is re-normalised in
+    /// the fragment shader) it is the rotation itself.
+    ///
+    /// The result is a [`Mat4`] rather than a 3×3 so it can be uploaded with
+    /// `glUniformMatrix4fv`; the shader reads its upper-left `mat3`. The translation
+    /// column is zeroed, since moving a direction is a bug that looks like lighting
+    /// sliding when an object is dragged.
+    ///
+    /// A singular matrix — a scale of zero on some axis, which a collapsing animation
+    /// produces for one frame — has no inverse. The identity is returned and a warning
+    /// logged, matching [`Self::inverse`].
+    pub fn normal_matrix(self) -> Mat4 {
+        let upper = GlamMat3::from_mat4(self.to_glam());
+        let determinant = upper.determinant();
+        if determinant == 0.0 || !determinant.is_finite() {
+            log::warn!("normal matrix of a singular model matrix; returning the identity");
+            return Self::IDENTITY;
+        }
+
+        let normal = upper.inverse().transpose();
+        // `to_cols_array` on a `Mat3` in `glam` is column-major, and the 4×4 we build
+        // from it leaves the fourth row and column as the identity's, which is what a
+        // `mat3(u_normal_matrix)` read in GLSL wants.
+        let m = normal.to_cols_array();
+        Self::from_cols_array(&[
+            m[0], m[1], m[2], 0.0, //
+            m[3], m[4], m[5], 0.0, //
+            m[6], m[7], m[8], 0.0, //
+            0.0, 0.0, 0.0, 1.0,
+        ])
     }
 
     /// Transforms a point (including the translation column).
@@ -493,5 +532,88 @@ mod tests {
             [0; 4]
         );
         assert_eq!(Mat4::default()._reserved, [0; 4]);
+        assert_eq!(
+            Mat4::from_scale(Vec3::new(2.0, 1.0, 1.0))
+                .normal_matrix()
+                ._reserved,
+            [0; 4]
+        );
+    }
+
+    /// Applies the upper 3×3 of `matrix` to `direction`, ignoring translation.
+    fn rotate_direction(matrix: Mat4, direction: Vec3) -> Vec3 {
+        let d = matrix.data;
+        Vec3::new(
+            d[0] * direction.x + d[4] * direction.y + d[8] * direction.z,
+            d[1] * direction.x + d[5] * direction.y + d[9] * direction.z,
+            d[2] * direction.x + d[6] * direction.y + d[10] * direction.z,
+        )
+    }
+
+    #[test]
+    fn the_normal_matrix_of_a_rotation_is_the_rotation() {
+        let rotation =
+            Mat4::from_rotation(Quat::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), FRAC_PI_2));
+        let normal = rotation.normal_matrix();
+
+        // A pure rotation is orthogonal, so inverse-transpose is itself. The normal on
+        // +X must end up where the geometry's +X face ends up, or the lit face and the
+        // visible face disagree.
+        let rotated = rotate_direction(normal, Vec3::new(1.0, 0.0, 0.0));
+        let expected = rotate_direction(rotation, Vec3::new(1.0, 0.0, 0.0));
+
+        assert_close(rotated.x, expected.x, "x");
+        assert_close(rotated.y, expected.y, "y");
+        assert_close(rotated.z, expected.z, "z");
+    }
+
+    #[test]
+    fn the_normal_matrix_undoes_a_non_uniform_scale() {
+        // This is the whole point of the inverse-transpose. Squash on X only: the
+        // geometry's +X face comes closer to the centre but still faces +X, so its
+        // normal must stay a unit +X. Multiplying by the model matrix instead would
+        // give 0.5 on X, and normalising that is still +X here -- the visible error is
+        // on the diagonal, which is the next assertion.
+        let squashed = Mat4::from_scale(Vec3::new(0.5, 1.0, 1.0));
+        let normal = squashed.normal_matrix();
+
+        let side = rotate_direction(normal, Vec3::new(1.0, 0.0, 0.0)).normalized();
+        assert_close(side.x, 1.0, "the +X normal direction");
+
+        // A diagonal normal of the ellipsoid. The model matrix would shrink its X
+        // component; the normal matrix must stretch it instead, tilting the normal
+        // away from Y and towards X, which is what a lit squashed sphere shows.
+        let diagonal = Vec3::new(1.0, 1.0, 0.0).normalized();
+        let naive = rotate_direction(squashed, diagonal);
+        let correct = rotate_direction(normal, diagonal).normalized();
+
+        assert!(
+            correct.x > naive.normalized().x,
+            "the normal matrix must tilt the diagonal normal towards the squashed axis: \
+             naive x={}, correct x={}",
+            naive.normalized().x,
+            correct.x
+        );
+    }
+
+    #[test]
+    fn the_normal_matrix_has_no_translation() {
+        // A direction that picks up a translation rotates the lighting as the object
+        // moves, which is the classic "the sun follows my model" bug.
+        let moved = Mat4::from_translation(Vec3::new(10.0, -4.0, 7.0));
+        let normal = moved.normal_matrix();
+
+        for index in [12, 13, 14] {
+            assert_close(normal.data[index], 0.0, "translation column");
+        }
+        assert_close(normal.data[15], 1.0, "w");
+    }
+
+    #[test]
+    fn a_singular_model_gets_the_identity_normal_matrix() {
+        // A collapsing animation passes through a zero scale; the frame must render
+        // rather than fill with NaN.
+        let collapsed = Mat4::from_scale(Vec3::new(1.0, 0.0, 1.0));
+        assert_eq!(collapsed.normal_matrix(), Mat4::IDENTITY);
     }
 }

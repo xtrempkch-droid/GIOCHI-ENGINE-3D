@@ -23,7 +23,7 @@ use giochi_engine::platform::Platform;
 use giochi_engine_3d::context::{self, GlesVersion};
 use giochi_engine_3d::math3d::{AxisInput, CameraController, Color3D, Quat, Transform3D, Vec3};
 use giochi_engine_3d::shader::BuiltinShader;
-use giochi_engine_3d::RenderContext3D;
+use giochi_engine_3d::{DirectionalLight, RenderContext3D};
 use sdl2::keyboard::Keycode;
 
 /// Floor edge length, in world units.
@@ -100,7 +100,9 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     // Two meshes, one shader: a big flat floor and a cube reused for every obstacle.
     let floor = render.create_plane_mesh(FLOOR_SIZE, 8)?;
     let cube = render.create_cube_mesh(OBSTACLE_SIZE)?;
-    let shader = render.create_builtin_shader(BuiltinShader::Flat)?;
+    // Phong rather than flat: with one hard-coded Lambert term a cube shows four sides
+    // and a top all at once with nothing to tell them apart except their silhouette.
+    let shader = render.create_builtin_shader(BuiltinShader::Phong)?;
     println!(
         "floor {floor}: {} tris; cube {cube}: {} tris; VAOs: {} / {}",
         render.mesh_index_count(floor) / 3,
@@ -110,6 +112,20 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     render.set_clear_color(Color3D::new(0.55, 0.72, 0.92, 1.0));
+
+    // A fixed sun, tilted so no two cube faces share a diffuse term. The renderer already
+    // defaults to this light; setting it explicitly is what the example is for.
+    let light = DirectionalLight::sun()
+        .with_direction(Vec3::new(0.4, -1.0, 0.3))
+        .with_specular(0.3, 24.0);
+    render.set_light(light);
+    println!(
+        "light direction {:?}, ambient {:.2}, specular {:.2} @ {:.0}",
+        light.direction.to_array(),
+        light.ambient,
+        light.specular,
+        light.shininess
+    );
 
     let mut controller = CameraController::new(Vec3::new(0.0, EYE_HEIGHT, 8.0), 0.0, -0.15);
     let mut input = Input::new(&platform);

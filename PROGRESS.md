@@ -1,12 +1,13 @@
 # Estado — GIOCHI-ENGINE
 
-## Última entrega: jogo de equilíbrio (`ball_balance`) para medir latência
+## Última entrega: fase 13 — iluminação direcional (Phong)
 Data: 2026-11-07
 
-## Última fase concluída: 12 — Câmera com controlo + mini_fps
-Data: 2026-11-07
+## Última fase concluída: 13 — Iluminação Phong
+Fase anterior: 12 — Câmera com controlo + mini_fps
 
-**Fases 0–8 (2D) concluídas. Extensão v2.1 (3D) em andamento: fases 9 a 12 concluídas.**
+**Fases 0–8 (2D) concluídas. Extensão v2.1 (3D) em andamento: fases 9 a 13 concluídas.
+Falta a fase 14, a C ABI 3D (v2).**
 
 ## Status 2D (Fases 0–8)
 
@@ -19,7 +20,7 @@ extensão v2.1). Gates 2D revalidados a cada fase 3D.
 - [x] Fase 10 — Math 3D (`Vec3`, `Quat`, `Mat4`, `Transform3D`, `Camera3D`)
 - [x] Fase 11 — Pipeline de mesh + shaders
 - [x] Fase 12 — Câmera com controlo + `mini_fps`
-- [ ] Fase 13 — Iluminação Phong (opcional)
+- [x] Fase 13 — Iluminação Phong
 - [ ] Fase 14 — C ABI 3D (v2)
 
 ## Gates validados
@@ -29,14 +30,16 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 378 testes, 0 falhas
-      (209 das fases 0–8 + 169 da crate 3D)
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 400 testes, 0 falhas
+      (209 das fases 0–8 + 191 da crate 3D)
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
 - [x] `cargo doc --workspace --no-deps --document-private-items` (0 warnings)
 - [x] `scripts/gen-header.sh --check` — `giochi.h` em sincronia com o crate
 - [x] `scripts/ffi-smoke.sh` — consumidores C e Python (fase 7, mantidos verdes)
 - [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --test context_smoke`
       — 3 testes contra GLES real (Mesa/EGL), incluindo leitura de pixel
+- [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --test lighting`
+      — 7 testes que leem o framebuffer e verificam a **sombra**, não a chamada
 
 Verificações manuais da fase:
 
@@ -49,6 +52,56 @@ Verificações manuais da fase:
   recolha pelo GC, `giochi.quit()`, propagação de erro, `app:step`, `arg`).
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
+
+## Entregue na fase 13 — Iluminação direcional (Phong)
+Data: 2026-11-07
+
+Pedido (opcional no prompt da extensão v2.1, mas implementado): luz direcional com
+ambiente, difusa e especular, para a face de cima de um cubo se distinguir de uma
+lateral sem recorrer ao wireframe.
+
+### O que existe
+
+- `render3d/light.rs` — `DirectionalLight`, `#[repr(C)]`, 88 bytes, só `f32`/`u32`.
+  `sun()` dá um sol branco inclinado; `with_*` para o resto; `sanitised()` é o que o
+  renderer guarda.
+- `shaders/phong.vert` / `phong.frag` — GLSL ES 1.00, Blinn-Phong. As varyings são
+  **world space**: em view space o sol passaria a seguir a câmara.
+- `Mat4::normal_matrix()` — `transpose(inverse(mat3(model)))` na CPU, porque GLSL ES
+  1.00 não tem `inverse()`.
+- `BuiltinShader::Phong` + `reads_lighting()`; `RenderContext3D::set_light` / `light()`.
+- `tests/lighting.rs` — 7 testes que leem o framebuffer de volta.
+- `mini_fps` passa a desenhar com Phong e um sol explícito, e imprime os parâmetros.
+- `docs/3D.md` §5.1 "Lighting", ADR-040, secção 9.4a do `docs/C_ABI_CONTRACT.md`.
+
+### Três decisões que não são óbvias (ADR-040)
+
+1. **Uma luz por frame, no renderer.** Por mesh exigiria registo, handle e tempo de vida
+   para algo que todas as cenas deste repositório definem uma vez. O custo por draw é de
+   cinco uniforms de qualquer maneira.
+2. **`direction` é o sentido em que a luz viaja.** `(0, -1, 0)` ilumina um chão visto de
+   cima. O shader nega o vector uma vez. A convenção contrária é igualmente comum, e é
+   por isso que está escrita em dois sítios.
+3. **Matriz de normais na CPU.** O shader `flat` da fase 11 usava `mat3(u_model)` e estava
+   correcto só por acidente: nada até à fase 12 escalava um objecto de forma não uniforme.
+
+### Bug encontrado ao construir isto
+
+**Os primeiros testes passavam pela razão errada.** As bandas de amostragem
+(`0.58..0.86` e `0.14..0.42` da altura) ficavam **fora** da silhueta da esfera — o
+projectado tem ~52 px de raio numa janela de 120 px, e a câmara a 5 unidades punha o
+equador no centro. O teste comparava "superfície iluminada" com "fundo preto" e passava
+com a luz apontada para qualquer lado. A correcção foi aproximar a câmara para 2 unidades
+(silhueta de ~60 px, o equador continua em `y = HEIGHT/2`) e amostrar um **rectângulo**
+estreito sobre o eixo vertical, que se prova dentro da silhueta. O perigo real é que o
+teste era verde: um teste de pixel satisfeito pela geometria errada é pior do que nenhum.
+
+### O que a fase 13 não muda
+
+`flat` e `textured` estão byte a byte iguais à fase 11, portanto os caminhos 2D e 3D já
+validados não podem regredir por causa de uma luz. `ball_balance` continua em `flat`: os
+limiares de cor do CI estão afinados para ele, e a bola é uma esfera vista através de uma
+escala uniforme, onde `mat3(u_model)` é exacto.
 
 ## Entregue — `ball_balance`, o jogo para medir latência
 Data: 2026-11-07
@@ -536,6 +589,20 @@ As oito fases do prompt mestre estão completas. Trabalho futuro, por ordem de v
 ## Bloqueios / pendências
 
 - Nenhum bloqueio de gate.
+- **`ball_balance` está construído, validado e no repositório — mas NÃO está no
+  aparelho.** Este é o único pedido do utilizador que continua por cumprir, e a causa
+  não é código. Na última verificação o `rk817-battery` lia `capacity=0`,
+  `CHARGE_NOW=0`, `voltage_avg=3498000 µV` — **abaixo** do `voltage_min_design`
+  (3 500 000 µV) — com `current_avg=-334 mA` e o carregador `rk817-charger` com
+  `online=0`: o USB-ethernet dá dados e não carrega. Como o rootfs **não sobrevive a um
+  corte de energia** (foi assim que `/opt/giochi` e `/root/.ssh/authorized_keys` se
+  perderam das outras vezes), correr GLES nessa situação é destrutivo e não apenas
+  arriscado. Depois disso o adaptador USB-ethernet desapareceu do `ip link` (o aparelho
+  foi fisicamente desligado), portanto também não há caminho de rede.
+  **Para desbloquear:** ligar a uma fonte que carregue, e depois
+  `scripts/hardware-check.sh --host root@10.55.0.2 --sysroot /tmp/r35s-sysroot
+  --skip-build` — que agora verifica a bateria, copia `cube_demo`, `mini_fps` e
+  `ball_balance` para `/opt/giochi/bin/` e corre os três no Mali-G31.
 - **PX30 acessível de novo (13:30).** O acesso voltou; fases 10 e 11 validadas no
   Mali-G31 (ver as secções das fases). Nota operacional: o aparelho tinha perdido
   `/opt/giochi` e o `authorized_keys`, ou seja o rootfs não sobrevive a um corte de

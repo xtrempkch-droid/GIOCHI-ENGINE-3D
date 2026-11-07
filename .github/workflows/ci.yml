@@ -189,6 +189,23 @@ jobs:
           cargo test -q -p giochi-engine-3d --test mesh_pipeline
           cargo run -q -p giochi-engine-3d --example cube_demo -- --frames 60
 
+      - name: 3D lighting
+        # Reads the framebuffer back and asserts the *shading*, not the call sequence:
+        # a sphere is brighter above its centre under a downward light, that relationship
+        # inverts when the light does, the specular term raises the peak, a red light
+        # zeroes green and blue, and a cube saturates under a downward light while going
+        # black under an upward one. A missing negation in the fragment shader or a
+        # `vec3` uniform filled as a `vec4` renders a plausible-looking frame, so no
+        # assertion short of reading the pixels catches either.
+        env:
+          SDL_VIDEODRIVER: offscreen
+        run: |
+          cargo test -q -p giochi-engine-3d --test lighting
+          cargo run -q -p giochi-engine-3d --example mini_fps -- --frames 60 --auto \
+            | tee /tmp/mini_fps_lit.log
+          grep -q 'light direction' /tmp/mini_fps_lit.log
+          grep -q 'no GL error' /tmp/mini_fps_lit.log
+
       - name: 3D without vertex array objects
         # GLES 2.0 devices without `GL_OES_vertex_array_object` take the per-draw
         # attribute path, and no developer machine has that driver. This is the only

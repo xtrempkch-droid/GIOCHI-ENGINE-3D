@@ -4,6 +4,8 @@
 //! wrapper and this one drives GLES directly. They cannot share a canvas, so they do
 //! not share a module (ADR-037).
 
+mod light;
 mod renderer;
 
+pub use light::DirectionalLight;
 pub use renderer::RenderContext3D;

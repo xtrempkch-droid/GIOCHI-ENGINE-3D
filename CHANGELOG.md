@@ -6,6 +6,35 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — Phase 13, directional lighting
+
+- `DirectionalLight`: one light per frame, held by the renderer. `#[repr(C)]`, primitive
+  members only, with the reserved tail rule R3 requires, so phase 14 can expose it
+  without a redesign (`docs/C_ABI_CONTRACT.md` §9.4a pins it at 88 bytes). `set_light`
+  sanitises on assignment: a zero-length direction becomes a warning and a fallback
+  instead of a NaN the driver renders as black, and `shininess` is floored at 1 because
+  `pow(x, 0)` paints a disc rather than a highlight.
+- `shaders/phong.vert` / `phong.frag`: GLSL ES 1.00 Blinn-Phong — ambient, diffuse,
+  specular, world-space varyings, half-vector specular.
+- `Mat4::normal_matrix()`: the inverse-transpose of the upper 3×3, computed on the CPU
+  because GLSL ES 1.00 has no `inverse()`. Without it a non-uniformly scaled object
+  shades as though it had a different shape.
+- `BuiltinShader::Phong` and `BuiltinShader::reads_lighting`.
+- `giochi-engine-3d/tests/lighting.rs`: 7 tests that read the framebuffer back and assert
+  the shading rather than the call sequence.
+- `mini_fps` now draws with Phong and an explicit sun; it prints the light parameters.
+- `docs/3D.md` §5.1 "Lighting": the direction convention, the normal matrix, a table of
+  every uniform with the symptom of getting it wrong, and how the tests verify it.
+- ADR-040 records the three choices that are not obvious: one light per frame, `direction`
+  follows the photons, and a CPU normal matrix.
+
+### Fixed — 3D by the lighting work
+
+- `read_pixels`-based assertions initially passed for the wrong reason: the sample bands
+  sat outside the sphere's silhouette, so they compared "lit surface" against "black
+  background". The probe is now a patch that is provably inside the silhouette, and the
+  camera distance is documented with the arithmetic.
+
 ### Added — `ball_balance`, a game for judging input latency
 
 - `giochi-engine-3d::game::BalanceGame`: the balance-board simulation, with no GL in it.
