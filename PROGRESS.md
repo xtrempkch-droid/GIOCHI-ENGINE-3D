@@ -80,6 +80,51 @@ aarch64, a criar um engine 3D, desenhar três frames de um cubo iluminado, exerc
 todos os caminhos de erro e desmontar tudo — no hardware. A parte II do ABI funciona
 numa linguagem que não é Rust, no dispositivo.
 
+## Release `v0.2.0` — publicada e verificada a partir do artefacto publicado
+Data: 2026-11-07
+
+Publicada (não draft) com os dois arquivos. A verificação foi feita **sobre o que está
+publicado**, descarregado do GitHub — não sobre a build local:
+
+| Verificação no arquivo x86_64 publicado | Resultado |
+|---|---|
+| `giochi-demo --verify` | `bootstrap OK` |
+| `giochi-demo lua lua/mini_game.lua` | pontuação, 3 vidas, **0 texturas vivas** |
+| `c_smoke` compilado contra o `include/` do arquivo e ligado ao `lib/` do arquivo | **`OK (abi 2, engine 0.2.0)`** |
+| `c_smoke_3d` (parte II) contra o mesmo | **`ok`** |
+
+No arquivo ARM64 publicado: todos os binários — `giochi-demo`, `lib/libgiochi.so`,
+`bin/cube_demo`, `bin/mini_fps`, `bin/ball_balance` — são ELF **ARM aarch64**; o
+`giochi.h` diz `GIOCHI_ABI_VERSION 2` e `0.2.0`; e o `libgiochi.so` exporta as **16**
+funções da parte II.
+
+**O arquivo ARM64 não pôde ser executado no console.** A bateria colapsou de 18 % para
+**0 %, 0,019 V** durante a sessão. O carregador passou a `online=1` e a carregar a
+**2,2 mA** — um trickle de pré-carga, que num pack de 4 Ah levaria semanas. Correr GLES
+nessas condições é o cenário exacto que já apagou o rootfs deste aparelho duas vezes,
+portanto não foi feito. O que sustenta a release ARM64 é a validação feita **20 minutos
+antes**, com a mesma fonte (ver a secção acima) mais a verificação estrutural do arquivo.
+
+### Três bugs do workflow de release, encontrados porque a verificação finalmente correu
+
+O passo `verify-release-artifact.sh` tinha sido escrito depois de a `v0.1.1` já estar
+publicada, e nunca tinha executado. Quando executou:
+
+1. **O job `release` não fazia checkout** — não tinha o script.
+2. **`cargo build --workspace --examples` filtra os targets** em vez de os acrescentar:
+   compilava os exemplos e **saltava** o `giochi-demo` e o cdylib `libgiochi`, deixando
+   uma biblioteca de 0.1.1 sob um header de 0.2.0. Apanhado pela comparação do header do
+   arquivo com a biblioteca do arquivo.
+3. **O job de publicação não tinha SDL2** — `undefined reference to SDL_*`.
+
+E dois na própria publicação:
+
+4. **`generate_release_notes: true` com `body_path` duplicava a página** a cada re-execução.
+5. **`action-gh-release` não reescreve o body de uma release existente.** A tentativa de
+   correcção anterior removeu a causa mas não o que já estava escrito, e **reportou
+   sucesso** com a página ainda errada. Resolvido com um passo `gh release edit
+   --notes-file` depois, que torna a re-execução idempotente.
+
 ## Release `v0.2.0` — verificada e publicada
 Data: 2026-11-07
 
@@ -796,6 +841,12 @@ As oito fases do prompt mestre estão completas. Trabalho futuro, por ordem de v
 ## Bloqueios / pendências
 
 - **Nenhuma fase por fazer. O plano do prompt mestre está completo (0 → 14).**
+- **A bateria do PX30 está no fim.** Durante a publicação da 0.2.0 colapsou de 18 % para
+  **0 %, 0,019 V**; o carregador está agora `online=1` mas a carregar a **2,2 mA**, o que
+  num pack de 4 Ah não é recuperação. Enquanto a tensão não subir acima de
+  `voltage_min_design` (3,4 V), qualquer sessão de GLES arrisca um brown-out, e um
+  brown-out apaga o rootfs — foi assim que `/opt/giochi` e `authorized_keys` se perderam
+  antes. Precisa de um carregador que dê mais corrente, ou de uma bateria nova.
 - ~~C ABI 3D validada em x86_64 mas ainda não no PX30.~~ **Resolvido:** `c_smoke` e
   `c_smoke_3d` correram no Mali-G31 (ver a secção de validação acima), a par do demo, do
   jogo Lua, dos três exemplos 3D e do `ball_balance`.
