@@ -410,6 +410,10 @@ Assets larger than `GIOCHI_MAX_ASSET_SIZE` (64 MiB) are rejected with
 `GIOCHI_ERROR_ASSET`. `giochi_asset_read` fails instead of truncating when
 `capacity` is smaller than the file.
 
+```c
+#define GIOCHI_MAX_ASSET_SIZE (64u * 1024u * 1024u)
+```
+
 ### 5.8 Scenes
 
 ```c
