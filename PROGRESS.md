@@ -53,7 +53,34 @@ Verificações manuais da fase:
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
 
-## Release `v0.2.0` — verificada e em draft
+## Validação da C ABI v2 no PX30 (Mali-G31) — completa
+Data: 2026-11-07
+
+A parte II do ABI estava validada em x86_64 (Mesa/EGL) mas não no console. Com o
+aparelho de volta (18 % de bateria, 4,048 V — desta vez acima do mínimo de projecto),
+correu o `scripts/hardware-check.sh` completo, que agora compila, instala e executa o
+consumidor C da parte II.
+
+Todos os checks passaram:
+
+| Check | Resultado no Mali-G31 |
+|---|---|
+| `demo --verify` | `bootstrap OK` |
+| `demo --frames 120 --quadro` | 640×480, 60,0 fps |
+| `lua mini_game` | 59,8 fps, pontuação 1, 3 vidas, **0 texturas vivas** |
+| **`c_smoke` (parte I)** | **`OK (abi 2, engine 0.2.0)`** |
+| **`c_smoke_3d` (parte II)** | **`ok`** |
+| `cube_demo` | GLES 2, VAO sim, 0 erros GL |
+| `mini_fps` | Phong, **24 caixotes baixos**, 0 erros GL |
+| `ball_balance` | p50 1,11 ms, p99 4,74 ms, 0/120 acima de 20 ms |
+
+O `c_smoke_3d` é a prova que faltava: um programa **escrito em C**, compilado com
+`-Wall -Wextra -Werror` contra o `giochi.h` gerado, ligado ao `libgiochi.so` do
+aarch64, a criar um engine 3D, desenhar três frames de um cubo iluminado, exercitar
+todos os caminhos de erro e desmontar tudo — no hardware. A parte II do ABI funciona
+numa linguagem que não é Rust, no dispositivo.
+
+## Release `v0.2.0` — verificada e publicada
 Data: 2026-11-07
 
 A tag `v0.2.0` foi criada, o workflow `Release` correu verde e a release está
@@ -769,10 +796,9 @@ As oito fases do prompt mestre estão completas. Trabalho futuro, por ordem de v
 ## Bloqueios / pendências
 
 - **Nenhuma fase por fazer. O plano do prompt mestre está completo (0 → 14).**
-- **C ABI 3D validada em x86_64 mas ainda não no PX30.** Os quatro consumidores C e Python
-  correm contra o `libgiochi.so` real em Mesa/EGL; o `c_smoke_3d` e os três exemplos 3D
-  são compilados, instalados e corridos pelo `scripts/hardware-check.sh`, mas o aparelho
-  estava inacessível (bateria) durante a fase 14.
+- ~~C ABI 3D validada em x86_64 mas ainda não no PX30.~~ **Resolvido:** `c_smoke` e
+  `c_smoke_3d` correram no Mali-G31 (ver a secção de validação acima), a par do demo, do
+  jogo Lua, dos três exemplos 3D e do `ball_balance`.
 - Nenhum bloqueio de gate.
 - **`ball_balance` está no aparelho e validado no Mali-G31.** Os três exemplos 3D
   estão em `/opt/giochi/bin/` e correram no hardware: `cube_demo`, `mini_fps` (com
