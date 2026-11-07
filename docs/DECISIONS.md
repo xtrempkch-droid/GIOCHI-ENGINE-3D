@@ -25,6 +25,9 @@ add a new ADR that states what it replaces.
 | 018 | `RenderContext` owns the window and the texture registry | Accepted |
 | 019 | Input snapshots per frame, with injectable state | Accepted |
 | 020 | Gamepad axes and buttons are queried live from SDL | Accepted |
+| 021 | Missing audio device degrades to silent mode | Accepted |
+| 022 | The resource cache is keyed by the exact path string | Accepted |
+| 023 | `Chunk`/`Music` are stored behind `Rc` in the handle registry | Accepted |
 
 ---
 
@@ -417,3 +420,74 @@ books, and cannot desynchronise if an event is dropped. It also keeps
 (there is no virtual controller). Tests therefore cover id mapping and
 normalisation directly and assert "disconnected ⇒ neutral" rather than faking a
 device; a real controller is needed to exercise the live path.
+
+---
+
+## ADR-021 — Missing audio device degrades to silent mode
+
+**Context.** `SDL_mixer` needs an open audio device to load and play anything.
+CI containers, headless builders and consoles that have not started their sound
+driver all lack one. Two options: fail `AudioSystem::new`, or start anyway.
+
+**Decision.** `AudioSystem::new` only fails if the platform layer itself cannot be
+asked for the subsystem. When the device cannot be opened, it logs a warning and
+returns a usable system in **silent mode**:
+
+* `AudioSystem::is_available()` returns `false`;
+* `load_sound`, `load_music`, `play_sound`, `play_music` return
+  `GiochiError::Audio` with a message saying
+  the engine is in silent mode;
+* volume, pause/resume/stop and every query remain safe no-ops.
+
+**Why.** A game must not refuse to start because a container has no sound card, and
+tests must be able to build an `AudioSystem` deterministically. A caller that
+requires audio can check `is_available()` once at start-up and decide for itself.
+
+**Consequences.** Every audio call site must be prepared for an `Err` even in code
+that "obviously" has sound. That is the same discipline the C ABI already imposes
+(`i32` return codes). `AudioSystem::silent()` exists so tests can assert the silent
+behaviour without depending on the host.
+
+---
+
+## ADR-022 — The resource cache is keyed by the exact path string
+
+**Context.** `"assets/player.png"`, `"./assets/player.png"` and an absolute path all
+name the same file. Keying the cache by a canonicalised path would merge them.
+
+**Decision.** Key by the string the caller passed. No canonicalisation, no
+symlink resolution, no case folding.
+
+**Why.** Canonicalising costs a filesystem round-trip on every `load_texture` — the
+exact cost the cache exists to avoid — and still does not merge `"Player.png"` with
+`"player.png"` on a case-insensitive filesystem. Predictable behaviour ("the same
+argument returns the same handle") is worth more than implicit merging.
+
+**Consequences.** A project that spells a path two ways uploads two textures. The
+documented rule is simple enough to follow, and `ResourceManager::is_texture_cached`
+lets a caller verify what the engine actually holds.
+
+**Stale handles.** A texture destroyed behind the cache's back would leave the
+manager handing out a dead handle. `ResourceManager` therefore validates every
+cached handle against the registry on lookup and reloads when it is gone.
+
+---
+
+## ADR-023 — `Chunk`/`Music` are stored behind `Rc` in the handle registry
+
+**Context.** `sdl2::mixer::Chunk` and `Music` own their `Mix_Chunk`/`Mix_Music` and
+free them on `Drop`. `Music<'a>` carries a lifetime, but `Music::from_file` returns
+`Music<'static>`, so it fits a `HandleRegistry`.
+
+**Decision.** Both live in crate-private `HandleRegistry<Chunk>` and
+`HandleRegistry<Music<'static>>`, exposed only as `SoundHandle`/`MusicHandle`. The
+registries keep the SDL objects alive independently of any borrow, exactly like
+textures (ADR-002).
+
+**Why not a plain `HashMap<u64, Chunk>`.** `HandleRegistry` already guarantees the
+two properties the ABI needs: `0` is never issued and handles are never reused, so a
+stale sound handle can never play a new sound.
+
+**Consequences.** Destroying a music handle also halts playback, because the mixer
+must never keep a pointer to a freed `Mix_Music`. That is enforced in
+`AudioSystem::destroy_music`.

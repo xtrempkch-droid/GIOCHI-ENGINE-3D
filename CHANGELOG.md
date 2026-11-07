@@ -8,6 +8,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Phase 4 — assets and audio: `asset_size`/`read_asset` reading into a
+  caller-owned buffer (never truncating, 64 MiB cap) and `ResourceManager`, a
+  path-keyed texture cache where loading the same path twice performs **one**
+  upload. `RenderContext` gains `load_texture`, `cached_texture`,
+  `clear_resource_cache` and access to the cache.
+- `AudioSystem` on top of SDL_mixer: sound effects and streamed music behind
+  opaque `SoundHandle`/`MusicHandle`, with `play_sound`, `play_music`,
+  `pause_music`, `resume_music`, `stop_music`, master volume clamped to `0..=128`
+  and `music_state`.
+- A machine without an audio device now runs in **silent mode**: loading and
+  playing return `GIOCHI_ERROR_AUDIO` while the engine keeps running (ADR-021).
+  `AudioSystem::silent()` makes that path testable without a sound card.
+- Example `audio_test`: synthesises a 16-bit stereo WAV at runtime (no committed
+  binary asset), plays it on `Space`, adjusts volume with the arrow keys, mutes
+  with `M`, and supports `--beep`/`--frames` for scripted verification.
+- `tests/assets_audio_smoke.rs`: headless coverage of the loader, the cache
+  (two loads → one texture, stale-handle reload, cache clear) and the sound
+  lifecycle on a real device.
+
+### Added — phase 3
+
 - Phase 3 — input: `KeyboardState`, `MouseState` and `GamepadState` aggregated by
   `Input`, which snapshots one consistent frame view via `Input::update(&[Event])`
   (called before the scene's update). Keyboard and mouse expose down/pressed/

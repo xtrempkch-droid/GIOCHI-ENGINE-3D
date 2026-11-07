@@ -6,6 +6,7 @@ use sdl2::render::{TextureCreator, WindowCanvas};
 use sdl2::video::Window as SdlWindow;
 use sdl2::video::WindowContext;
 
+use crate::assets::ResourceManager;
 use crate::error::GiochiError;
 use crate::math::{Color, Rect, Vec2};
 use crate::platform::sdl::SdlContext;
@@ -35,6 +36,7 @@ pub struct RenderContext {
     // initialised.
     canvas: WindowCanvas,
     textures: TextureRegistry,
+    resources: ResourceManager,
     camera: Camera,
     _context: Rc<SdlContext>,
     _reserved: [u32; 4],
@@ -67,6 +69,7 @@ impl RenderContext {
         Ok(RenderContext {
             canvas,
             textures,
+            resources: ResourceManager::new(),
             camera: Camera::new(Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32)),
             _context: context,
             _reserved: [0; 4],
@@ -82,8 +85,50 @@ impl RenderContext {
     }
 
     /// Loads a texture and returns its handle. See [`TextureRegistry::create_texture`].
+    ///
+    /// This bypasses the resource cache: each call uploads a new texture. Use
+    /// [`RenderContext::load_texture`] to share one upload per path.
     pub fn create_texture(&self, path: &str) -> Result<TextureHandle, GiochiError> {
         self.textures.create_texture(path)
+    }
+
+    /// Loads a texture through the resource cache.
+    ///
+    /// The second call for the same path returns the same handle and does not
+    /// upload again, which is what a game with several entities sharing a sprite
+    /// sheet wants.
+    pub fn load_texture(&mut self, path: &str) -> Result<TextureHandle, GiochiError> {
+        self.resources.load_texture(&self.textures, path)
+    }
+
+    /// Returns the cached handle for `path`, without loading.
+    pub fn cached_texture(&self, path: &str) -> Option<TextureHandle> {
+        self.resources.get_texture(&self.textures, path)
+    }
+
+    /// Number of paths the resource cache currently holds.
+    pub fn cached_texture_count(&self) -> usize {
+        self.resources.cached_texture_count()
+    }
+
+    /// The resource cache, for asset reads and cache inspection.
+    pub fn resources(&self) -> &ResourceManager {
+        &self.resources
+    }
+
+    /// The resource cache, mutably.
+    pub fn resources_mut(&mut self) -> &mut ResourceManager {
+        &mut self.resources
+    }
+
+    /// Drops every cached path and destroys the textures behind them.
+    ///
+    /// Lives here rather than only on [`ResourceManager`] because clearing the
+    /// cache needs the registry at the same time, and a caller outside the crate
+    /// cannot borrow both halves of a `RenderContext`.
+    pub fn clear_resource_cache(&mut self) {
+        self.resources.clear(&self.textures);
+        debug_assert_eq!(self.resources.cached_texture_count(), 0);
     }
 
     /// Creates a texture from raw RGBA8 pixels.

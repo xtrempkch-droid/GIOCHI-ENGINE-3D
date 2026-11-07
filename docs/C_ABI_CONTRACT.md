@@ -13,8 +13,9 @@ Implementation progress: phase 0 delivered the value types and the two version
 queries; phase 1 delivered the platform layer behind `giochi_engine_init`
 (`Platform`, `Window`, `Time`, `GameLoop`); phase 2 delivered the 2D renderer and
 the texture registry behind `giochi_texture_*`/`giochi_render_*`; phase 3 delivered
-the input state behind `giochi_input_*`/`giochi_gamepad_*`. The `extern "C"`
-functions themselves land in phase 7.
+the input state behind `giochi_input_*`/`giochi_gamepad_*`; phase 4 delivered the
+asset loader and the audio system behind `giochi_asset_*`, `giochi_sound_*` and
+`giochi_music_*`. The `extern "C"` functions themselves land in phase 7.
 
 ---
 
@@ -434,6 +435,8 @@ void        giochi_sound_destroy(GiochiSound sound);             /* phase 4 */
 int32_t     giochi_sound_play(GiochiSound sound, int32_t loops); /* phase 4 */
 void        giochi_audio_set_volume(int32_t volume);             /* phase 4, 0..=128 */
 
+int32_t     giochi_audio_available(void);                        /* phase 4 */
+
 GiochiMusic giochi_music_load(const char* path);                 /* phase 4 */
 void        giochi_music_destroy(GiochiMusic music);             /* phase 4 */
 int32_t     giochi_music_play(GiochiMusic music, int32_t loops); /* phase 4 */
@@ -444,9 +447,17 @@ int32_t     giochi_music_is_playing(void);                       /* phase 4 */
 ```
 
 * `loops` is the number of *extra* repetitions: `0` plays once, `-1` loops
-  forever.
-* A failing audio device degrades gracefully: load/play return an error but the
-  rest of the engine keeps running.
+  forever. Any value below `-1` is treated as `-1`.
+* A failing audio device degrades gracefully: `load`/`play` return
+  `GIOCHI_ERROR_AUDIO` while the rest of the engine keeps running.
+  `giochi_audio_available` lets a consumer check once at start-up instead of
+  provoking a failure (it mirrors `AudioSystem::is_available`, phase 4).
+* `giochi_audio_set_volume` clamps to `0..=128`; out-of-range values are never an
+  error.
+* Destroying a music handle stops playback first, so the mixer never holds a freed
+  stream.
+* Sound effects have 16 mixing channels; playing more than that steals the oldest
+  channel (SDL_mixer's behaviour).
 
 ### 5.7 Assets
 
@@ -457,6 +468,10 @@ int32_t giochi_asset_read(const char* path,
                           size_t capacity,
                           size_t* out_read);                                         /* phase 4 */
 ```
+
+`giochi_asset_read` writes exactly the file's size into `buffer` and reports it
+through `out_read`; the buffer contents past `out_read` are untouched. The engine
+never allocates the buffer, so the caller owns the memory and the size policy.
 
 Assets larger than `GIOCHI_MAX_ASSET_SIZE` (64 MiB) are rejected with
 `GIOCHI_ERROR_ASSET`. `giochi_asset_read` fails instead of truncating when

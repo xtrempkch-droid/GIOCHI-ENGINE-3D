@@ -110,6 +110,7 @@ pub fn sdl_version() -> (u32, u32, u32) {
 /// `Sdl` must outlive every window and the event pump, so it is owned together
 /// with the subsystems behind an `Rc` instead of borrowed.
 pub(crate) struct SdlContext {
+    audio: Option<sdl2::AudioSubsystem>,
     video: sdl2::VideoSubsystem,
     timer: sdl2::TimerSubsystem,
     events: sdl2::EventSubsystem,
@@ -188,6 +189,16 @@ impl Platform {
             .event()
             .map_err(|err| map_sdl_error("event subsystem", err))?;
 
+        // Audio is optional: a CI container or a console without a sound driver
+        // must not stop the engine from running. `AudioSystem` reports silent mode.
+        let audio = match sdl.audio() {
+            Ok(subsystem) => Some(subsystem),
+            Err(err) => {
+                log::warn!("audio subsystem unavailable: {err}");
+                None
+            }
+        };
+
         // Gamepads are optional: a console without a controller attached, or a
         // build without joystick support, must not stop the engine from running.
         let game_controller = match sdl.game_controller() {
@@ -205,6 +216,7 @@ impl Platform {
 
         Ok(Platform {
             context: Rc::new(SdlContext {
+                audio,
                 video,
                 timer,
                 events,
@@ -263,6 +275,17 @@ impl Platform {
     /// Creates the engine's main window.
     pub fn create_window(&self, config: WindowConfig, title: &str) -> Result<Window, GiochiError> {
         Window::new(self, config, title)
+    }
+
+    /// Returns the audio subsystem, or a descriptive error when it could not be
+    /// initialised.
+    ///
+    /// [`crate::audio::AudioSystem::new`] uses this; when it fails the engine runs
+    /// in silent mode instead of refusing to start.
+    pub fn audio_subsystem(&self) -> Result<sdl2::AudioSubsystem, GiochiError> {
+        self.context.audio.clone().ok_or(GiochiError::Audio(
+            "the SDL2 audio subsystem is not available".to_owned(),
+        ))
     }
 
     /// Returns the game controller subsystem, or a descriptive error when it could

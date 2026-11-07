@@ -3,5 +3,8 @@
 pub mod mixer;
 pub mod sound;
 
-pub use mixer::AudioSystem;
-pub use sound::{MusicHandle, SoundHandle, LOOPS_INFINITE, MAX_VOLUME};
+pub use mixer::{mixer_version, AudioSystem};
+pub use sound::{
+    clamp_volume, MusicHandle, MusicState, SoundHandle, CHUNK_SIZE, LOOPS_INFINITE, MAX_VOLUME,
+    MIXING_CHANNELS, SAMPLE_RATE,
+};

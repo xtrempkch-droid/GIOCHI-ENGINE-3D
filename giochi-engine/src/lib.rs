@@ -62,8 +62,8 @@ pub const fn version_packed() -> u32 {
     (VERSION_MAJOR << 16) | (VERSION_MINOR << 8) | VERSION_PATCH
 }
 
-pub use crate::assets::ResourceManager;
-pub use crate::audio::{AudioSystem, MusicHandle, SoundHandle};
+pub use crate::assets::{asset_size, read_asset, ResourceManager, MAX_ASSET_SIZE};
+pub use crate::audio::{AudioSystem, MusicHandle, MusicState, SoundHandle};
 pub use crate::core::engine::{Engine, EngineConfig};
 pub use crate::core::game_loop::{GameLoop, FIXED_TIMESTEP, MAX_FRAME_TIME};
 pub use crate::core::time::{FrameClock, Time};

@@ -1,104 +1,451 @@
 //! SDL2 mixer wrapper.
 
-use crate::audio::sound::{MusicHandle, SoundHandle};
+use sdl2::mixer::{Channel, Chunk, Music};
+use std::cell::Cell;
+
+use crate::audio::sound::{
+    clamp_volume, MusicHandle, MusicState, SoundHandle, CHUNK_SIZE, MIXING_CHANNELS, SAMPLE_RATE,
+};
 use crate::error::GiochiError;
+use crate::handle_registry::HandleRegistry;
 
 /// Owns the SDL2 mixer, every loaded sound chunk and the currently playing music
 /// stream.
+///
+/// Lifecycle: create it once via [`AudioSystem::new`], load sounds/music, play
+/// them, then destroy each handle explicitly. Sounds and music are **not** RAII at
+/// the API boundary; the `Drop` impl of `AudioSystem` only releases what is still
+/// loaded.
+///
+/// A machine without an audio device is not fatal: [`AudioSystem::new`] logs a
+/// warning and returns a usable system in *silent mode*. Loading and playing then
+/// return [`GiochiError::Audio`] with a clear message, while the rest of the game
+/// keeps running. This is what makes the engine usable in CI and on a bare
+/// console before the sound driver is up.
 ///
 /// # C ABI
 ///
 /// Not exposed. C consumers use `giochi_sound_*`, `giochi_music_*` and
 /// `giochi_audio_set_volume`, which act on the engine's single audio system.
 #[repr(C)]
-#[derive(Debug)]
 pub struct AudioSystem {
+    sounds: HandleRegistry<Chunk>,
+    music: HandleRegistry<Music<'static>>,
+    audio: Option<MixerAudio>,
+    volume: Cell<i32>,
     _reserved: [u32; 4],
 }
+
+impl std::fmt::Debug for AudioSystem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AudioSystem")
+            .field("device", &self.is_available())
+            .field("sounds", &self.sounds.len())
+            .field("music", &self.music.len())
+            .field("volume", &self.volume.get())
+            .field("state", &self.music_state())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Keeps the audio device open for the system's lifetime.
+///
+/// Separated from `AudioSystem` so that a silent system simply holds `None`.
+struct MixerAudio {
+    _audio: sdl2::AudioSubsystem,
+    _mixer: MixerContext,
+}
+
+impl std::fmt::Debug for MixerAudio {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MixerAudio").finish_non_exhaustive()
+    }
+}
+
+/// `Sdl2MixerContext` must outlive every `Chunk`/`Music`; leaking it keeps
+/// SDL_mixer initialised for the process, which is what the engine wants.
+struct MixerContext;
 
 impl AudioSystem {
     /// Opens the audio device and initialises SDL2_mixer.
     ///
-    /// Implemented in phase 4.
-    pub fn new() -> Result<AudioSystem, GiochiError> {
-        todo!("fase 4: inicializar SDL2_mixer")
+    /// Never fails because of a missing device: the returned system is in silent
+    /// mode instead, and [`AudioSystem::is_available`] reports `false`. Failing
+    /// start-up because a CI container has no sound card would make the engine
+    /// untestable.
+    pub fn new(platform: &crate::platform::Platform) -> Result<AudioSystem, GiochiError> {
+        let audio = match open_mixer(platform) {
+            Ok(audio) => Some(audio),
+            Err(error) => {
+                log::warn!(
+                    "áudio indisponível ({error}); a engine segue em modo silencioso. \
+                     Carregar/tocar som retornará erro."
+                );
+                None
+            }
+        };
+
+        let system = AudioSystem {
+            sounds: HandleRegistry::new(),
+            music: HandleRegistry::new(),
+            audio,
+            volume: Cell::new(crate::audio::MAX_VOLUME),
+            _reserved: [0; 4],
+        };
+        system.apply_volume();
+        Ok(system)
+    }
+
+    /// Creates a silent system without touching SDL.
+    ///
+    /// Every load/play call returns [`GiochiError::Audio`]. Intended for tests and
+    /// for consumers that disable audio on purpose.
+    pub fn silent() -> AudioSystem {
+        AudioSystem {
+            sounds: HandleRegistry::new(),
+            music: HandleRegistry::new(),
+            audio: None,
+            volume: Cell::new(crate::audio::MAX_VOLUME),
+            _reserved: [0; 4],
+        }
+    }
+
+    /// Returns `true` when a real audio device is open.
+    pub fn is_available(&self) -> bool {
+        self.audio.is_some()
     }
 
     /// Loads a WAV/OGG/MP3 effect and returns its handle.
     ///
-    /// Implemented in phase 4.
-    pub fn load_sound(&mut self, _path: &str) -> Result<SoundHandle, GiochiError> {
-        todo!("fase 4: carregar som")
+    /// The file is fully decoded into memory, which is what makes short effects
+    /// low-latency. Use [`AudioSystem::load_music`] for long tracks.
+    pub fn load_sound(&mut self, path: &str) -> Result<SoundHandle, GiochiError> {
+        self.require_device()?;
+        if path.trim().is_empty() {
+            return Err(GiochiError::InvalidArgument("sound path is empty"));
+        }
+
+        let chunk = Chunk::from_file(path)
+            .map_err(|err| GiochiError::Asset(format!("failed to load sound '{path}': {err}")))?;
+
+        Ok(self.sounds.insert(chunk))
     }
 
-    /// Releases the sound behind `handle`.
-    ///
-    /// Implemented in phase 4.
-    pub fn destroy_sound(&mut self, _sound: SoundHandle) -> bool {
-        todo!("fase 4: destruir som")
+    /// Releases the sound behind `handle`. Returns `false` for an invalid or
+    /// already-destroyed handle.
+    pub fn destroy_sound(&mut self, handle: SoundHandle) -> bool {
+        self.sounds.remove(handle)
     }
 
-    /// Plays `sound` on the first free channel. `loops` is the number of extra
-    /// repetitions, or [`crate::audio::LOOPS_INFINITE`].
+    /// Plays `sound` on the first free channel.
     ///
-    /// Implemented in phase 4.
-    pub fn play_sound(&mut self, _sound: SoundHandle, _loops: i32) -> Result<(), GiochiError> {
-        todo!("fase 4: tocar som")
+    /// `loops` is the number of *extra* repetitions: `0` plays once,
+    /// [`crate::audio::LOOPS_INFINITE`] loops forever. Negative values other than
+    /// `-1` are clamped to `0`.
+    pub fn play_sound(&mut self, sound: SoundHandle, loops: i32) -> Result<(), GiochiError> {
+        self.require_device()?;
+        let chunk = self
+            .sounds
+            .get(sound)
+            .ok_or(GiochiError::InvalidHandle(sound))?;
+
+        Channel::all()
+            .play(&chunk, normalise_loops(loops))
+            .map(|_| ())
+            .map_err(|err| GiochiError::Audio(format!("failed to play sound: {err}")))
+    }
+
+    /// Stops every sound effect channel.
+    pub fn stop_all_sounds(&mut self) {
+        if self.audio.is_some() {
+            Channel::all().halt();
+        }
     }
 
     /// Loads a streamed music track and returns its handle.
     ///
-    /// Implemented in phase 4.
-    pub fn load_music(&mut self, _path: &str) -> Result<MusicHandle, GiochiError> {
-        todo!("fase 4: carregar musica")
+    /// Music is not decoded into memory, so long tracks cost almost no RAM.
+    pub fn load_music(&mut self, path: &str) -> Result<MusicHandle, GiochiError> {
+        self.require_device()?;
+        if path.trim().is_empty() {
+            return Err(GiochiError::InvalidArgument("music path is empty"));
+        }
+
+        let music = Music::from_file(path)
+            .map_err(|err| GiochiError::Asset(format!("failed to load music '{path}': {err}")))?;
+
+        Ok(self.music.insert(music))
     }
 
     /// Releases the music track behind `handle`.
     ///
-    /// Implemented in phase 4.
-    pub fn destroy_music(&mut self, _music: MusicHandle) -> bool {
-        todo!("fase 4: destruir musica")
+    /// If the handle is the track currently playing, playback is stopped first,
+    /// so a freed `Mix_Music` is never left in the mixer.
+    pub fn destroy_music(&mut self, handle: MusicHandle) -> bool {
+        if self.music.get(handle).is_some() {
+            Music::halt();
+        }
+        self.music.remove(handle)
     }
 
-    /// Starts playing `music`.
+    /// Starts playing `music`, replacing whatever was playing.
     ///
-    /// Implemented in phase 4.
-    pub fn play_music(&mut self, _music: MusicHandle, _loops: i32) -> Result<(), GiochiError> {
-        todo!("fase 4: tocar musica")
+    /// `loops` follows the same convention as [`AudioSystem::play_sound`].
+    pub fn play_music(&mut self, music: MusicHandle, loops: i32) -> Result<(), GiochiError> {
+        self.require_device()?;
+        let track = self
+            .music
+            .get(music)
+            .ok_or(GiochiError::InvalidHandle(music))?;
+
+        track
+            .play(normalise_loops(loops))
+            .map_err(|err| GiochiError::Audio(format!("failed to play music: {err}")))
     }
 
-    /// Pauses the current music stream.
-    ///
-    /// Implemented in phase 4.
+    /// Pauses the current music stream. Resuming continues from the same position.
     pub fn pause_music(&mut self) {
-        todo!("fase 4: pausar musica")
+        if self.audio.is_some() {
+            Music::pause();
+        }
     }
 
     /// Resumes the current music stream.
-    ///
-    /// Implemented in phase 4.
     pub fn resume_music(&mut self) {
-        todo!("fase 4: retomar musica")
+        if self.audio.is_some() {
+            Music::resume();
+        }
     }
 
-    /// Stops the current music stream.
-    ///
-    /// Implemented in phase 4.
+    /// Stops the current music stream and rewinds it to the start.
     pub fn stop_music(&mut self) {
-        todo!("fase 4: parar musica")
+        if self.audio.is_some() {
+            Music::halt();
+        }
     }
 
     /// Sets the master volume, clamped to `0..=MAX_VOLUME`.
-    ///
-    /// Implemented in phase 4.
-    pub fn set_volume(&mut self, _volume: i32) {
-        todo!("fase 4: definir volume")
+    pub fn set_volume(&mut self, volume: i32) {
+        self.volume.set(clamp_volume(volume));
+        self.apply_volume();
     }
 
-    /// Returns `true` while a music stream is playing.
-    ///
-    /// Implemented in phase 4.
+    /// Returns the current master volume in `0..=MAX_VOLUME`.
+    pub fn volume(&self) -> i32 {
+        self.volume.get()
+    }
+
+    /// Returns `true` while a music stream is playing (paused counts as not
+    /// playing).
     pub fn is_music_playing(&self) -> bool {
-        todo!("fase 4: estado da musica")
+        self.audio.is_some() && Music::is_playing() && !Music::is_paused()
+    }
+
+    /// Returns the current music state.
+    pub fn music_state(&self) -> MusicState {
+        if self.audio.is_none() || !Music::is_playing() {
+            MusicState::Stopped
+        } else if Music::is_paused() {
+            MusicState::Paused
+        } else {
+            MusicState::Playing
+        }
+    }
+
+    /// Number of live sound handles.
+    pub fn sound_count(&self) -> usize {
+        self.sounds.len()
+    }
+
+    /// Number of live music handles.
+    pub fn music_count(&self) -> usize {
+        self.music.len()
+    }
+
+    /// Returns `true` when `handle` refers to a live sound.
+    pub fn has_sound(&self, handle: SoundHandle) -> bool {
+        self.sounds.contains(handle)
+    }
+
+    /// Returns `true` when `handle` refers to a live music track.
+    pub fn has_music(&self, handle: MusicHandle) -> bool {
+        self.music.contains(handle)
+    }
+
+    /// Destroys every sound and music track.
+    pub fn clear(&mut self) {
+        self.stop_music();
+        self.stop_all_sounds();
+        self.sounds.clear();
+        self.music.clear();
+    }
+
+    fn require_device(&self) -> Result<(), GiochiError> {
+        if self.audio.is_some() {
+            Ok(())
+        } else {
+            Err(GiochiError::Audio(
+                "no audio device is available (the engine is in silent mode)".to_owned(),
+            ))
+        }
+    }
+
+    fn apply_volume(&self) {
+        if self.audio.is_some() {
+            let volume = self.volume.get();
+            Channel::all().set_volume(volume);
+            Music::set_volume(volume);
+        }
+    }
+}
+
+impl Drop for AudioSystem {
+    fn drop(&mut self) {
+        self.clear();
+    }
+}
+
+/// Maps the engine's loop convention (`-1` = forever, `n` = n extra repeats) onto
+/// SDL_mixer's, which uses the same convention but must not receive `< -1`.
+fn normalise_loops(loops: i32) -> i32 {
+    if loops < 0 {
+        crate::audio::LOOPS_INFINITE
+    } else {
+        loops
+    }
+}
+
+/// Opens the audio device and initialises SDL_mixer's decoders.
+fn open_mixer(platform: &crate::platform::Platform) -> Result<MixerAudio, String> {
+    let audio = platform
+        .audio_subsystem()
+        .map_err(|error| error.to_string())?;
+
+    // SDL_mixer's OGG/MP3 decoders are optional at build time; request the ones we
+    // care about and accept whatever the library actually provides.
+    let wanted = sdl2::mixer::InitFlag::OGG | sdl2::mixer::InitFlag::MP3;
+    match sdl2::mixer::init(wanted) {
+        Ok(context) => {
+            // Must outlive every Chunk/Music; leaking keeps the decoders alive for
+            // the engine's lifetime.
+            std::mem::forget(context);
+        }
+        Err(err) => {
+            log::warn!("SDL_mixer: decodificadores opcionais indisponíveis ({err}); seguindo");
+        }
+    }
+
+    // SDL_mixer wants the raw `AUDIO_*` bit pattern as a `u16`; `sdl2` only
+    // exposes it through `sys`, so the constant is widened and truncated here.
+    let format = sdl2::sys::AUDIO_S16LSB as u16;
+    sdl2::mixer::open_audio(SAMPLE_RATE, format, 2, CHUNK_SIZE)?;
+    sdl2::mixer::allocate_channels(MIXING_CHANNELS);
+
+    Ok(MixerAudio {
+        _audio: audio,
+        _mixer: MixerContext,
+    })
+}
+
+/// Returns the dynamically linked SDL_mixer version as `(major, minor, patch)`.
+///
+/// Useful for diagnostics: the engine bundles SDL_mixer, so this is the library
+/// actually loaded by the binary.
+pub fn mixer_version() -> (u32, u32, u32) {
+    let version = sdl2::mixer::get_linked_version();
+    (
+        u32::from(version.major),
+        u32::from(version.minor),
+        u32::from(version.patch),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_silent_system_reports_unavailable_and_rejects_playback() {
+        let mut system = AudioSystem::silent();
+
+        assert!(!system.is_available());
+        assert_eq!(
+            system.load_sound("x.wav").expect_err("must fail").code(),
+            crate::error::codes::AUDIO
+        );
+        assert_eq!(
+            system.load_music("x.ogg").expect_err("must fail").code(),
+            crate::error::codes::AUDIO
+        );
+        assert_eq!(
+            system.play_sound(1, 0).expect_err("must fail").code(),
+            crate::error::codes::AUDIO
+        );
+        assert_eq!(
+            system.play_music(1, 0).expect_err("must fail").code(),
+            crate::error::codes::AUDIO
+        );
+    }
+
+    #[test]
+    fn a_silent_system_is_always_stopped() {
+        let system = AudioSystem::silent();
+
+        assert!(!system.is_music_playing());
+        assert_eq!(system.music_state(), MusicState::Stopped);
+    }
+
+    #[test]
+    fn volume_is_clamped_and_readable_without_a_device() {
+        let mut system = AudioSystem::silent();
+
+        system.set_volume(999);
+        assert_eq!(system.volume(), crate::audio::MAX_VOLUME);
+
+        system.set_volume(-5);
+        assert_eq!(system.volume(), 0);
+    }
+
+    #[test]
+    fn destroying_unknown_handles_is_reported() {
+        let mut system = AudioSystem::silent();
+
+        assert!(!system.destroy_sound(0));
+        assert!(!system.destroy_sound(42));
+        assert!(!system.destroy_music(0));
+        assert!(!system.destroy_music(42));
+        assert_eq!(system.sound_count(), 0);
+        assert_eq!(system.music_count(), 0);
+    }
+
+    #[test]
+    fn muting_and_stopping_are_safe_without_a_device() {
+        let mut system = AudioSystem::silent();
+
+        system.pause_music();
+        system.resume_music();
+        system.stop_music();
+        system.stop_all_sounds();
+        system.clear();
+
+        assert!(system.sound_count() == 0 && system.music_count() == 0);
+    }
+
+    #[test]
+    fn the_loop_convention_is_normalised_for_sdl() {
+        assert_eq!(normalise_loops(-1), -1);
+        assert_eq!(normalise_loops(-5), -1);
+        assert_eq!(normalise_loops(0), 0);
+        assert_eq!(normalise_loops(3), 3);
+    }
+
+    #[test]
+    fn the_mixer_version_is_queryable() {
+        let (major, minor, patch) = mixer_version();
+
+        assert!(
+            major >= 2,
+            "unexpected SDL_mixer version {major}.{minor}.{patch}"
+        );
     }
 }

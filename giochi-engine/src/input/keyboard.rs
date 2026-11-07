@@ -17,6 +17,8 @@ pub const KEY_SPACE: KeyCode = 32;
 pub const KEY_A: KeyCode = 97;
 /// `D`.
 pub const KEY_D: KeyCode = 100;
+/// `M`.
+pub const KEY_M: KeyCode = 109;
 /// `S`.
 pub const KEY_S: KeyCode = 115;
 /// `W`.

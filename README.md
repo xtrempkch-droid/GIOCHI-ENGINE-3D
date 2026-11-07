@@ -4,10 +4,11 @@ A **2D** game engine in Rust on top of SDL2, designed from day one to be consume
 from any language through a C ABI. Primary target: `aarch64-unknown-linux-gnu`
 (Linux consoles with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 
-> **Status: phase 3 (input).** The workspace, the C ABI contract, the value types,
-> the SDL2 platform layer, the fixed-timestep loop, the 2D renderer with opaque
-> texture handles and keyboard/mouse/gamepad input exist. Assets and audio land in
-> phase 4 — see [PROGRESS.md](PROGRESS.md).
+> **Status: phase 4 (assets + audio).** The workspace, the C ABI contract, the value
+> types, the SDL2 platform layer, the fixed-timestep loop, the 2D renderer with
+> opaque texture handles, keyboard/mouse/gamepad input, the asset cache and the
+> audio mixer exist. Scenes and the `Engine` facade land in phase 5 — see
+> [PROGRESS.md](PROGRESS.md).
 
 ## Why "C-shaped" Rust?
 
@@ -63,9 +64,11 @@ cargo run -p giochi-demo -- --frames 60
 cargo run -p giochi-engine --example hello_rect      # three rectangles
 cargo run -p giochi-engine --example moving_sprite   # bouncing sprite + camera
 cargo run -p giochi-engine --example input_test      # WASD, mouse, gamepad
+cargo run -p giochi-engine --example audio_test      # Space plays a synthesised beep
 ```
 
-Both accept `--frames N` to run headlessly for a fixed number of frames.
+All examples accept `--frames N` to run for a fixed number of frames, which is how
+the smoke tests exercise them without a display.
 
 ### Minimal render loop
 
@@ -87,21 +90,45 @@ render.destroy_texture(player);
 ### Input per frame
 
 ```rust
-# use giochi_engine::{Input, Platform};
-# let platform = Platform::new()?;
+use giochi_engine::input::keyboard::{KEY_SPACE, KEY_W};
+use giochi_engine::{Input, Platform};
+
 let mut input = Input::new(&platform);
 
 let events = platform.poll_events();
-input.update(&events);                       // clears one-frame edges, applies events
+input.update(&events); // clears the one-frame edges, then applies every event
 
-if input.key_down(giochi_engine::input::keyboard::KEY_W) { /* held */ }
-if input.key_pressed(giochi_engine::input::keyboard::KEY_SPACE) { /* tapped */ }
+if input.key_down(KEY_W) { /* held */ }
+if input.key_pressed(KEY_SPACE) { /* tapped exactly once */ }
 let (mouse_x, mouse_y) = input.mouse().position();
-# Ok::<(), giochi_engine::GiochiError>(())
 ```
 
 Order matters: `poll_events` → `input.update` → simulation → `present`. The
 `pressed`/`released` edges are valid only until the next `input.update`.
+
+### Assets and audio
+
+```rust
+// One upload per path, even across entities.
+let sheet = render.load_texture("assets/player.png")?;
+assert_eq!(render.load_texture("assets/player.png")?, sheet);
+
+// Sound effects are fully decoded; music is streamed from disk.
+let beep = audio.load_sound("assets/beep.wav")?;
+audio.play_sound(beep, 0)?;
+audio.set_volume(96);
+
+// Explicit teardown: no RAII at the boundary.
+audio.destroy_sound(beep);
+render.destroy_texture(sheet);
+```
+
+`render` is the `&mut RenderContext` from above and `audio` a `&mut AudioSystem`
+built with `AudioSystem::new(&platform)?`.
+
+If no audio device is available the engine logs a warning and keeps running in
+silent mode: `audio.is_available()` is `false` and load/play return an
+`GIOCHI_ERROR_AUDIO` error instead of aborting the game.
 
 ### Video driver
 
