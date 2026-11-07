@@ -40,6 +40,7 @@ add a new ADR that states what it replaces.
 | 033 | The MSRV is verified, and it is not the one the prompt suggested | Accepted |
 | 034 | Optional image decoders are probed, never assumed | Accepted |
 | 035 | The drawable size is authoritative, not the configured size | Accepted |
+| 036 | Assets ship as PNG plus a BMP twin, resolved at load time | Accepted |
 
 ---
 
@@ -877,3 +878,40 @@ game code behave differently on KMSDRM and on a desktop.
 mystery on the panel. Two checks moved with it: the C smoke test no longer asserts the
 requested render size on kmsdrm, and `--quadro` screenshots are documented as panel-sized
 ([KMSDRM.md](KMSDRM.md) §8.3).
+
+---
+
+## ADR-036 — Assets ship as PNG plus a BMP twin, resolved at load time
+
+**Context.** ADR-034 makes the engine tolerate a codec-less `libSDL2_image`, but
+tolerating it does not make the repository runnable there. `assets/` held only
+`player.png` and `checker.png`, so on the R35S — whose `libSDL2_image` links only
+`libSDL2`, `libm` and `libc` — a plain checkout could not run its own demo:
+`load_texture("assets/player.png")` failed with "Unsupported image format". The
+hardware run only worked because a hand-converted BMP had been deployed **renamed to
+`.png`**, which is a lie the format auto-detection happened to accept.
+
+**Decision.** Every asset is committed twice, `<name>.png` and `<name>.bmp`, with
+identical pixels. The shipped consumers try the PNG first and fall back to the BMP
+when loading fails: the demo, the Lua reference game, and both ABI smoke tests
+(`c_smoke.c`, `python_smoke.py`). `scripts/png-to-bmp.py` regenerates the twins from
+the PNGs — `--check` compares bytes and `scripts/gates.sh` runs it — and
+`giochi-engine/tests/asset_formats.rs` decodes both through SDL and compares sizes.
+
+The Rust examples under `giochi-engine/examples/` still name the PNG directly: they
+are host-side teaching code, and the two reference games already show the pattern.
+
+**What is deliberately not done.** No capability query was added to the public API.
+`Renderer::image_formats()` would need a C-shaped return type, `_reserved` padding and
+a documented lifetime for a bitmask that saves one failed `IMG_Load` per asset. No
+auto-conversion happens at runtime either: converting on the device would mean
+shipping a decoder to the platform that lacks one.
+
+**Why not BMP only.** BMP is the safe deployment format, but it is 22× larger here
+(4.2 KB against 194 bytes for a 32x32 sprite) and PNG is what every other consumer of
+`assets/` expects. Keeping both costs 20 KB of repository and buys "works on both".
+
+**Consequences.** Adding an asset means running `scripts/png-to-bmp.py assets/new.png`
+and committing both files; the test fails loudly if that step is skipped. The 32-bit
+`BI_BITFIELDS` + `BITMAPV4HEADER` form is used so the alpha channel survives — SDL
+decodes it with no external library.

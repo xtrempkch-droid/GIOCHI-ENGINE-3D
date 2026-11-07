@@ -134,7 +134,9 @@ Primeira execução numa consola de verdade: **Rockchip PX30** portátil, Buildr
 2024.02, kernel 6.12, aarch64, painel DSI 640x480, glibc 2.38, sem X11 e sem Wayland,
 964 MB de RAM, CPU ARMv8.
 
-Quatro bugs de portabilidade que nem o CI nem a suíte de desktop podiam ter apanhado:
+Quatro bugs de portabilidade que nem o CI nem a suíte de desktop podiam ter apanhado, mais
+uma lacuna que o próprio teste revelou — a do item 5, que só aparece quando se tenta
+correr o *repositório* no aparelho em vez de um binário preparado à mão:
 
 1. **`libSDL2_image` sem codecs.** Nessa imagem a biblioteca liga apenas `libSDL2`,
    `libm` e `libc`: PNG e JPEG são stubs "not supported". Como `IMG_Init` falha quando
@@ -154,6 +156,14 @@ Quatro bugs de portabilidade que nem o CI nem a suíte de desktop podiam ter apa
    continuava a responder com `.pc` x86_64 do host, pelo que o SDL2 activava
    X11/Wayland/EGL/PulseAudio/sndio e o linker aarch64 recebia sonames do host. Ambos
    corrigidos (`cmake/aarch64-linux-toolchain.cmake`, `scripts/build-aarch64.sh`).
+5. **Os assets do repositório não corriam no alvo.** `assets/` só tinha PNG, e nessa
+   imagem não há decoder PNG: um `git clone` fresco não conseguia correr o próprio demo
+   no aparelho. O teste em hardware só passou porque um BMP convertido à mão foi
+   enviado **com o nome `.png`**, que a auto-detecção de formato aceitava por acidente.
+   Agora cada asset existe em duas versões, PNG e BMP, com os mesmos pixels, e o demo e
+   o `mini_game.lua` caem para o BMP quando o PNG falha (ADR-036). O
+   `scripts/png-to-bmp.py` regenera os pares e o `tests/asset_formats.rs` falha o CI
+   quando um deles fica desactualizado.
 
 Duas armadilhas de operação, ambas registadas em `docs/KMSDRM.md` §8:
 

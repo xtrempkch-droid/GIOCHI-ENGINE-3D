@@ -248,6 +248,15 @@ objdump -p /usr/lib/libSDL2_image-2.0.so.0 | grep NEEDED   # no libpng/libjpeg =
 
 Ship BMP assets to such a target, or rebuild `libSDL2_image` with `libpng`.
 
+The repository does the former without giving up PNG on capable builds: every
+asset under `assets/` is committed twice, `player.png` **and** `player.bmp`, and the
+demo, the Lua example and both ABI smoke tests try the PNG first and fall back to the
+BMP when the decoder is missing. `scripts/png-to-bmp.py` regenerates the twins (the
+pixels are identical, so nothing looks different on a desktop), `--check` fails the
+gate when one drifts, and `giochi-engine/tests/asset_formats.rs` decodes both through
+SDL. Before this, a plain checkout of the repository could not run its own demo on
+this device at all — only a hand-converted BMP renamed to `.png` worked.
+
 ### 8.5 Numbers from that run
 
 Measured with the release ARM64 build described in
@@ -264,3 +273,23 @@ Measured with the release ARM64 build described in
 
 The texture count returning to zero after a 1200-frame game is the leak check: the
 Lua binding frees textures on `Drop`, and the registry reports nothing left behind.
+
+### 8.6 Repeating the run without the archaeology
+
+`scripts/hardware-check.sh` performs everything §8.1–§8.5 describes, in the order
+that actually works, and restores the console afterwards even on Ctrl-C or on a
+failure:
+
+```bash
+scripts/hardware-check.sh --host root@10.55.0.2 --sysroot /tmp/r35s-sysroot
+```
+
+It cross-builds, deploys to `/opt/giochi`, frees DRM by parking the launcher,
+runs the demo, a frame capture, the Lua reference game and the C consumer, brings
+the captured frame back for inspection, prints the battery, and then re-enables the
+launcher and signals `giochi-init`. Use `--skip-build` to reuse an existing
+`target/aarch64-unknown-linux-gnu/release`, and `--skip-c-smoke` when no
+`aarch64-linux-gnu-gcc` is available.
+
+Every remote snippet sticks to busybox `sh`/`awk`/`ps`/`readlink`: the target image
+has no bash, no `python3`, no `timeout` and no `fuser`.

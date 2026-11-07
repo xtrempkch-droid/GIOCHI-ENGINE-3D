@@ -109,6 +109,38 @@ fn asset(name: &str) -> String {
     relative
 }
 
+/// Loads the first texture that this build can actually decode.
+///
+/// PNG and JPEG are optional at build time in SDL_image, and the console image
+/// ships a `libSDL2_image` that links only `libSDL2`, `libm` and `libc` — asking
+/// for `player.png` there fails with "unsupported image format". BMP needs no
+/// external library, so the repository keeps a `.bmp` twin of every `.png` asset
+/// and this falls back to it. `scripts/png-to-bmp.py` regenerates the twins and
+/// `giochi-engine/tests/asset_formats.rs` fails CI when one drifts.
+fn load_texture_any(
+    engine: &mut Engine,
+    candidates: &[&str],
+) -> Result<u64, giochi_engine::GiochiError> {
+    let mut last_error = None;
+
+    for name in candidates {
+        match engine.render_mut().load_texture(&asset(name)) {
+            Ok(handle) => {
+                log::debug!("textura carregada: {name}");
+                return Ok(handle);
+            }
+            Err(error) => {
+                log::debug!("textura '{name}' indisponível: {error}");
+                last_error = Some(error);
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| {
+        giochi_engine::GiochiError::Asset(format!("nenhum candidato para textura: {candidates:?}"))
+    }))
+}
+
 fn run(options: Options) -> Result<(), String> {
     println!("giochi-engine bootstrap OK");
 
@@ -269,7 +301,7 @@ struct DemoScene {
 
 impl DemoScene {
     fn new(engine: &mut Engine) -> Result<Self, giochi_engine::GiochiError> {
-        let player = engine.render_mut().load_texture(&asset("player.png"))?;
+        let player = load_texture_any(engine, &["player.png", "player.bmp"])?;
 
         let (width, height) = engine.render().size();
         let spawn = Vec2::new(

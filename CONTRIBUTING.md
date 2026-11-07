@@ -61,7 +61,10 @@ scripts/gates.sh
 | Docs | `cargo doc --workspace --no-deps --document-private-items` |
 | ARM64 | `scripts/check-aarch64.sh` |
 | C header | `scripts/gen-header.sh --check` |
+| Asset twins | `python3 scripts/png-to-bmp.py --check assets/*.png` |
+| Scripts | `shellcheck scripts/*.sh` |
 | C/Python consumers | `scripts/ffi-smoke.sh` |
+| Real console (manual) | `scripts/hardware-check.sh --host root@<device>` |
 
 If a gate cannot pass for an environmental reason, document the blocker in
 `PROGRESS.md` and leave the phase open. Do not mark it complete.
@@ -77,7 +80,8 @@ afford on every push: a real ARM64 **link** with the multiarch SDL2 packages.
 
 All three call the same scripts rather than reimplementing them, so a fix lands once:
 `scripts/install-deps.sh`, `scripts/install-arm64-deps.sh`, `scripts/check-aarch64.sh`, `scripts/build-aarch64.sh`,
-`scripts/gen-header.sh`, `scripts/ffi-smoke.sh`, `scripts/gates.sh`.
+`scripts/gen-header.sh`, `scripts/ffi-smoke.sh`, `scripts/gates.sh`, `scripts/png-to-bmp.py`,
+`scripts/hardware-check.sh`.
 
 ## Style
 

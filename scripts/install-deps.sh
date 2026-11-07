@@ -68,6 +68,10 @@ packages=(
     file
     ca-certificates
     curl
+    # `python_smoke.py` and `scripts/png-to-bmp.py` both need an interpreter, and
+    # `scripts/gates.sh` lints the shell scripts it relies on.
+    python3
+    shellcheck
 )
 
 if [[ "$cross" == "1" ]]; then

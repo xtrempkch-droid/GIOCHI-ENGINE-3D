@@ -29,6 +29,7 @@ if [[ "$(id -u)" != "0" ]]; then
 fi
 
 # The runner's own release, so both architectures come from the same index.
+# shellcheck disable=SC1091 # a runtime file; shellcheck cannot follow it without -x
 . /etc/os-release
 codename="${VERSION_CODENAME:-}"
 if [[ -z "$codename" ]]; then

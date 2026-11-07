@@ -38,6 +38,16 @@ fixed; the measurements are in [docs/KMSDRM.md](docs/KMSDRM.md) §8.
 
 ### Added — hardware validation
 
+- Every asset is now committed twice, as `player.png`/`player.bmp` and
+  `checker.png`/`checker.bmp`, with identical pixels. On the R35S a plain checkout
+  previously could not run its own demo at all. The demo, the Lua reference game and
+  both ABI smoke tests fall back to the BMP when a build has no PNG decoder;
+  `scripts/png-to-bmp.py` regenerates the twins (`--check` compares bytes and
+  `scripts/gates.sh` runs it) and `giochi-engine/tests/asset_formats.rs` decodes both
+  through SDL. ADR-036.
+- `scripts/hardware-check.sh` repeats the whole hardware run — cross-build, deploy,
+  release DRM master, demo, frame capture, Lua game, C consumer, restore the console —
+  so validating the next unit does not need the archaeology this section documents.
 - `docs/KMSDRM.md` §8 records what the run actually measured, including the two traps
   that cost the most time: a shipped console's own launcher already holds DRM master
   (so the "stop your X server" message is misleading there), and the supervisor gives up

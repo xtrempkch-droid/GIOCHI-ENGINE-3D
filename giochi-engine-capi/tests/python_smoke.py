@@ -173,6 +173,46 @@ class Probe:
         self.saw_texture = False
 
 
+def decodable_asset(
+    lib: ctypes.CDLL, candidates: list[bytes]
+) -> tuple[bytes, object | None, int]:
+    """Returns the first candidate this build can actually decode.
+
+    `giochi_asset_read` hands back the bytes of an unreadable format without
+    complaint; only creating a texture proves a decoder exists (ADR-034). The
+    repository ships a BMP twin of every PNG (ADR-036), so a build without libpng
+    still has something to decode.
+    """
+    for name in candidates:
+        size = c_size_t(0)
+        if lib.giochi_asset_size(name, ctypes.byref(size)) != GIOCHI_ERROR_OK or size.value == 0:
+            continue
+
+        buffer = (ctypes.c_uint8 * size.value)()
+        read = c_size_t(0)
+        if lib.giochi_asset_read(name, buffer, size.value, ctypes.byref(read)) != GIOCHI_ERROR_OK:
+            continue
+        if read.value != size.value:
+            continue
+
+        probe = lib.giochi_texture_create_memory(buffer, read.value)
+        if probe == 0:
+            continue
+        lib.giochi_texture_destroy(probe)
+        return name, buffer, read.value
+
+    return b"", None, 0
+
+
+def first_texture(lib: ctypes.CDLL, candidates: list[bytes]) -> tuple[bytes, int]:
+    """Returns the first candidate this build can load as a texture."""
+    for name in candidates:
+        handle = lib.giochi_texture_create(name)
+        if handle != 0:
+            return name, handle
+    return b"", 0
+
+
 def main() -> int:
     directory = sys.argv[1] if len(sys.argv) > 1 else "target/debug"
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -213,27 +253,27 @@ def main() -> int:
     check((width.value, height.value) == (320, 240), "render size values")
 
     # ---- assets -------------------------------------------------------------
-    size = c_size_t(0)
-    check(lib.giochi_asset_size(b"assets/player.png", ctypes.byref(size)) == GIOCHI_ERROR_OK,
-          "asset size")
-    check(size.value > 0, "asset is not empty")
+    player_path, buffer, player_size = decodable_asset(
+        lib, [b"assets/player.png", b"assets/player.bmp"]
+    )
+    check(player_path != b"", "an asset variant must decode")
+    check(player_size > 0, "asset is not empty")
 
-    buffer = (ctypes.c_uint8 * size.value)()
-    read = c_size_t(0)
-    check(lib.giochi_asset_read(b"assets/player.png", buffer, size.value, ctypes.byref(read))
-          == GIOCHI_ERROR_OK, "asset read")
-    check(read.value == size.value, "asset read length")
-    check(tuple(buffer[:4]) == (0x89, ord("P"), ord("N"), ord("G")), "PNG signature")
+    if buffer is not None:
+        check(
+            bytes(buffer[:2]) == b"BM" or bytes(buffer[:4]) == b"\x89PNG",
+            "image signature",
+        )
 
-    from_memory = lib.giochi_texture_create_memory(buffer, read.value)
-    check(from_memory != 0, "texture from memory")
-    check(lib.giochi_texture_width(from_memory) == 32, "memory texture width")
-    check(lib.giochi_texture_destroy(from_memory) == GIOCHI_ERROR_OK, "memory texture destroy")
+        from_memory = lib.giochi_texture_create_memory(buffer, player_size)
+        check(from_memory != 0, "texture from memory")
+        check(lib.giochi_texture_width(from_memory) == 32, "memory texture width")
+        check(lib.giochi_texture_destroy(from_memory) == GIOCHI_ERROR_OK, "memory texture destroy")
 
     # A tiny buffer fails instead of truncating.
     tiny = (ctypes.c_uint8 * 4)()
     read_small = c_size_t(0)
-    check(lib.giochi_asset_read(b"assets/player.png", tiny, 4, ctypes.byref(read_small))
+    check(lib.giochi_asset_read(player_path, tiny, 4, ctypes.byref(read_small))
           == GIOCHI_ERROR_ASSET, "short buffer is rejected")
 
     check(lib.giochi_texture_destroy(4242) == GIOCHI_ERROR_INVALID_HANDLE, "double destroy")
@@ -245,7 +285,9 @@ def main() -> int:
     @ON_ENTER
     def on_enter(_: c_void_p) -> None:
         probe.entered += 1
-        probe.texture = lib.giochi_texture_create(b"assets/checker.png")
+        _, probe.texture = first_texture(
+            lib, [b"assets/checker.png", b"assets/checker.bmp"]
+        )
         probe.saw_texture = probe.texture != 0 and lib.giochi_texture_width(probe.texture) == 64
         lib.giochi_texture_destroy(probe.texture)
 

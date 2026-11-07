@@ -310,8 +310,26 @@ local app = giochi.app {
 
 -- Loading happens before the loop: inside `update` the app is busy running, and the
 -- renderer is only lent to the `render` callback.
-local player = app:texture(assets .. "player.png")
-local drone_texture = app:texture(assets .. "checker.png")
+--
+-- PNG keeps the assets readable, but its decoder is optional at build time: the
+-- console image ships an SDL_image with PNG compiled out, where `player.png` fails
+-- with "unsupported image format". BMP needs no external library, so the repository
+-- keeps a `.bmp` twin of every `.png` and this falls back to it. The pixels are
+-- identical (scripts/png-to-bmp.py regenerates the twins).
+local function primeira_textura(app, nomes)
+    local ultimo
+    for _, nome in ipairs(nomes) do
+        local ok, valor = pcall(function() return app:texture(assets .. nome) end)
+        if ok then
+            return valor
+        end
+        ultimo = valor
+    end
+    error(ultimo)
+end
+
+local player = primeira_textura(app, { "player.png", "player.bmp" })
+local drone_texture = primeira_textura(app, { "checker.png", "checker.bmp" })
 
 -- A short synthesised beep, written to a temporary WAV so the repository carries no
 -- binary audio asset.

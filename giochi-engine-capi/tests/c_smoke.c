@@ -57,6 +57,60 @@ static int contains_ignore_case(const char *haystack, const char *needle)
         }                                                                      \
     } while (0)
 
+/* The PNG decoder is optional at build time in SDL_image (ADR-034), and the console
+ * image ships one with PNG compiled out. The repository keeps a .bmp twin of every
+ * .png asset, so try the candidates in order instead of failing on a target that
+ * simply cannot decode PNG. Both files hold the same pixels (ADR-036). */
+static GiochiTexture texture_create_any(const char *const *candidates, size_t count)
+{
+    for (size_t i = 0; i < count; i++) {
+        GiochiTexture texture = giochi_texture_create(candidates[i]);
+        if (texture != 0) {
+            return texture;
+        }
+    }
+    return 0;
+}
+
+/* Returns the first candidate whose raw bytes this build can actually decode, filling
+ * `*out_buffer`/`*out_size`. `giochi_asset_read` hands back the bytes of an unreadable
+ * format without complaint — only `giochi_texture_create_memory` knows whether a
+ * decoder exists — so the probe is a real texture creation. */
+static const char *read_decodable_asset(const char *const *candidates, size_t count,
+                                        uint8_t **out_buffer, size_t *out_size)
+{
+    for (size_t i = 0; i < count; i++) {
+        size_t size = 0;
+        if (giochi_asset_size(candidates[i], &size) != GIOCHI_ERROR_OK || size == 0) {
+            continue;
+        }
+
+        uint8_t *buffer = malloc(size);
+        if (buffer == NULL) {
+            return NULL;
+        }
+
+        size_t read = 0;
+        if (giochi_asset_read(candidates[i], buffer, size, &read) != GIOCHI_ERROR_OK
+            || read != size) {
+            free(buffer);
+            continue;
+        }
+
+        GiochiTexture probe = giochi_texture_create_memory(buffer, read);
+        if (probe == 0) {
+            free(buffer);
+            continue;
+        }
+        giochi_texture_destroy(probe);
+
+        *out_buffer = buffer;
+        *out_size = read;
+        return candidates[i];
+    }
+    return NULL;
+}
+
 /* Frame counter shared with the scene callbacks. */
 struct scene_state {
     int entered;
@@ -73,7 +127,8 @@ static void on_enter(void *user_data)
     state->entered++;
 
     /* Resource loading belongs here: on_enter runs outside the engine's frame. */
-    state->texture = giochi_texture_create("assets/player.png");
+    static const char *const player_assets[] = {"assets/player.png", "assets/player.bmp"};
+    state->texture = texture_create_any(player_assets, 2);
     CHECK(state->texture != 0);
     CHECK(giochi_texture_width(state->texture) == 32);
     CHECK(giochi_texture_height(state->texture) == 32);
@@ -180,24 +235,23 @@ int main(void)
     CHECK_CODE(giochi_render_size(NULL, NULL));
 
     /* ---- assets ----------------------------------------------------------- */
+    static const char *const player_assets[] = {"assets/player.png", "assets/player.bmp"};
+
     size_t size = 0;
-    CHECK_CODE(giochi_asset_size("assets/player.png", &size));
+    uint8_t *buffer = NULL;
+    const char *decode_path = read_decodable_asset(player_assets, 2, &buffer, &size);
+    CHECK(decode_path != NULL);
     CHECK(size > 0);
 
-    uint8_t *buffer = malloc(size);
-    CHECK(buffer != NULL);
-    if (buffer != NULL) {
-        size_t read = 0;
-        CHECK_CODE(giochi_asset_read("assets/player.png", buffer, size, &read));
-        CHECK(read == size);
+    if (decode_path != NULL) {
         /* An image signature, to prove the bytes are really the image and not
            zeroes. BMP counts: SDL_image decodes it with no external library,
            and a console image built without libpng has nothing else. */
-        CHECK(read > 8
+        CHECK(size > 8
               && ((buffer[0] == 0x89 && buffer[1] == 'P')
                   || (buffer[0] == 'B' && buffer[1] == 'M')));
 
-        GiochiTexture from_memory = giochi_texture_create_memory(buffer, read);
+        GiochiTexture from_memory = giochi_texture_create_memory(buffer, size);
         CHECK(from_memory != 0);
         CHECK(giochi_texture_width(from_memory) == 32);
         CHECK_CODE(giochi_texture_destroy(from_memory));
@@ -207,7 +261,8 @@ int main(void)
     /* A buffer that is too small fails instead of truncating. */
     uint8_t tiny[4] = {0};
     size_t read_small = 0;
-    CHECK(giochi_asset_read("assets/player.png", tiny, sizeof(tiny), &read_small)
+    CHECK(giochi_asset_read(decode_path != NULL ? decode_path : "assets/player.png", tiny,
+                            sizeof(tiny), &read_small)
           == GIOCHI_ERROR_ASSET);
     /* A double destroy is reported. */
     CHECK(giochi_texture_destroy(4242) == GIOCHI_ERROR_INVALID_HANDLE);
