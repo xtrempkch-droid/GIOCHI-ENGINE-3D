@@ -53,6 +53,39 @@ Verificações manuais da fase:
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
 
+## Segunda validação em hardware **diferente**: Powkiddy x55 (Mali-G52)
+Data: 2026-11-07
+
+O aparelho ligado em `10.55.0.2` passou a ser um **Powkiddy x55** — não o PX30/R35S.
+Confirmado por `hostname` (`giochi-system-x55`) e pelo kernel: `panfrost ... mali-g52 id
+0x7402`, num RK3566. **Toda a bateria de testes passou**, sem alterar uma linha de código:
+
+| Check | PX30 / Mali-G31 | **x55 / Mali-G52** |
+|---|---|---|
+| `demo --verify` | OK | **OK** |
+| `demo --quadro` | 640×480 | **720×1280** (painel retrato) |
+| `lua mini_game` | 59,8 fps, 0 texturas vivas | **59,9 fps, 0 texturas vivas** |
+| `c_smoke` (parte I) | `abi 2, engine 0.2.0` | **`abi 2, engine 0.2.0`** |
+| **`c_smoke_3d` (parte II)** | **ok** | **ok** |
+| `cube_demo` | GLES 2, VAO sim, 0 erros | **GLES 2, VAO sim, 0 erros** |
+| `mini_fps` | Phong, 24 caixotes | **Phong, 24 caixotes** |
+| `ball_balance` | p50 1,07 / p99 3,77 ms | **p50 1,10 / p99 3,95 ms** |
+
+Isto vale mais do que repetir o teste no mesmo aparelho: **dois SoCs, duas GPUs e duas
+geometrias de painel** diferentes (640×480 paisagem, 720×1280 retrato), com o mesmo binário
+compilado uma vez. É a evidência de que a camada 3D e o ABI não estão afinados para um
+aparelho. Em particular, o `aspect` derivado do drawable (ADR-035) e o `BalanceView`
+testado a 4:3 e 16:9 sobrevivem a um painel de 9:16 sem ajuste.
+
+### Bug corrigido no `hardware-check.sh` (encontrado por esta troca)
+
+O registo da bateria era escrito separado por espaços e lido com `read -r a b c d`. Neste
+aparelho o `status` é **"Not charging"** — com espaço — portanto todos os campos depois
+dele deslizaram: a tensão passou a ser a string `"charging"` e o mínimo ficou com o valor
+da tensão. Passou despercebido porque a condição de recusa não disparou por acidente
+(`charging=yes`). O registo passou a usar `|` como separador e o código passou a avisar
+quando a capacidade não é numérica, em vez de falhar sob `set -e`.
+
 ## Validação da C ABI v2 no PX30 (Mali-G31) — completa
 Data: 2026-11-07
 
@@ -841,12 +874,12 @@ As oito fases do prompt mestre estão completas. Trabalho futuro, por ordem de v
 ## Bloqueios / pendências
 
 - **Nenhuma fase por fazer. O plano do prompt mestre está completo (0 → 14).**
-- **A bateria do PX30 está no fim.** Durante a publicação da 0.2.0 colapsou de 18 % para
-  **0 %, 0,019 V**; o carregador está agora `online=1` mas a carregar a **2,2 mA**, o que
-  num pack de 4 Ah não é recuperação. Enquanto a tensão não subir acima de
-  `voltage_min_design` (3,4 V), qualquer sessão de GLES arrisca um brown-out, e um
-  brown-out apaga o rootfs — foi assim que `/opt/giochi` e `authorized_keys` se perderam
-  antes. Precisa de um carregador que dê mais corrente, ou de uma bateria nova.
+- **O aparelho em `10.55.0.2` lê bateria a 0 % / 0,018 V**, mas está a correr do
+  carregador (`online=1`). A campanha de testes completa correu nesse estado a pedido do
+  utilizador, sem incidente: os três binários 3D e os dois consumidores C terminaram com
+  código 0. A leitura de 0,018 V não é uma tensão de célula — é o que o `rk817` reporta
+  quando não consegue medir. Tratar como **sem bateria, apenas com a fonte**: desligar o
+  cabo durante uma sessão continua a ser o cenário que apaga o rootfs.
 - ~~C ABI 3D validada em x86_64 mas ainda não no PX30.~~ **Resolvido:** `c_smoke` e
   `c_smoke_3d` correram no Mali-G31 (ver a secção de validação acima), a par do demo, do
   jogo Lua, dos três exemplos 3D e do `ball_balance`.

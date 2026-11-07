@@ -111,12 +111,16 @@ for d in /sys/class/power_supply/*/; do
     status=$(cat "$d/status" 2>/dev/null)
     voltage=$(cat "$d/voltage_avg" 2>/dev/null)
     minimum=$(cat "$d/voltage_min_design" 2>/dev/null)
-    printf '%s %s %s %s' "${capacity:-?}" "${status:-?}" "${voltage:-?}" "${minimum:-?}"
+    # `|` and not a space: `status` is "Not charging" on some drivers, and a
+    # whitespace-separated record silently shifts every field after it -- which is
+    # exactly what happened on the Powkiddy x55, where the voltage was parsed as the
+    # literal string "charging" and the minimum ended up holding the voltage.
+    printf '%s|%s|%s|%s' "${capacity:-?}" "${status:-?}" "${voltage:-?}" "${minimum:-?}"
     break
 done
 REMOTE
 )
-read -r batt_capacity batt_status batt_voltage batt_minimum <<<"$battery"
+IFS='|' read -r batt_capacity batt_status batt_voltage batt_minimum <<<"$battery"
 
 charging=$(remote <<'REMOTE' || true
 for d in /sys/class/power_supply/*/; do
@@ -137,7 +141,11 @@ if [[ -n "${batt_capacity:-}" && "$batt_capacity" != "?" ]]; then
     if [[ "$batt_voltage" =~ ^[0-9]+$ && "$batt_minimum" =~ ^[0-9]+$ ]]; then
         [[ "$batt_voltage" -lt "$batt_minimum" ]] && below_minimum=1
     fi
-    if [[ "$charging" != "yes" ]] && { [[ "$batt_capacity" -le 5 ]] || [[ "$below_minimum" == "1" ]]; }; then
+    if [[ ! "$batt_capacity" =~ ^[0-9]+$ ]]; then
+        # A driver that reports something other than a number should not make the check
+        # crash under `set -u`/`-e`; it just means there is nothing to judge.
+        echo "  WARNING: the battery reports capacity '${batt_capacity}', which is not a number"
+    elif [[ "$charging" != "yes" ]] && { [[ "$batt_capacity" -le 5 ]] || [[ "$below_minimum" == "1" ]]; }; then
         if [[ "$force_low_battery" == "0" ]]; then
             die "the battery cannot carry this run. Charge the device, then re-run.
        Running GLES now risks a brown-out, and a brown-out wipes the rootfs --
