@@ -234,26 +234,50 @@ impl Drop for TextureRegistry {
 
 /// Initialises SDL_image exactly once per process.
 ///
-/// `IMG_LoadTexture` needs the PNG/JPG decoders registered; failing to initialise
-/// them is reported by the load call itself, so the result is not propagated here
-/// and is logged instead.
+/// The PNG and JPG decoders are **optional at build time**: a console image
+/// built without `libpng`/`libjpeg` still links `libSDL2_image`, with the
+/// per-format entry points compiled as "not supported" stubs. `IMG_Init` fails
+/// when *any* requested flag cannot be satisfied, so asking for `PNG | JPG`
+/// used to declare the whole subsystem dead on such a target — even though
+/// BMP, TGA, PNM and QOI need no flags and kept working.
+///
+/// So the subsystem is opened with no flags at all, and each optional decoder
+/// is then probed on its own, which is the only way to learn what this build
+/// actually has. Measured on a Rockchip PX30 (Buildroot 2024.02) whose
+/// `libSDL2_image` links only `libSDL2`/`libm`/`libc`.
 fn ensure_image_subsystem() {
     static INIT: OnceLock<bool> = OnceLock::new();
 
     let ok = *INIT.get_or_init(|| {
-        match sdl2::image::init(sdl2::image::InitFlag::PNG | sdl2::image::InitFlag::JPG) {
+        // No flags: registers the always-available decoders and only fails if
+        // SDL_image itself is unusable.
+        match sdl2::image::init(sdl2::image::InitFlag::empty()) {
             Ok(context) => {
                 // The context must live for the whole process; leaking one
                 // `Sdl2ImageContext` is the documented way to keep SDL_image
                 // initialised for the engine's lifetime.
                 std::mem::forget(context);
-                true
             }
             Err(err) => {
                 log::error!("failed to initialise SDL_image: {err}");
-                false
+                return false;
             }
         }
+
+        for (flag, name) in [
+            (sdl2::image::InitFlag::PNG, "PNG"),
+            (sdl2::image::InitFlag::JPG, "JPG"),
+        ] {
+            match sdl2::image::init(flag) {
+                Ok(context) => std::mem::forget(context),
+                Err(_) => log::warn!(
+                    "SDL_image was built without {name} support; \
+                     {name} assets will not load on this target"
+                ),
+            }
+        }
+
+        true
     });
 
     if !ok {

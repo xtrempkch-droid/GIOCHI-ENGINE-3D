@@ -266,11 +266,26 @@ impl Engine {
             .with_fixed_timestep(fixed_timestep)
             .unwrap_or_else(|_| GameLoop::new());
 
+        let (actual_width, actual_height) = render.size();
+        if actual_width != config.width || actual_height != config.height {
+            // KMSDRM is fullscreen-only: it binds the panel's native mode and
+            // ignores the requested size, so the drawable is not what was asked
+            // for. Saying so once beats debugging a scene laid out for a screen
+            // that does not exist.
+            log::info!(
+                "requested {}x{}, backend opened {}x{}",
+                config.width,
+                config.height,
+                actual_width,
+                actual_height
+            );
+        }
+
         log::info!(
             "engine {:?}: {}x{} via '{}', audio {}",
             config.title_str(),
-            config.width,
-            config.height,
+            actual_width,
+            actual_height,
             platform.video_driver_name(),
             if audio.is_available() {
                 "ativo"

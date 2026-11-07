@@ -84,17 +84,36 @@ CROSS_SYSROOT=/opt/console-sdk/sysroot scripts/build-aarch64.sh --release
 CROSS_SYSROOT=/opt/console-sdk/sysroot scripts/check-aarch64.sh
 ```
 
+This is the path that was used for the first real-hardware run
+([KMSDRM.md](KMSDRM.md) §8): the ARM64 build was made against the console's own
+sysroot, and the resulting binaries ran on it unchanged. A sysroot normally comes from
+the vendor SDK cache; one can also be lifted from the device itself:
+
+```bash
+mkdir -p /tmp/console-sysroot
+for d in usr/lib usr/include usr/share/pkgconfig lib; do
+    ssh root@console "tar -C /$d -cf - ." | tar -C /tmp/console-sysroot/$d -xf -
+done
+CROSS_SYSROOT=/tmp/console-sysroot scripts/build-aarch64.sh --release
+```
+
 The script looks for the satellites under `$CROSS_SYSROOT/usr/lib/<triple>`,
 `$CROSS_SYSROOT/usr/lib/aarch64-linux-gnu`, `$CROSS_SYSROOT/lib/aarch64-linux-gnu`
 and `$CROSS_SYSROOT/usr/lib`, and adds a `-Lnative=` flag so `rustc` finds them.
-The same variable makes `cmake/aarch64-linux-toolchain.cmake` set `CMAKE_SYSROOT`,
-so SDL2's own build uses the sysroot for its ALSA/udev probing.
 
 A sysroot must contain the full transitive closure of the satellites
 (`libpng16`, `libjpeg`, `libtiff`, `libwebp`, `libfreetype`, `libharfbuzz`,
 `libvorbisfile`, `libmodplug`, `libmpg123`, `libopusfile`, `libfluidsynth`, …).
 Copying only `libSDL2_mixer.so` and friends is not enough; the linker reports the
 missing symbols from the dependencies.
+
+**A sysroot without libc headers is still enough for the Rust build.** A vendor
+rootfs often ships only the shared objects. Cargo needs the ARM64 SDL2 `.so`s and the
+`.pc` files, nothing else, so the sysroot works as-is. Compiling a *C* consumer
+against it (`giochi-engine-capi/tests/c_smoke.c`) needs libc headers from the host's
+cross toolchain (`/usr/aarch64-linux-gnu/include`) plus
+`-Wl,--allow-shlib-undefined -Wl,-rpath-link=$CROSS_SYSROOT/usr/lib`, because the
+sysroot's `.so`s reference libc, freetype and harfbuzz, which are not in it.
 
 ## The linker
 
@@ -130,6 +149,19 @@ The toolchain file sets `CMAKE_SYSTEM_NAME`/`CMAKE_SYSTEM_PROCESSOR`, the ARM64
 compilers, and restricts `find_*` to the sysroot. SDL2's optional dependencies
 that the sysroot does not provide are disabled instead of being resolved from the
 host.
+
+**Cross isolation takes three settings, and two of them are easy to miss.** Setting
+only `CMAKE_SYSROOT` changes the compiler's default search paths; it does **not**
+restrict `find_library`/`find_package`, so CMake still walks
+`/usr/lib/x86_64-linux-gnu`, finds `libEGL`/`libpulse`/`libwayland` there and hands
+the aarch64 linker flags that resolve to host sonames. `CMAKE_FIND_ROOT_PATH` is the
+missing half. And SDL2 probes X11, Wayland, EGL, PulseAudio and sndio through
+**pkg-config**, which knows nothing about either CMake variable: left alone it answers
+with the host's `.pc` files, so the failures come back through a third channel.
+`scripts/build-aarch64.sh` therefore exports both `PKG_CONFIG_SYSROOT_DIR` and
+`PKG_CONFIG_LIBDIR` (not just `PKG_CONFIG_PATH` — the latter *adds* to the host's
+default search path rather than replacing it). With all three in place the probes fail,
+which is the correct answer: the target does not have those subsystems.
 
 `scripts/check-aarch64.sh` and `scripts/build-aarch64.sh` both export
 `CMAKE_TOOLCHAIN_FILE_aarch64_unknown_linux_gnu` — the target-suffixed variable

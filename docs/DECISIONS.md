@@ -31,6 +31,15 @@ add a new ADR that states what it replaces.
 | 024 | The engine lends its subsystems to scenes; scenes never own them | Accepted |
 | 025 | Scene transitions are requests applied after the frame | Accepted |
 | 026 | `Engine::run_current` is the single loop; `--frames` lives in the engine | Accepted |
+| 027 | The ARM64 gate is `cargo check`; linking is a separate, verified path | Accepted |
+| 028 | A callback may use exactly what the engine lends it | Accepted |
+| 029 | `Engine::step` shares the loop body with `run_current` | Accepted |
+| 030 | Lua gets capabilities, not a global engine | Accepted |
+| 031 | `Texture` freed by `Drop`, `Sound`/`Music` by the app | Accepted |
+| 032 | The C-shaped rules are checked by a test, not by review | Accepted |
+| 033 | The MSRV is verified, and it is not the one the prompt suggested | Accepted |
+| 034 | Optional image decoders are probed, never assumed | Accepted |
+| 035 | The drawable size is authoritative, not the configured size | Accepted |
 
 ---
 
@@ -816,3 +825,55 @@ publish the floor the project actually has.
 **Consequences.** Anyone on 1.75–1.81 now gets cargo's clear "requires rustc 1.82" message
 instead of a confusing failure inside `mlua`. The floor is a measured value, not a guess:
 1.79 was tried and failed, 1.82 was tried and passed.
+
+## ADR-034 — Optional image decoders are probed, never assumed
+
+**Context.** `ensure_image_subsystem` asked SDL_image for `PNG | JPG`. `IMG_Init` is
+all-or-nothing: it fails if *any* requested flag cannot be satisfied. On a console image
+`libSDL2_image` can be built with no external codec at all — it links only `libSDL2`,
+`libm` and `libc`, and the PNG and JPEG entry points are compiled as "not supported"
+stubs. On such a target the engine's initialisation failed, file-based texture loading
+was declared dead, and the log blamed SDL_image for what was really one missing codec —
+while BMP, TGA, PNM and QOI kept working, because those decoders are built in and need
+no flag.
+
+The failure is invisible on a desktop, where the distribution's `libSDL2_image` always
+has both codecs, so nothing in the desktop test suite could have caught it.
+
+**Decision.** Open the subsystem with `InitFlag::empty()`, which fails only if
+SDL_image itself is unusable, then probe `PNG` and `JPG` separately and warn once per
+missing decoder. Formats that need no flag need no second step.
+
+**Why "ask for everything and accept the failure" is not enough.** A flag set is a
+*request*, and a single failure cannot distinguish "no SDL_image" from "no PNG" from
+"no JPG". Probing one flag at a time is the only way to learn what a given build has.
+
+**Consequences.** A codec-less target loads BMP assets and logs exactly which formats it
+cannot decode, instead of refusing to start. BMP is the safe deployment format for such
+images ([KMSDRM.md](KMSDRM.md) §8.4), and `--verify` reports the live texture count so a
+mis-shipped PNG shows up on the first run rather than as an invisible sprite.
+
+## ADR-035 — The drawable size is authoritative, not the configured size
+
+**Context.** `EngineConfig::width`/`height` were logged as if they described the window.
+On a desktop they do. On KMSDRM they do not: the backend is fullscreen-only, binds the
+panel's native mode and silently ignores the requested size. Asking for 1280x720 on a
+640x480 panel produces a 640x480 drawable with no error, no warning and no scaling. A
+scene laid out for 1280x720 is cropped, and the startup log agrees with the configuration
+rather than with the screen — which is the worst possible combination for debugging.
+
+**Decision.** The engine reads the real drawable from the renderer once the window
+exists, reports that in the startup line, and logs an extra
+`requested WxH, backend opened WxH` line when the two differ.
+`giochi_render_size` and `RenderContext::size()` keep returning the real drawable — they
+always did — so the API and the log now tell the same story.
+
+**What is deliberately not done.** No scaling is attempted and the requested size is not
+silently rewritten into the config. Games read `RenderContext::size()` and lay out
+against it. Auto-scaling would hide the mismatch behind a transform and make the same
+game code behave differently on KMSDRM and on a desktop.
+
+**Consequences.** The mismatch becomes a logged fact on the first frame instead of a
+mystery on the panel. Two checks moved with it: the C smoke test no longer asserts the
+requested render size on kmsdrm, and `--quadro` screenshots are documented as panel-sized
+([KMSDRM.md](KMSDRM.md) §8.3).

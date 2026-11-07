@@ -322,7 +322,11 @@ pub extern "C" fn giochi_engine_timestep() -> f32 {
     })
 }
 
-/// NUL-terminated name of the video driver actually in use (`"kmsdrm"`, `"x11"`, …).
+/// NUL-terminated name of the video driver actually in use (`"KMSDRM"`,
+/// `"x11"`, `"dummy"`, …).
+///
+/// SDL2 spells its console backend `KMSDRM` in capitals; compare
+/// case-insensitively if you branch on it.
 ///
 /// Owned by the engine, valid until the next call on the same thread, never NULL.
 ///

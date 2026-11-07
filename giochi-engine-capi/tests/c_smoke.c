@@ -8,6 +8,7 @@
  *   cc -std=c11 -Wall -Wextra -Werror -I giochi-engine-capi/include \
  *      giochi-engine-capi/tests/c_smoke.c -L target/debug -lgiochi -o c_smoke
  */
+#include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +17,26 @@
 #include "giochi.h"
 
 static int failures;
+
+/* SDL2 registers this backend as "KMSDRM", unlike "x11" or "wayland", so a
+ * case-sensitive compare silently misses the console this test exists for. */
+static int contains_ignore_case(const char *haystack, const char *needle)
+{
+    const size_t n = strlen(needle);
+    const size_t h = strlen(haystack);
+    for (size_t i = 0; i + n <= h; i++) {
+        size_t j = 0;
+        while (j < n
+               && tolower((unsigned char)haystack[i + j])
+                      == tolower((unsigned char)needle[j])) {
+            j++;
+        }
+        if (j == n) {
+            return 1;
+        }
+    }
+    return 0;
+}
 
 #define CHECK(condition)                                                       \
     do {                                                                       \
@@ -147,7 +168,13 @@ int main(void)
 
     uint32_t width = 0, height = 0;
     CHECK_CODE(giochi_render_size(&width, &height));
-    CHECK(width == 320 && height == 240);
+    CHECK(width > 0 && height > 0);
+    /* A windowed backend honours the requested size. KMSDRM is fullscreen-only:
+       it binds the panel's native mode and cannot be 320x240. Demanding the
+       requested size would make this test fail on the console it exists for. */
+    if (!contains_ignore_case(giochi_engine_video_driver(), "kmsdrm")) {
+        CHECK(width == 320 && height == 240);
+    }
 
     /* NULL out-parameters are allowed. */
     CHECK_CODE(giochi_render_size(NULL, NULL));
@@ -163,8 +190,12 @@ int main(void)
         size_t read = 0;
         CHECK_CODE(giochi_asset_read("assets/player.png", buffer, size, &read));
         CHECK(read == size);
-        /* PNG signature, to prove the bytes are really the image. */
-        CHECK(read > 8 && buffer[0] == 0x89 && buffer[1] == 'P');
+        /* An image signature, to prove the bytes are really the image and not
+           zeroes. BMP counts: SDL_image decodes it with no external library,
+           and a console image built without libpng has nothing else. */
+        CHECK(read > 8
+              && ((buffer[0] == 0x89 && buffer[1] == 'P')
+                  || (buffer[0] == 'B' && buffer[1] == 'M')));
 
         GiochiTexture from_memory = giochi_texture_create_memory(buffer, read);
         CHECK(from_memory != 0);

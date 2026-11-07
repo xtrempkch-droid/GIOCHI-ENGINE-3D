@@ -128,6 +128,58 @@ Validação: a matriz completa de CI espelhada num contentor `ubuntu:24.04` limp
 clippy, build, 209 testes, doc, header, FFI (C + Python), demo, os cinco exemplos e o
 `mini_game.lua` — **16/16 passos**, 0 falhas.
 
+## Validação em hardware real (2026-11-07)
+
+Primeira execução numa consola de verdade: **Rockchip PX30** portátil, Buildroot
+2024.02, kernel 6.12, aarch64, painel DSI 640x480, glibc 2.38, sem X11 e sem Wayland,
+964 MB de RAM, CPU ARMv8.
+
+Quatro bugs de portabilidade que nem o CI nem a suíte de desktop podiam ter apanhado:
+
+1. **`libSDL2_image` sem codecs.** Nessa imagem a biblioteca liga apenas `libSDL2`,
+   `libm` e `libc`: PNG e JPEG são stubs "not supported". Como `IMG_Init` falha quando
+   *qualquer* flag pedida está indisponível, pedir `PNG | JPG` fazia a engine declarar
+   todo o subsistema morto — apesar de BMP, TGA, PNM e QOI não precisarem de flag
+   nenhuma. Agora abre-se sem flags e cada codec opcional é sondado em separado, com um
+   aviso por formato em falta (ADR-034).
+2. **KMSDRM é fullscreen-only e o log mentia.** Pedir 1280x720 num painel de 640x480
+   abre 640x480, sem erro e sem escala; o arranque imprimia o tamanho *configurado*.
+   Agora reporta o drawable real e escreve `requested WxH, backend opened WxH` quando
+   diferem (ADR-035).
+3. **O nome do driver é `KMSDRM`, em maiúsculas** (`x11` e `wayland` são minúsculas), pelo
+   que o natural `strcmp(driver, "kmsdrm")` nunca casava numa consola — e o erro era
+   invisível no desktop. Documentado; o smoke test C compara sem distinguir maiúsculas.
+4. **O cross ARM64 com sysroot vazava pacotes do host.** Duas omissões independentes: o
+   toolchain CMake definia `CMAKE_SYSROOT` mas não `CMAKE_FIND_ROOT_PATH`, e o pkg-config
+   continuava a responder com `.pc` x86_64 do host, pelo que o SDL2 activava
+   X11/Wayland/EGL/PulseAudio/sndio e o linker aarch64 recebia sonames do host. Ambos
+   corrigidos (`cmake/aarch64-linux-toolchain.cmake`, `scripts/build-aarch64.sh`).
+
+Duas armadilhas de operação, ambas registadas em `docs/KMSDRM.md` §8:
+
+- a consola arranca no seu próprio launcher, que detém `/dev/dri/card0` durante toda a
+  vida — a mensagem "outro processo detém DRM master" **não** significa só "pare o X".
+  Libertar exige tornar o launcher não-executável (o supervisor respeita `[ -x ]`) e
+  depois sinalizar `giochi-init`;
+- o supervisor desiste em definitivo após 5 falhas em 60 s e estaciona num
+  `sleep 3600`: um binário de teste que rebente cinco vezes deixa o ecrã preto sem
+  recuperação a não ser sinalizar `giochi-init`.
+
+**Medições nesse dispositivo** (build ARM64 de release, 640x480, vsync desligado):
+
+| Medição | Resultado |
+|---|---|
+| `giochi-demo --frames 300` | 59,4 fps, 303 passos |
+| `giochi-demo lua mini_game.lua --auto --frames 1200` | 59,5 fps, 16 pontos, **0 texturas vivas** |
+| Memória residente (`VmRSS`) | 21,9 MB (`VmPeak` 181 MB) |
+| Consumidor C (`c_smoke`) | `OK (abi 1, engine 0.1.0)` |
+| Áudio | disponível (ALSA, `/dev/snd/pcmC0D0p`) |
+| Gamepad | detetado (`r36s_Gamepad`) |
+
+O regresso a zero texturas depois de 1200 frames de jogo é a prova de não-fuga: o binding
+Lua liberta texturas no `Drop` e o registo confirma que nada ficou para trás. A build
+ARM64 exige no máximo `GLIBC_2.35`, compatível com os 2.38 do dispositivo.
+
 ## Roadmap
 
 As oito fases do prompt mestre estão completas. Trabalho futuro, por ordem de valor:
@@ -152,9 +204,10 @@ As oito fases do prompt mestre estão completas. Trabalho futuro, por ordem de v
 - `sdl2` compila com `unsafe_textures` (ADR-017); um único canvas por processo
   (ADR-018).
 - O caminho "ao vivo" do gamepad não é exercitável sem hardware (ADR-020).
-- Nesta máquina o `kmsdrm` não inicializa (sessão gráfica detém DRM master) — caso
-  coberto pelo fallback do ADR-015. O dispositivo de áudio existe, então o caminho
-  real de mixer foi verificado.
+- Nesta máquina de desenvolvimento o `kmsdrm` não inicializa (sessão gráfica detém DRM
+  master) — caso coberto pelo fallback do ADR-015. O caminho KMSDRM real está agora
+  **provado em hardware** (PX30, secção acima); o mixer também foi verificado com placa
+  de som real.
 - `SceneTransition::Replace`/`Push` não podem ser aplicados pelo engine (o enum não
   carrega payload); a troca de cena é feita por `Engine::push_scene`/
   `replace_scene`. Documentado no ADR-025.

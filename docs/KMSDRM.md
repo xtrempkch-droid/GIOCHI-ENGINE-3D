@@ -84,8 +84,10 @@ Group membership, as in §3.
 
 **`DRM devices found in /dev/dri: ... If another process holds DRM master`**
 
-A running desktop session owns the console. Either stop it, switch to a virtual
-console (`Ctrl+Alt+F3`), or unset `SDL_KMSDRM_REQUIRE_DRM_MASTER` while developing.
+Another process owns the console: a desktop session, or — on a shipped console — the
+launcher that booted it, which holds `/dev/dri/card0` open for its whole life (see
+§8.1 for how to find it). Either stop it, switch to a virtual console
+(`Ctrl+Alt+F3`), or unset `SDL_KMSDRM_REQUIRE_DRM_MASTER` while developing.
 
 **`failed to initialise the SDL2 video subsystem: No available video device`**
 
@@ -157,3 +159,108 @@ RUST_LOG=info SDL_VIDEODRIVER=kmsdrm ./giochi-demo --verify
 `--verify` runs a single frame through the full `Engine` pipeline and prints the
 live texture and sound counts plus whether audio is available, which is the fastest
 way to confirm that a deployment is wired correctly.
+
+---
+
+## 8. Measured on real hardware
+
+Everything below was observed on a **Rockchip PX30** handheld (Buildroot 2024.02,
+kernel 6.12, aarch64, 640x480 DSI panel, glibc 2.38, no X11 and no Wayland). Each
+item cost time to diagnose and none is predictable from the sections above.
+
+### 8.1 A shipped console already holds DRM master
+
+The device boots into its own launcher, which keeps `/dev/dri/card0` and
+`renderD128` open for its whole life. `kmsdrm` then fails with the "another process
+holds DRM master" message from §4, even though nothing resembling a desktop session
+is running — so that message does **not** only mean "stop your X server".
+
+Find the holder without `fuser` (BusyBox images often lack it):
+
+```bash
+for p in /proc/[0-9]*; do for f in $p/fd/*; do
+    case "$(readlink "$f" 2>/dev/null)" in /dev/dri/*) echo "${p#/proc/} $(cat $p/comm)";; esac
+done; done | sort -u
+```
+
+On our image `giochi-init` restarts the launcher within a second, so releasing the
+console for a test needs a wider window than killing it. Making the launcher
+non-executable is what the supervisor honours (`[ -x "$LAUNCHER" ] ||` falls into a
+wait loop that polls every `LAUNCHER_WAIT` seconds, 30 by default), and it is undone
+with a single `chmod +x`:
+
+```bash
+chmod -x /opt/giochi/apps/launcher/bin/giochi-launcher
+kill -TERM "$(pidof giochi-init)"      # inittab respawns it into the wait loop
+# ... run the engine against /dev/dri/card0 ...
+chmod +x /opt/giochi/apps/launcher/bin/giochi-launcher
+kill -TERM "$(pidof giochi-init)"      # respawned, this time it launches
+```
+
+**The trap: a broken test binary can leave the console dead.** The supervisor gives
+up after `RESTART_MAX=5` failures inside `RESTART_WINDOW=60` seconds, and then parks
+in `while :; do sleep 3600; done` — it stays alive (the kernel needs an init) but
+never starts the launcher again. The screen goes black and no amount of rebooting
+the *app* helps. Deploying a test binary that crashes on startup five times will do
+exactly this. Recovery is the same `kill -TERM` on `giochi-init`, which re-enters
+`main` with a fresh quota; a SIGTERM to the launcher counts as a deliberate exit and
+resets the quota instead of consuming it, so use that signal deliberately. Leave a
+marker when this happens rather than guessing later — on failure the supervisor
+writes `quedas_repetidas` into `$PARADA_FILE`.
+
+### 8.2 The driver name is `KMSDRM`, in capitals
+
+SDL2's bootstrap for this backend is registered as `"KMSDRM"`, while `x11` and
+`wayland` are lower case. `strcmp(driver, "kmsdrm") == 0` therefore never matches on
+a console, and the mistake is invisible on a desktop. Compare case-insensitively;
+`giochi_engine_video_driver()`, `app:video_driver()` and `Engine::video_driver_name`
+all return SDL's own spelling.
+
+### 8.3 KMSDRM is fullscreen-only: the requested size is ignored
+
+Asking for 1280x720 on a 640x480 panel **opens 640x480**. There is no window manager
+to negotiate a window size and no scaling. Consequences:
+
+* `giochi_render_size` / `RenderContext::size()` return the real drawable, which is
+  the panel mode, not `EngineConfig::width/height`;
+* the engine logs both when they differ
+  (`requested 1280x720, backend opened 640x480`), because a scene laid out for the
+  configured size is silently cropped otherwise;
+* a screenshot taken with `--quadro` is the panel's size, not the configured one.
+
+Design scenes against the reported size. Do not assume the configured size survives.
+
+### 8.4 `libSDL2_image` may be built without any external codec
+
+On this image `libSDL2_image` links only `libSDL2`, `libm` and `libc`: PNG and JPG
+are compiled as "not supported" stubs, and `IMG_Init(PNG)` fails. Because
+`IMG_Init` fails when *any* requested flag is unavailable, the engine used to
+declare the whole subsystem dead — even though BMP, TGA, PNM and QOI need no flags
+and kept working. Since ADR-034 the subsystem is opened with no flags and each
+optional decoder is probed separately, so this target logs a warning and still
+decodes BMP.
+
+Check what an image actually has before blaming the engine:
+
+```bash
+objdump -p /usr/lib/libSDL2_image-2.0.so.0 | grep NEEDED   # no libpng/libjpeg = no PNG/JPG
+```
+
+Ship BMP assets to such a target, or rebuild `libSDL2_image` with `libpng`.
+
+### 8.5 Numbers from that run
+
+Measured with the release ARM64 build described in
+[CROSS_COMPILE.md](CROSS_COMPILE.md), 640x480 panel, vsync off and the default
+60 Hz timestep:
+
+| Measurement | Result |
+| --- | --- |
+| `giochi-demo --frames 300` | 59.4 fps, 303 steps |
+| `giochi-demo lua mini_game.lua --auto --frames 1200` | 59.5 fps, 16 points, 0 live textures |
+| Resident memory (`VmRSS`) | 21.9 MB (`VmPeak` 181 MB) |
+| C ABI consumer (`c_smoke`) | `OK (abi 1, engine 0.1.0)` |
+| Audio | available (ALSA, `/dev/snd/pcmC0D0p`) |
+
+The texture count returning to zero after a 1200-frame game is the leak check: the
+Lua binding frees textures on `Drop`, and the registry reports nothing left behind.

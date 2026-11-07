@@ -15,6 +15,11 @@ set(CMAKE_CXX_COMPILER aarch64-linux-gnu-g++)
 
 if(DEFINED ENV{CROSS_SYSROOT})
   set(CMAKE_SYSROOT "$ENV{CROSS_SYSROOT}")
+  # CMAKE_SYSROOT alone only changes the compiler's default search paths; it does
+  # not restrict `find_library`/`find_package`. Without this line CMake still walks
+  # the host's /usr/lib/x86_64-linux-gnu, finds libEGL/libpulse/libwayland there,
+  # and hands the aarch64 linker flags that resolve to x86_64 sonames.
+  set(CMAKE_FIND_ROOT_PATH "$ENV{CROSS_SYSROOT}")
 endif()
 
 # Optional SDL2 dependencies must not be resolved from the host system when the

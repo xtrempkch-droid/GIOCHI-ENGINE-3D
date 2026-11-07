@@ -142,7 +142,7 @@ Setup and inspection only. Every method except `run`/`step` needs the engine idl
 | `app:set_volume(0..128)` | — | Clamped, never an error. |
 | `app:set_clear_color(color)` | — | Overrides the frame's background. |
 | `app:size()` | `width, height` | Physical pixels. |
-| `app:video_driver()` | string | `"kmsdrm"`, `"x11"`, `"dummy"`, … — what SDL actually opened. |
+| `app:video_driver()` | string | `"KMSDRM"`, `"x11"`, `"dummy"`, … — what SDL actually opened. SDL2 spells the console backend in capitals. |
 | `app:audio_available()` | boolean | `false` means silent mode (ADR-021). |
 | `app:volume()` | integer | Current master volume. |
 | `app:frames()` / `app:steps()` | integer | Statistics of the last run. |

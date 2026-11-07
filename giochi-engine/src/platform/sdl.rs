@@ -229,8 +229,12 @@ impl Platform {
         })
     }
 
-    /// Name of the video driver SDL2 actually initialised (`kmsdrm`, `x11`,
+    /// Name of the video driver SDL2 actually initialised (`KMSDRM`, `x11`,
     /// `wayland`, …).
+    ///
+    /// Note the spelling: SDL2 registers its console backend as `KMSDRM` in
+    /// capitals, unlike the lower-case `x11` and `wayland`. Consumers that
+    /// branch on this name must compare case-insensitively.
     pub fn video_driver_name(&self) -> &'static str {
         self.context.video.current_video_driver()
     }

@@ -6,7 +6,46 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing yet.
+### Verified on real hardware
+
+The first run on an actual console — a Rockchip PX30 handheld (Buildroot 2024.02,
+kernel 6.12, aarch64, 640x480 DSI panel, glibc 2.38, no X11, no Wayland) — found four
+portability bugs that neither the desktop suite nor CI could have caught. All four are
+fixed; the measurements are in [docs/KMSDRM.md](docs/KMSDRM.md) §8.
+
+### Fixed — hardware validation
+
+- **A codec-less `libSDL2_image` killed texture loading entirely.** On this image
+  `libSDL2_image` links only `libSDL2`, `libm` and `libc`: PNG and JPEG are compiled as
+  "not supported" stubs. Because `IMG_Init` fails when *any* requested flag is
+  unavailable, asking for `PNG | JPG` made the engine declare the whole subsystem dead —
+  even though BMP, TGA, PNM and QOI need no flags and worked all along. The subsystem is
+  now opened with no flags and each optional decoder is probed separately, warning once
+  per missing format. ADR-034.
+- **KMSDRM is fullscreen-only, and the log said otherwise.** Requesting 1280x720 on a
+  640x480 panel opens 640x480 with no error and no scaling, but startup printed the
+  *configured* size — the worst pairing for debugging a cropped scene. The engine now
+  reports the real drawable and logs `requested WxH, backend opened WxH` when they
+  differ. ADR-035.
+- **The driver name is `KMSDRM`, in capitals.** `x11` and `wayland` are lower case, so
+  the natural `strcmp(driver, "kmsdrm")` never matched on a console and the mistake was
+  invisible on a desktop. Documented, and the C smoke test now compares case-insensitively.
+- **The ARM64 sysroot cross build leaked host packages.** Two independent omissions:
+  the CMake toolchain file set `CMAKE_SYSROOT` without `CMAKE_FIND_ROOT_PATH`, and
+  pkg-config still answered with host x86_64 `.pc` files, so SDL2 enabled
+  X11/Wayland/EGL/PulseAudio/sndio and the aarch64 linker was handed host sonames. Both
+  are set now (`cmake/aarch64-linux-toolchain.cmake`, `scripts/build-aarch64.sh`).
+
+### Added — hardware validation
+
+- `docs/KMSDRM.md` §8 records what the run actually measured, including the two traps
+  that cost the most time: a shipped console's own launcher already holds DRM master
+  (so the "stop your X server" message is misleading there), and the supervisor gives up
+  permanently after five crashes in a minute, leaving the screen black with no recovery
+  short of signalling `giochi-init`.
+- Measured on that device: 300 demo frames at 59.4 fps, a 1200-frame Lua game at
+  59.5 fps with **zero live textures** afterwards, `c_smoke: OK (abi 1, engine 0.1.0)`,
+  and 21.9 MB resident.
 
 ## [0.1.0] - 2026-11-07
 

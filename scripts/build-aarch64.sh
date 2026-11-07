@@ -93,6 +93,15 @@ export CMAKE_TOOLCHAIN_FILE_aarch64_unknown_linux_gnu="$repo_root/cmake/aarch64-
 # A plain sysroot is not in gcc's default search path; a multiarch directory is.
 if [[ -n "${CROSS_SYSROOT:-}" ]]; then
     export RUSTFLAGS="${RUSTFLAGS:-} -Lnative=$lib_dir"
+
+    # SDL2's CMake probes X11, Wayland, EGL, PulseAudio and sndio through
+    # pkg-config, which knows nothing about CMAKE_FIND_ROOT_PATH. Left alone it
+    # answers with the *host's* x86_64 .pc files, so the bundled SDL2 enables
+    # those subsystems and the aarch64 linker is then handed flags that resolve
+    # to host sonames. Pointing pkg-config at the sysroot alone makes those
+    # probes fail, which is correct: the target does not have them.
+    export PKG_CONFIG_SYSROOT_DIR="$CROSS_SYSROOT"
+    export PKG_CONFIG_LIBDIR="$CROSS_SYSROOT/usr/lib/pkgconfig:$CROSS_SYSROOT/usr/share/pkgconfig"
 fi
 
 echo "==> target:      $target"
