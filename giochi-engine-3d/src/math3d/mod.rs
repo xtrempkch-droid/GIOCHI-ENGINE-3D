@@ -15,6 +15,7 @@
 
 mod camera;
 mod color;
+mod controller;
 mod mat4;
 mod quat;
 mod transform;
@@ -22,6 +23,7 @@ mod vec3;
 
 pub use camera::Camera3D;
 pub use color::Color3D;
+pub use controller::{AxisInput, CameraController, ControllerConfig};
 pub use mat4::Mat4;
 pub use quat::Quat;
 pub use transform::Transform3D;

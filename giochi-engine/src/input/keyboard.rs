@@ -17,12 +17,18 @@ pub const KEY_SPACE: KeyCode = 32;
 pub const KEY_A: KeyCode = 97;
 /// `D`.
 pub const KEY_D: KeyCode = 100;
+/// `E`. Used by the 3D walker to ascend.
+pub const KEY_E: KeyCode = 101;
 /// `M`.
 pub const KEY_M: KeyCode = 109;
+/// `Q`. Used by the 3D walker to descend.
+pub const KEY_Q: KeyCode = 113;
 /// `S`.
 pub const KEY_S: KeyCode = 115;
 /// `W`.
 pub const KEY_W: KeyCode = 119;
+/// Left shift. SDL reports the modifier as a keycode as well as a modifier.
+pub const KEY_LEFT_SHIFT: KeyCode = 1_073_741_825;
 /// Left arrow.
 pub const KEY_LEFT: KeyCode = 1_073_741_904;
 /// Right arrow.

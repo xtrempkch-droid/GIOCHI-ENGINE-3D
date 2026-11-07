@@ -27,3 +27,7 @@ env_logger = { workspace = true }
 [[example]]
 name = "cube_demo"
 path = "examples/cube_demo.rs"
+
+[[example]]
+name = "mini_fps"
+path = "examples/mini_fps.rs"

@@ -200,6 +200,14 @@ jobs:
           cargo test -q -p giochi-engine-3d --test mesh_pipeline
           cargo run -q -p giochi-engine-3d --example cube_demo -- --frames 30
 
+      - name: 3D first-person walker
+        # `--auto` walks a scripted path: `Input`'s keyboard state is only populated by
+        # real SDL events, so an unattended run has to drive the axes directly. Without
+        # this the movement code is never executed on a keyboard-less runner.
+        env:
+          SDL_VIDEODRIVER: offscreen
+        run: cargo run -q -p giochi-engine-3d --example mini_fps -- --frames 120 --auto
+
       - name: 3D frame capture
         # "It drew a frame" and "it drew the right frame" are different claims. The
         # capture is a real BMP read back with glReadPixels, and the size is asserted so

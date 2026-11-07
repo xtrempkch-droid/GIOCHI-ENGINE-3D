@@ -115,7 +115,7 @@ pub(crate) struct SdlContext {
     timer: sdl2::TimerSubsystem,
     events: sdl2::EventSubsystem,
     game_controller: Option<sdl2::GameControllerSubsystem>,
-    _sdl: sdl2::Sdl,
+    sdl: sdl2::Sdl,
 }
 
 impl fmt::Debug for SdlContext {
@@ -127,6 +127,16 @@ impl fmt::Debug for SdlContext {
 impl SdlContext {
     pub(crate) fn video(&self) -> &sdl2::VideoSubsystem {
         &self.video
+    }
+
+    /// The mouse utility.
+    ///
+    /// `MouseUtil` is a zero-sized handle (`SdlDrop` only), so it is derived from the
+    /// stored `Sdl` on demand instead of being kept as a second field. Never `None` in
+    /// practice; the `Option` at the call site is about the *vanilla* driver having no
+    /// pointer, which is a per-frame question, not a construction-time one.
+    pub(crate) fn mouse(&self) -> Option<sdl2::mouse::MouseUtil> {
+        Some(self.sdl.mouse())
     }
 }
 
@@ -221,7 +231,7 @@ impl Platform {
                 timer,
                 events,
                 game_controller,
-                _sdl: sdl,
+                sdl,
             }),
             event_pump: RefCell::new(event_pump),
             choice,
@@ -308,6 +318,17 @@ impl Platform {
 
     pub(crate) fn sdl_context(&self) -> &Rc<SdlContext> {
         &self.context
+    }
+
+    /// Returns the SDL mouse utility, or `None` when the video subsystem has no mouse.
+    ///
+    /// Needed by the 3D walker's relative-mouse mode. A headless run has no pointer, so
+    /// this is an `Option` rather than an error: capturing the mouse is an enhancement,
+    /// never a requirement to start.
+    pub fn sdl_mouse(&self) -> Option<sdl2::mouse::MouseUtil> {
+        // Derived on demand rather than stored: `MouseUtil` is a zero-sized handle
+        // borrowed from the `Sdl` context, and the 2D path never needs it.
+        self.context.mouse()
     }
 
     /// Returns the SDL video subsystem.

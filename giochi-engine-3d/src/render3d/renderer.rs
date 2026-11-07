@@ -110,6 +110,22 @@ impl RenderContext3D {
         self.state.clear(self.gl.glow());
     }
 
+    /// Switches polygon rasterisation between filled and wireframe.
+    ///
+    /// Wireframe is the fastest way to tell "the face was culled" from "the face was
+    /// never drawn", so it belongs in the renderer rather than in an example.
+    pub fn set_wireframe(&self, on: bool) {
+        // SAFETY: `polygon_mode` is core GLES 2.0 (GL_LINE is the only alternative it
+        // allows). A driver that rejects it raises GL_INVALID_ENUM, which
+        // `take_gl_error` surfaces.
+        unsafe {
+            self.gl.glow().polygon_mode(
+                glow::FRONT_AND_BACK,
+                if on { glow::LINE } else { glow::FILL },
+            );
+        }
+    }
+
     /// Sets the GL viewport to `width`x`height` and records it for the camera.
     ///
     /// Split out of [`RenderContext3D::begin_frame`] so a test can drive it without a

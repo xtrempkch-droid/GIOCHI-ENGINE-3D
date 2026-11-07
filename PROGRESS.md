@@ -1,9 +1,9 @@
 # Estado — GIOCHI-ENGINE
 
-## Última fase concluída: 11 — Pipeline de mesh + shaders
+## Última fase concluída: 12 — Câmera com controlo + mini_fps
 Data: 2026-11-07
 
-**Fases 0–8 (2D) concluídas. Extensão v2.1 (3D) em andamento: fases 9, 10 e 11 concluídas.**
+**Fases 0–8 (2D) concluídas. Extensão v2.1 (3D) em andamento: fases 9 a 12 concluídas.**
 
 ## Status 2D (Fases 0–8)
 
@@ -15,7 +15,7 @@ extensão v2.1). Gates 2D revalidados a cada fase 3D.
 - [x] Fase 9 — Bootstrap 3D: contexto GLES/EGL, clear, swap
 - [x] Fase 10 — Math 3D (`Vec3`, `Quat`, `Mat4`, `Transform3D`, `Camera3D`)
 - [x] Fase 11 — Pipeline de mesh + shaders
-- [ ] Fase 12 — Câmera com controle + `mini_fps`
+- [x] Fase 12 — Câmera com controlo + `mini_fps`
 - [ ] Fase 13 — Iluminação Phong (opcional)
 - [ ] Fase 14 — C ABI 3D (v2)
 
@@ -26,8 +26,8 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 347 testes, 0 falhas
-      (209 das fases 0–8 + 138 da crate 3D)
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 360 testes, 0 falhas
+      (209 das fases 0–8 + 151 da crate 3D)
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
 - [x] `cargo doc --workspace --no-deps --document-private-items` (0 warnings)
 - [x] `scripts/gen-header.sh --check` — `giochi.h` em sincronia com o crate
@@ -46,6 +46,47 @@ Verificações manuais da fase:
   recolha pelo GC, `giochi.quit()`, propagação de erro, `app:step`, `arg`).
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
+
+## Entregue na fase 12 — Câmera com controlo + `mini_fps`
+
+O walker em primeira pessoa, e o exemplo jogável que a fase pede.
+
+- `math3d/controller.rs`: `CameraController` com yaw/pitch acumulados (não quaternário
+  integrado — evita deriva ao fim de uma sessão), pitch travado aquém dos polos, velocidade
+  suavizada e passeio normalizado (W+D não é 41% mais rápido que W).
+- `AxisInput`: eixos desacoplados da fonte. Teclado é uma fonte; um caminho
+  scriptado é outra. Isto permite testar a matemática de movimento directamente e foi
+  o que expôs o bug abaixo.
+- `examples/mini_fps.rs`: chão texturizado, 24 cubos com inclinações diferentes, WASD,
+  Q/E, sprint com shift, rato relativo com ESC a libertar, TAB para wireframe, FPS no log
+  uma vez por segundo, `--frames`/`--auto`/`--quadro`.
+- `RenderContext3D::set_wireframe`, `Platform::sdl_mouse`.
+- Chaves `KEY_E`, `KEY_Q`, `KEY_LEFT_SHIFT` adicionadas à crate 2D (aditivo).
+
+### Bug encontrado pelo próprio exemplo
+
+O modo `--auto` não movia o jogador. A primeira versão chamava
+`AxisInput::from_keyboard`, e `KeyboardState` só é populado por eventos SDL reais — num
+percurso scriptado não há teclado, logo os eixos ficavam a zero. O sintoma era traiçoeiro:
+o FPS imprimia 60,0 e o programa saía com sucesso, mas a posição não mudava. Resolvido com
+`update_with_axes` e um teste que assere a **direção** de cada eixo (W → −Z, D → +X,
+E → +Y) e que a diagonal não é mais rápida que a linha reta.
+
+### Medido no PX30 (Mali-G31/Panfrost), 2026-11-07 13:40
+
+| Verificação | Resultado |
+|---|---|
+| `mini_fps --frames 300 --auto` | **60,0 fps** em todos os relatórios, 0 erros GL |
+| `mini_fps --frames 1200 --auto` (sem cap) | **57,1 fps** (21 s) |
+| Movimento | (0,1.7,8) → (38.2,1.7,−101.0) em 1200 frames |
+| Captura no aparelho | BMP 640×480; céu em cima, chão em baixo, cubos com profundidade |
+| Libertação | `released: 0 meshes and 0 shaders left` |
+| FPS no desktop (`offscreen`) | 60,0 com cap, mesma cena |
+
+**Validado em hardware real.** `--auto` existe precisamente porque "jogável" não é
+testável automaticamente: o caminho manual (rato relativo, WASD, TAB, ESC) usa o mesmo
+código de movimento, mas o que se pode medir — direção, colisão de profundidade, fps — é
+medido.
 
 ## Entregue na fase 11 — Pipeline de mesh + shaders
 

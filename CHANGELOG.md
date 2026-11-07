@@ -6,6 +6,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — 3D, phase 12: first-person camera and `mini_fps`
+
+- `CameraController`: WASD, Q/E, sprint, relative mouse look. Yaw and pitch are stored as
+  clamped angles rather than an integrated quaternion, which is what stops the view
+  drifting over a long session.
+- `AxisInput` decouples the movement axes from the keyboard, so a scripted path drives
+  the same code the manual check does. This is not a convenience: `KeyboardState` is only
+  populated by real SDL events, and the first `--auto` implementation walked nowhere while
+  still printing 60.0 fps and exiting successfully.
+- `examples/mini_fps.rs`: textured floor, 24 tilted obstacle cubes, wireframe toggle,
+  fps once per second, `--frames`/`--auto`/`--quadro`.
+- `RenderContext3D::set_wireframe` and `Platform::sdl_mouse`; `KEY_E`, `KEY_Q` and
+  `KEY_LEFT_SHIFT` added to the 2D input module (additive).
+
+### Verified — phase 12 on real hardware (PX30, Mali-G31)
+
+- 300 frames with the frame cap: **60.0 fps** sustained, no GL error.
+- 1200 frames uncapped: **57.1 fps** in 21 s, position walking from (0, 1.7, 8) to
+  (38.2, 1.7, -101.0).
+- A frame captured on the device shows the sky, the floor and the obstacles in depth.
+
 ### Verified — phases 10 and 11 on real hardware
 
 Confirmed on the Rockchip PX30 (Mali-G31/Panfrost, Mesa 24.0.0), which is the device
