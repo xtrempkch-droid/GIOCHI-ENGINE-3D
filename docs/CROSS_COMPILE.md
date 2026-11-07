@@ -47,24 +47,28 @@ fetch arm64 from the amd64 mirror and 404. Pin the existing stanzas to `amd64`
 first, then add the arm64 ports mirror:
 
 ```bash
-# 1. Pin the existing (amd64) sources.
-sudo sed -i 's/^Types: deb$/Types: deb\nArchitectures: amd64/' \
-  /etc/apt/sources.list.d/ubuntu.sources
-
-# 2. Add the ARM64 ports mirror.
-sudo dpkg --add-architecture arm64
-sudo tee /etc/apt/sources.list.d/ubuntu-arm64.sources >/dev/null <<'EOF'
-Types: deb
-URIs: http://ports.ubuntu.com/ubuntu-ports
-Suites: noble noble-updates noble-security
-Components: main universe
-Architectures: arm64
-EOF
-
-# 3. Install.
-sudo apt update
-sudo apt install libsdl2-image-dev:arm64 libsdl2-mixer-dev:arm64 libsdl2-ttf-dev:arm64
+sudo scripts/install-arm64-deps.sh
 ```
+
+That script is the whole recipe, and CI calls it too:
+
+1. pin the existing (amd64) sources with `Architectures: amd64`, or apt tries to fetch
+   arm64 from the amd64 mirror and 404s;
+2. `dpkg --add-architecture arm64` and add the `ports.ubuntu.com` mirror;
+3. install the ARM64 SDL2 satellites and the cross toolchain.
+
+It derives the ports **suite from the machine's own `/etc/os-release`**. That matters:
+hard-coding `noble` on a newer release mixes indexes from two releases and the libc
+packages then conflict outright —
+
+```text
+libcrypt-dev:amd64 Breaks libcrypt-dev:arm64 (!= 1:4.5.1-1)
+```
+
+— which is exactly how the `aarch64 link` job failed once `ubuntu-latest` moved from
+24.04 to 26.04. The two jobs that need the multiarch indexes are therefore pinned to
+`ubuntu-24.04`, the release the recipe is verified on, instead of tracking
+`ubuntu-latest`.
 
 On Debian the mirror is `http://deb.debian.org/debian` with `Suites: bookworm`
 and component `main`; on other Ubuntu releases substitute the suite name. The
@@ -201,4 +205,10 @@ remain the source of truth and what CI runs.
   `lib/libgiochi.{so,a}`, `lua/mini_game.lua`, docs, assets).
 
 All three were verified in a clean `ubuntu:24.04` container, running the exact `run:`
-steps of each job.
+steps of each job, and then on the real runners:
+
+| Workflow | Jobs | Result |
+|---|---|---|
+| `ci.yml` | gates, ffi, cross-check, smoke | green |
+| `cross-compile.yml` | check, link | green after pinning `ubuntu-24.04` |
+| `release.yml` | build-x86_64, build-aarch64 | same recipe as `link` |

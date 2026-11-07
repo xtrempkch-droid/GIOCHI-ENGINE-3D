@@ -16,6 +16,15 @@ rather than a rewrite. Runs on `x86_64-unknown-linux-gnu` and
 `aarch64-unknown-linux-gnu`; auto-selects KMSDRM on a bare Linux console and
 falls back to the desktop driver elsewhere.
 
+### Fixed — CI on the runner, after the workflows started working
+
+- `ubuntu-latest` moved from 24.04 to 26.04, and the ARM64 multiarch recipe broke with
+  it: `libcrypt-dev:amd64 Breaks libcrypt-dev:arm64 (!= 1:4.5.1-1)`, because the ports
+  suite was hard-coded to `noble` while the host had become something newer. The recipe
+  now lives in `scripts/install-arm64-deps.sh`, derives the suite from the machine's
+  `/etc/os-release`, and the two jobs that need matching indexes are pinned to
+  `ubuntu-24.04` rather than tracking a moving target.
+
 ### Fixed — false minimum Rust version
 
 - `rust-version` declared **1.75**, which no combination of the pinned dependencies can

@@ -110,6 +110,12 @@ Sondado com `cargo +1.79` (falha) e `cargo +1.82` (passa): o piso declarado é a
 clippy passou a sugerir `Result::inspect` (estável desde 1.76) em `read_asset_vec`, que
 estava escrito à moda antiga por causa do piso falso.
 
+Depois do primeiro envio, o CI real ficou verde em `ci.yml` (4 jobs) e expôs uma última
+armadilha em `cross-compile.yml`: o `ubuntu-latest` já não é 24.04 mas 26.04, e o recipe
+multiarch preso a `noble` colide em `libcrypt-dev` (amd64 *Breaks* arm64). Extraído para
+`scripts/install-arm64-deps.sh`, que deriva a suite do `/etc/os-release`, com os dois jobs
+de índices coincidentes fixados em `ubuntu-24.04`.
+
 Validação: a matriz completa de CI espelhada num contentor `ubuntu:24.04` limpo — fmt,
 clippy, build, 209 testes, doc, header, FFI (C + Python), demo, os cinco exemplos e o
 `mini_game.lua` — **16/16 passos**, 0 falhas.

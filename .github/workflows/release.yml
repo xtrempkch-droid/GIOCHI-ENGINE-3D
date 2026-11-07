@@ -67,7 +67,9 @@ jobs:
 
   build-aarch64:
     name: Build aarch64 release (cross)
-    runs-on: ubuntu-latest
+    # Pinned: the multiarch recipe is verified against this release's indexes, and
+    # `ubuntu-latest` moving releases is exactly what broke it once.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -78,23 +80,9 @@ jobs:
           rustup target add aarch64-unknown-linux-gnu
 
       - name: Install ARM64 SDL2 libraries
-        run: |
-          set -euo pipefail
-          sudo sed -i 's/^Types: deb$/Types: deb\nArchitectures: amd64/' \
-            /etc/apt/sources.list.d/ubuntu.sources
-          sudo dpkg --add-architecture arm64
-          sudo tee /etc/apt/sources.list.d/ubuntu-arm64.sources > /dev/null <<'EOF'
-          Types: deb
-          URIs: http://ports.ubuntu.com/ubuntu-ports
-          Suites: noble noble-updates noble-security
-          Components: main universe
-          Architectures: arm64
-          EOF
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake pkg-config file \
-            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-            libsdl2-image-dev:arm64 libsdl2-mixer-dev:arm64 libsdl2-ttf-dev:arm64
+        # One script for both workflows: the multiarch recipe, pinned to the runner's
+        # own release so the amd64 and arm64 indexes cannot disagree.
+        run: sudo ./scripts/install-arm64-deps.sh
 
       - uses: Swatinem/rust-cache@v2
         with:

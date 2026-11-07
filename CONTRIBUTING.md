@@ -76,7 +76,7 @@ afford on every push: a real ARM64 **link** with the multiarch SDL2 packages.
 [`release.yml`](.github/workflows/release.yml) packages both targets for a tag.
 
 All three call the same scripts rather than reimplementing them, so a fix lands once:
-`scripts/install-deps.sh`, `scripts/check-aarch64.sh`, `scripts/build-aarch64.sh`,
+`scripts/install-deps.sh`, `scripts/install-arm64-deps.sh`, `scripts/check-aarch64.sh`, `scripts/build-aarch64.sh`,
 `scripts/gen-header.sh`, `scripts/ffi-smoke.sh`, `scripts/gates.sh`.
 
 ## Style
