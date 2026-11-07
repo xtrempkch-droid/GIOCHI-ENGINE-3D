@@ -22,7 +22,7 @@ use giochi_engine::platform::sdl::{quit_signal, QuitSignal};
 use giochi_engine::platform::window::{Window, WindowConfig};
 use giochi_engine::platform::Platform;
 use giochi_engine_3d::context::{self, GlesVersion};
-use giochi_engine_3d::math3d::Color3D;
+use giochi_engine_3d::math3d::{Camera3D, Color3D};
 use giochi_engine_3d::RenderContext3D;
 
 /// Command line options.
@@ -81,6 +81,11 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         render.gles_version().major(),
         render.adapter()
     );
+
+    // The camera is created here and resolved against the real drawable size on every
+    // frame. On KMSDRM that is the panel, which is not the size the config asked for
+    // (ADR-035) -- a hardcoded 16:9 would crop a 4:3 panel.
+    let base_camera = Camera3D::new();
     if requested == GlesVersion::Gles3 && !render.supports_gles3() {
         println!("GLES 3.0 was requested but the driver gave 2.0; continuing on 2.0");
     }
@@ -105,7 +110,14 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        render.begin_frame();
+        render.begin_frame(&window);
+
+        let camera =
+            base_camera.with_drawable_size(render.drawable_size().0, render.drawable_size().1);
+        if camera.view_projection().is_err() {
+            return Err("the camera produced no view-projection matrix".into());
+        }
+
         render.end_frame(&window);
 
         // The context is double-buffered, so a frame is only "good" once the driver has

@@ -19,6 +19,8 @@ use crate::math3d::Color3D;
 pub struct RenderContext3D {
     gl: GlContext,
     state: GlState,
+    /// Viewport size in physical pixels, updated by `begin_frame`.
+    drawable_size: (u32, u32),
 }
 
 impl std::fmt::Debug for RenderContext3D {
@@ -27,6 +29,7 @@ impl std::fmt::Debug for RenderContext3D {
             .field("version", &self.gl.version())
             .field("adapter", &self.gl.adapter())
             .field("state", &self.state)
+            .field("drawable_size", &self.drawable_size)
             .finish_non_exhaustive()
     }
 }
@@ -39,7 +42,11 @@ impl RenderContext3D {
         // driver's default state happens to be.
         state.apply(gl.glow());
 
-        Self { gl, state }
+        Self {
+            gl,
+            state,
+            drawable_size: (1, 1),
+        }
     }
 
     /// The glow function table, for the mesh and shader modules.
@@ -62,13 +69,53 @@ impl RenderContext3D {
         self.state.clear_color = color.clamped();
     }
 
-    /// Applies the state and clears colour and depth.
+    /// Applies the state, sets the viewport and clears colour and depth.
     ///
     /// Every frame starts here. Depth is cleared every frame because a 3D scene that
     /// reuses the previous frame's depth buffer renders back-to-front garbage.
-    pub fn begin_frame(&mut self) {
+    ///
+    /// The viewport is taken from the **window's real drawable size**, not from the
+    /// configured size. On KMSDRM those differ: the backend is fullscreen-only and
+    /// ignores the requested size (ADR-035), so a viewport built from the configuration
+    /// would draw into the corner of a panel and clip the rest. This is why the window
+    /// is a parameter rather than state captured at construction — it can be resized.
+    pub fn begin_frame(&mut self, window: &Window) {
+        let (width, height) = window.drawable_size();
+        self.resize(width, height);
+
         self.state.apply(self.gl.glow());
         self.state.clear(self.gl.glow());
+    }
+
+    /// Sets the GL viewport to `width`x`height` and records it for the camera.
+    ///
+    /// Split out of [`RenderContext3D::begin_frame`] so a test can drive it without a
+    /// window, and so callers that manage their own loop can call it exactly once.
+    pub fn resize(&mut self, width: u32, height: u32) {
+        let width = width.max(1);
+        let height = height.max(1);
+
+        // SAFETY: `viewport` is core GLES 2.0 and the context is current.
+        unsafe {
+            self.gl.glow().viewport(0, 0, width as i32, height as i32);
+        }
+
+        self.drawable_size = (width, height);
+    }
+
+    /// The viewport size last set, in physical pixels.
+    ///
+    /// Feed this to [`Camera3D::with_drawable_size`](crate::math3d::Camera3D::with_drawable_size)
+    /// once per frame: it is the real surface, which on a console is the panel and not
+    /// what the configuration asked for.
+    pub fn drawable_size(&self) -> (u32, u32) {
+        self.drawable_size
+    }
+
+    /// Aspect ratio of the last viewport, or `1.0` before the first frame.
+    pub fn aspect(&self) -> f32 {
+        let (width, height) = self.drawable_size;
+        width as f32 / height as f32
     }
 
     /// Presents the back buffer.
@@ -79,7 +126,7 @@ impl RenderContext3D {
     /// Convenience for the phase 9 demo: clear with `color` and present.
     pub fn clear(&mut self, window: &Window, color: Color3D) {
         self.set_clear_color(color);
-        self.begin_frame();
+        self.begin_frame(window);
         self.end_frame(window);
     }
 

@@ -1,15 +1,28 @@
 //! 3D maths.
 //!
-//! Everything that crosses the C ABI is `#[repr(C)]` and built from `f32` arrays; the
-//! `glam` types are re-exported for Rust callers only. That split is deliberate: `glam`
-//! is `#[repr(simd)]`-adjacent and must never appear in a public struct field.
+//! The public types are `#[repr(C)]` and built from `f32`, so they can cross the C ABI
+//! unchanged. `glam` is used for the arithmetic and never appears in a public field: it
+//! is an implementation detail, not part of the surface.
 //!
-//! Phase 9 only needs [`Color3D`]; phase 10 adds `Mat4`, `Transform3D` and
-//! `Camera3D`.
+//! Two conventions are fixed here and stated in `docs/C_ABI_CONTRACT.md` because they
+//! are the ones that fail invisibly:
+//!
+//! * quaternions are `(x, y, z, w)`;
+//! * `Transform3D` composes as **scale → rotate → translate**.
+//!
+//! Matrices are column-major so [`Mat4::as_ptr`] can be handed straight to
+//! `glUniformMatrix4fv` with `transpose = false`.
 
+mod camera;
 mod color;
+mod mat4;
+mod quat;
+mod transform;
+mod vec3;
 
+pub use camera::Camera3D;
 pub use color::Color3D;
-
-/// Re-exported for Rust callers. Never part of a `#[repr(C)]` type.
-pub use glam::{Quat, Vec3};
+pub use mat4::Mat4;
+pub use quat::Quat;
+pub use transform::Transform3D;
+pub use vec3::Vec3;

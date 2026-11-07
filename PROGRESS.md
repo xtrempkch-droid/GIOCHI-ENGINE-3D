@@ -1,9 +1,9 @@
 # Estado — GIOCHI-ENGINE
 
-## Última fase concluída: 9 — Bootstrap 3D (contexto GLES/EGL)
+## Última fase concluída: 10 — Math 3D
 Data: 2026-11-07
 
-**Fases 0–8 (2D) concluídas. Extensão v2.1 (3D) em andamento: fase 9 concluída.**
+**Fases 0–8 (2D) concluídas. Extensão v2.1 (3D) em andamento: fases 9 e 10 concluídas.**
 
 ## Status 2D (Fases 0–8)
 
@@ -13,7 +13,7 @@ extensão v2.1). Gates 2D revalidados a cada fase 3D.
 ## Status 3D (Fases 9–14)
 
 - [x] Fase 9 — Bootstrap 3D: contexto GLES/EGL, clear, swap
-- [ ] Fase 10 — Math 3D (`Mat4`, `Transform3D`, `Camera3D`)
+- [x] Fase 10 — Math 3D (`Vec3`, `Quat`, `Mat4`, `Transform3D`, `Camera3D`)
 - [ ] Fase 11 — Pipeline de mesh + shaders
 - [ ] Fase 12 — Câmera com controle + `mini_fps`
 - [ ] Fase 13 — Iluminação Phong (opcional)
@@ -26,8 +26,8 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 236 testes, 0 falhas
-      (209 das fases 0–8 + 27 da crate 3D)
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 305 testes, 0 falhas
+      (209 das fases 0–8 + 96 da crate 3D)
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
 - [x] `cargo doc --workspace --no-deps --document-private-items` (0 warnings)
 - [x] `scripts/gen-header.sh --check` — `giochi.h` em sincronia com o crate
@@ -46,6 +46,53 @@ Verificações manuais da fase:
   recolha pelo GC, `giochi.quit()`, propagação de erro, `app:step`, `arg`).
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
+
+## Entregue na fase 10 — Math 3D
+
+Cinco tipos `#[repr(C)]` com a aritmética em `glam`, que nunca aparece em campo
+público.
+
+- `math3d/vec3.rs`, `quat.rs`: `Vec3` (28 bytes) e `Quat` (32 bytes), com
+  `normalized()` que devolve zero/identidade em vez de NaN para entradas degeneradas —
+  um quatérnio zero vindo do C blankaria o frame sem erro nenhum.
+- `math3d/mat4.rs`: `Mat4` coluna-maior, 80 bytes, `as_ptr()` pronto para
+  `glUniformMatrix4fv(transpose = GL_FALSE)`. `perspective`, `orthographic`, `look_at`
+  devolvem `Err` para frustum degenerado em vez de produzir uma matriz que não desenha.
+- `math3d/transform.rs`: `Transform3D` (104 bytes), composição
+  **escala → rotação → translação**.
+- `math3d/camera.rs`: `Camera3D` (116 bytes), `aspect == 0.0` significa "não resolvido"
+  e `projection_matrix()` devolve erro em vez de adivinhar 16:9.
+- `RenderContext3D::begin_frame(&window)` agora **define o viewport** a partir do
+  drawable real, e expõe `drawable_size()`/`aspect()` para a câmera. Antes o viewport
+  nunca era configurado — no KMSDRM, onde o drawable real difere do pedido (ADR-035),
+  isso desenharia no canto do painel.
+- `tests/math3d_integration.rs`: 7 testes de composição entre tipos.
+- `tests/abi_layout_3d.rs` reescrito para usar os tipos reais: 9 testes que travam
+  28/32/32/104/116/80 bytes e provam que nenhum tipo SIMD vazou para a superfície.
+
+### Bug encontrado pelos próprios testes
+
+`glam::perspective_rh` mapeia profundidade em **0..1** (Vulkan/D3D); OpenGL ES espera
+**-1..1**. A primeira versão usava a errada: toda matriz parecia plausível, nenhum erro
+GL, e a geometria só quebraria perto do near plane. O teste que assere o NDC z no near
+plane pegou. Corrigido para `perspective_rh_gl`/`orthographic_rh_gl`, com o intervalo
+travado por teste.
+
+### Medido
+
+| Verificação | Resultado |
+|---|---|
+| `cargo test -p giochi-engine-3d` | **95 testes** (75 lib + 9 layout + 3 GL + 7 integração + 1 doc) |
+| `SDL_VIDEODRIVER=offscreen --frames 200` | 200 frames, nenhum erro GL, câmera resolvida por frame |
+| GLES 2 pedido com driver a reportar 3.2 | reporta **GLES 2** (a correção da fase 9 vale no desktop) |
+| `cargo check --target aarch64` | passa |
+| Build cruzado do crate + exemplo para aarch64 | linka, ELF ARM aarch64 |
+
+**Teste manual em hardware pendente — bloqueado.** O aparelho ficou inacessível: quando
+a bateria morreu e voltou, ele regenerou a chave de host SSH **e** perdeu as chaves
+autorizadas (`Permission denied (publickey)`). Ou foi reflashado, ou o rootfs resetou.
+Sem acesso não há como rodar a fase 10 no PX30; a validação possível (GL real via
+`offscreen`) foi feita. Ver §"Bloqueios".
 
 ## Entregue na fase 9 — Bootstrap 3D (contexto GLES/EGL)
 
@@ -318,6 +365,15 @@ As oito fases do prompt mestre estão completas. Trabalho futuro, por ordem de v
 ## Bloqueios / pendências
 
 - Nenhum bloqueio de gate.
+- **PX30 inacessível (2026-11-07, tarde).** Depois de a bateria esgotar e voltar, o
+  aparelho regenerou a chave de host SSH e perdeu as chaves autorizadas:
+  `Permission denied (publickey,password,keyboard-interactive)`. Antes disso a mesma
+  unidade tinha aceitado a chave sem intervenção, então isto indica reflash do rootfs
+  (ou um rootfs em tmpfs que não sobreviveu ao corte de energia). Consequência: a
+  fase 10 está validada em GL real no desktop (`SDL_VIDEODRIVER=offscreen`, Mesa/EGL)
+  mas **não no Mali-G31**. Recuperar exige acesso físico: reinstalar a chave pública
+  em `/root/.ssh/authorized_keys` pela consola série, ou reflashar. A fase 9 tinha sido
+  validada no hardware antes da queda e continua registada acima.
 - CMake 4.2.3 × `cmake_minimum_required(VERSION 3.0.x)` do SDL2 vendorizado:
   workaround em `.cargo/config.toml` (ADR-014).
 - `sdl2` compila com `unsafe_textures` (ADR-017); um único canvas por processo

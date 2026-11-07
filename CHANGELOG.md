@@ -6,6 +6,34 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — 3D, phase 10: maths
+
+- `math3d::{Vec3, Quat, Mat4, Transform3D, Camera3D}`, all `#[repr(C)]`, with `glam` as
+  an implementation detail that never appears in a public field.
+- `Mat4` is column-major so `as_ptr()` goes straight to `glUniformMatrix4fv`. The
+  constructors return `Err` for a degenerate frustum instead of producing a matrix that
+  renders nothing.
+- `Camera3D::aspect == 0.0` means *unresolved*, and projection fails rather than
+  guessing 16:9 — on a console the panel is the truth (ADR-035).
+- `RenderContext3D::begin_frame` now takes the window and sets the GL viewport from the
+  **real drawable size**, exposing `drawable_size()`/`aspect()` for the camera.
+- 95 tests in the crate (was 27), including 9 layout assertions that lock the documented
+  struct sizes and prove no SIMD type leaked into the surface.
+
+### Fixed — the projection used the Vulkan depth range
+
+`glam::perspective_rh` maps depth to `0..1`; OpenGL ES expects `-1..1`. The first
+version used the wrong one: every matrix looked plausible, no GL error was raised, and
+geometry would only break as it approached the near plane. Caught by a test asserting
+the NDC depth at the near and far planes; `math3d` now uses the `_gl` variants and
+`tests/math3d_integration.rs` pins the range.
+
+### Fixed — the viewport was never set
+
+`begin_frame` cleared and presented without calling `glViewport`, so the viewport stayed
+at whatever the driver defaulted to. On KMSDRM the drawable is the panel and not the
+requested size (ADR-035), so a scene would have been drawn into a corner and clipped.
+
 ### Added — 3D, phase 9 (extension v2.1)
 
 3D arrives as a **separate crate**, not a render backend: `giochi-engine-3d` drives

@@ -63,7 +63,7 @@ fn clearing_a_frame_raises_no_gl_error() {
     // and a state bug that only shows on the second frame is the common case.
     for frame in 0..5 {
         render.set_clear_color(Color3D::SKY);
-        render.begin_frame();
+        render.begin_frame(&window);
         render.end_frame(&window);
 
         let error = render.take_gl_error();
@@ -82,7 +82,7 @@ fn the_clear_color_is_actually_written_to_the_surface() {
     let want = Color3D::new(0.25, 0.5, 0.75, 1.0);
 
     render.set_clear_color(want);
-    render.begin_frame();
+    render.begin_frame(&window);
 
     // Read back one pixel. This is what separates "the call was made" from "the pixel
     // is that colour" -- the same distinction the 2D engine's `--quadro` capture makes.
