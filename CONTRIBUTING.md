@@ -64,6 +64,7 @@ scripts/gates.sh
 | Version consistency | `scripts/check-version.sh` |
 | Asset twins | `python3 scripts/png-to-bmp.py --check assets/*.png` |
 | Scripts | `shellcheck scripts/*.sh` |
+| Workflows | `actionlint .github/workflows/*.yml` (run by CI) |
 | C/Python consumers | `scripts/ffi-smoke.sh` |
 | Real console (manual) | `scripts/hardware-check.sh --host root@<device>` |
 

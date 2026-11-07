@@ -65,6 +65,15 @@ jobs:
         # dependency pins must agree with it or a release misreports what it is.
         run: ./scripts/check-version.sh
 
+      - name: Lint the workflow files
+        # Every job here runs shell that `shellcheck` never sees, and a YAML mistake
+        # only surfaces as a red X after the push that was supposed to prove the
+        # change works. Pinned so the linter cannot change behaviour under us.
+        run: |
+          set -euo pipefail
+          bash <(curl -sSf https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) 1.7.7
+          ./actionlint -color
+
       - name: Asset BMP twins are up to date
         # A target whose SDL2_image has no PNG decoder loads the .bmp twin instead
         # (ADR-036), so a stale twin is a bug that only shows up on that target.

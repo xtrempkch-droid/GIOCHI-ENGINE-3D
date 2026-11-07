@@ -15,6 +15,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it on the packaged x86_64 archive before attaching it, and checks the ARM64 archive's
   layout and ELF architecture, so "well-formed tarball" can no longer stand in for
   "working tarball".
+- CI lints the workflow files with `actionlint` (pinned to 1.7.7). Every job there runs
+  shell that `shellcheck` never sees, and a YAML mistake otherwise only shows up as a
+  red X after the push that was meant to prove the change works.
 
 ## [0.1.1] - 2026-11-07
 
