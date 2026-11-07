@@ -9,7 +9,24 @@ use giochi_engine::platform::window::Window;
 use glow::HasContext;
 
 use crate::context::{GlContext, GlState};
-use crate::math3d::Color3D;
+use crate::error::{Error3D, Result3D};
+use crate::math3d::{Camera3D, Color3D, Transform3D};
+use crate::mesh::{Mesh, Vertex};
+use crate::registry::HandleRegistry;
+use crate::shader::{BuiltinShader, Program};
+
+/// Opaque handle to a mesh. `0` is invalid.
+///
+/// # C ABI
+///
+/// `typedef uint64_t GiochiMeshHandle;` (`docs/C_ABI_CONTRACT.md` §9.5).
+pub type MeshHandle = u64;
+/// Opaque handle to a shader program. `0` is invalid.
+///
+/// # C ABI
+///
+/// `typedef uint64_t GiochiShaderHandle;`.
+pub type ShaderHandle = u64;
 
 /// The 3D renderer.
 ///
@@ -21,6 +38,8 @@ pub struct RenderContext3D {
     state: GlState,
     /// Viewport size in physical pixels, updated by `begin_frame`.
     drawable_size: (u32, u32),
+    meshes: HandleRegistry<Mesh>,
+    shaders: HandleRegistry<Program>,
 }
 
 impl std::fmt::Debug for RenderContext3D {
@@ -30,6 +49,8 @@ impl std::fmt::Debug for RenderContext3D {
             .field("adapter", &self.gl.adapter())
             .field("state", &self.state)
             .field("drawable_size", &self.drawable_size)
+            .field("meshes", &self.meshes.len())
+            .field("shaders", &self.shaders.len())
             .finish_non_exhaustive()
     }
 }
@@ -46,6 +67,8 @@ impl RenderContext3D {
             gl,
             state,
             drawable_size: (1, 1),
+            meshes: HandleRegistry::new(),
+            shaders: HandleRegistry::new(),
         }
     }
 
@@ -203,6 +226,241 @@ impl RenderContext3D {
         }
 
         Ok(buffer)
+    }
+
+    // ---- meshes ----------------------------------------------------------
+
+    /// Uploads a mesh and returns its handle.
+    ///
+    /// # Errors
+    ///
+    /// [`Error3D::InvalidArgument`] for an empty mesh or an out-of-range index;
+    /// [`Error3D::GlObject`] when the driver refuses a buffer.
+    pub fn create_mesh(&mut self, vertices: &[Vertex], indices: &[u32]) -> Result3D<MeshHandle> {
+        let mesh = Mesh::from_vertices_indices(self.gl.glow(), vertices, indices)?;
+        Ok(self.meshes.insert(mesh))
+    }
+
+    /// Uploads one of the procedural primitives.
+    ///
+    /// The example uses this rather than a committed `.obj`; see
+    /// [`crate::mesh::cube`] for why.
+    pub fn create_cube_mesh(&mut self, size: f32) -> Result3D<MeshHandle> {
+        let (vertices, indices) = crate::mesh::cube(size);
+        self.create_mesh(&vertices, &indices)
+    }
+
+    /// Uploads the procedural floor plane.
+    pub fn create_plane_mesh(&mut self, size: f32, subdivisions: u32) -> Result3D<MeshHandle> {
+        let (vertices, indices) = crate::mesh::plane(size, subdivisions);
+        self.create_mesh(&vertices, &indices)
+    }
+
+    /// Loads an OBJ file and uploads it.
+    pub fn load_obj_mesh(&mut self, path: &std::path::Path) -> Result3D<MeshHandle> {
+        let (vertices, indices) = crate::mesh::load_obj(path)?;
+        self.create_mesh(&vertices, &indices)
+    }
+
+    /// Releases a mesh. Returns `false` for `0` or an already-destroyed handle.
+    pub fn destroy_mesh(&mut self, handle: MeshHandle) -> bool {
+        let Some(mesh) = self.meshes.get(handle) else {
+            return false;
+        };
+
+        // `Rc::try_unwrap` only succeeds when nothing else holds the mesh. A caller
+        // holding a clone would otherwise cause the GL objects to leak silently, so the
+        // failure is logged rather than swallowed.
+        match std::rc::Rc::try_unwrap(mesh) {
+            Ok(mesh) => mesh.destroy(self.gl.glow()),
+            Err(_) => {
+                log::warn!("mesh {handle} is still referenced elsewhere; GL objects leaked");
+            }
+        }
+
+        self.meshes.remove(handle)
+    }
+
+    /// Number of live meshes.
+    pub fn mesh_count(&self) -> usize {
+        self.meshes.len()
+    }
+
+    /// Index count of `handle`, or `0` for an unknown handle.
+    pub fn mesh_index_count(&self, handle: MeshHandle) -> u32 {
+        self.meshes
+            .get(handle)
+            .map(|mesh| mesh.index_count())
+            .unwrap_or(0)
+    }
+
+    /// Vertex count of `handle`, or `0` for an unknown handle.
+    pub fn mesh_vertex_count(&self, handle: MeshHandle) -> u32 {
+        self.meshes
+            .get(handle)
+            .map(|mesh| mesh.vertex_count())
+            .unwrap_or(0)
+    }
+
+    /// Whether `handle` uses a vertex array object.
+    ///
+    /// Exposed because the two attribute paths are genuinely different code and a test
+    /// has to be able to assert which one ran.
+    pub fn mesh_uses_vao(&self, handle: MeshHandle) -> bool {
+        self.meshes
+            .get(handle)
+            .map(|mesh| mesh.uses_vao())
+            .unwrap_or(false)
+    }
+
+    // ---- shaders ---------------------------------------------------------
+
+    /// Compiles one of the built-in shaders.
+    pub fn create_builtin_shader(&mut self, which: BuiltinShader) -> Result3D<ShaderHandle> {
+        let program = Program::from_source(
+            self.gl.glow(),
+            which.vertex_source(),
+            which.fragment_source(),
+        )?;
+        Ok(self.shaders.insert(program))
+    }
+
+    /// Compiles a vertex/fragment pair read from disk.
+    ///
+    /// R10: a user shader is a file, never a string embedded in the caller's binary.
+    pub fn load_shader(
+        &mut self,
+        vertex_path: &std::path::Path,
+        fragment_path: &std::path::Path,
+    ) -> Result3D<ShaderHandle> {
+        let vertex = std::fs::read_to_string(vertex_path).map_err(|err| {
+            Error3D::Asset(format!(
+                "failed to read vertex shader '{}': {err}",
+                vertex_path.display()
+            ))
+        })?;
+        let fragment = std::fs::read_to_string(fragment_path).map_err(|err| {
+            Error3D::Asset(format!(
+                "failed to read fragment shader '{}': {err}",
+                fragment_path.display()
+            ))
+        })?;
+
+        let program = Program::from_source(self.gl.glow(), &vertex, &fragment)?;
+        Ok(self.shaders.insert(program))
+    }
+
+    /// Releases a shader program. Returns `false` for `0` or an unknown handle.
+    pub fn destroy_shader(&mut self, handle: ShaderHandle) -> bool {
+        let Some(program) = self.shaders.get(handle) else {
+            return false;
+        };
+
+        match std::rc::Rc::try_unwrap(program) {
+            Ok(program) => program.destroy(self.gl.glow()),
+            Err(_) => {
+                log::warn!("shader {handle} is still referenced elsewhere; GL objects leaked");
+            }
+        }
+
+        self.shaders.remove(handle)
+    }
+
+    /// Number of live shader programs.
+    pub fn shader_count(&self) -> usize {
+        self.shaders.len()
+    }
+
+    /// Releases every mesh and shader, then reports whether anything is left.
+    ///
+    /// Exists for an orderly shutdown and for the leak check the demo prints: after
+    /// destroying its resources a game should see `true` here. Anything still held
+    /// elsewhere (an `Rc` clone) leaks, and that is worth surfacing rather than hiding.
+    pub fn release_all(&mut self) -> bool {
+        for handle in self.meshes.handles() {
+            self.destroy_mesh(handle);
+        }
+        for handle in self.shaders.handles() {
+            self.destroy_shader(handle);
+        }
+
+        self.meshes.is_empty() && self.shaders.is_empty()
+    }
+
+    // ---- drawing ---------------------------------------------------------
+
+    /// Draws `mesh` with `shader` at `model`, seen through `camera`.
+    ///
+    /// Uniforms are set every call rather than cached per (mesh, shader) pair: with a
+    /// handful of draws per frame the bookkeeping would cost more than the two
+    /// `glUniformMatrix4fv` calls it saves, and stale-model bugs are expensive.
+    ///
+    /// Returns `false` when either handle is unknown, so a caller can tell "drew
+    /// nothing" from "drew a degenerate frame".
+    pub fn draw_mesh(
+        &mut self,
+        mesh: MeshHandle,
+        shader: ShaderHandle,
+        model: &Transform3D,
+        camera: &Camera3D,
+    ) -> Result3D<bool> {
+        let Some(mesh) = self.meshes.get(mesh) else {
+            return Ok(false);
+        };
+        let Some(program) = self.shaders.get(shader) else {
+            return Ok(false);
+        };
+
+        // The camera may legitimately be unresolved (aspect 0.0), and silently drawing
+        // with a stale projection is how a frame ends up subtly wrong on a console.
+        let resolved = camera.with_drawable_size(self.drawable_size.0, self.drawable_size.1);
+        let view_proj = resolved
+            .view_projection()
+            .map_err(|reason| Error3D::InvalidArgument(reason.to_owned()))?;
+
+        program.bind(self.gl.glow());
+        program.set_mat4(self.gl.glow(), "u_view_proj", &view_proj);
+        program.set_mat4(self.gl.glow(), "u_model", &model.matrix());
+        // The flat shader reads `u_color`; a textured one reads `u_tint`. Setting both
+        // is free (a missing uniform is cached as `None` and skipped).
+        let colour = self.state.clear_color;
+        program.set_color(self.gl.glow(), "u_color", colour);
+        program.set_color(self.gl.glow(), "u_tint", Color3D::WHITE);
+
+        mesh.draw(self.gl.glow(), &program);
+
+        Ok(true)
+    }
+
+    /// Draws `mesh` with an explicit colour, overriding the clear colour.
+    pub fn draw_mesh_colored(
+        &mut self,
+        mesh: MeshHandle,
+        shader: ShaderHandle,
+        model: &Transform3D,
+        camera: &Camera3D,
+        colour: Color3D,
+    ) -> Result3D<bool> {
+        let Some(mesh) = self.meshes.get(mesh) else {
+            return Ok(false);
+        };
+        let Some(program) = self.shaders.get(shader) else {
+            return Ok(false);
+        };
+
+        let resolved = camera.with_drawable_size(self.drawable_size.0, self.drawable_size.1);
+        let view_proj = resolved
+            .view_projection()
+            .map_err(|reason| Error3D::InvalidArgument(reason.to_owned()))?;
+
+        program.bind(self.gl.glow());
+        program.set_mat4(self.gl.glow(), "u_view_proj", &view_proj);
+        program.set_mat4(self.gl.glow(), "u_model", &model.matrix());
+        program.set_color(self.gl.glow(), "u_color", colour.clamped());
+
+        mesh.draw(self.gl.glow(), &program);
+
+        Ok(true)
     }
 }
 

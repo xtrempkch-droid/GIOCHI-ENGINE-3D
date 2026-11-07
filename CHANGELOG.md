@@ -6,6 +6,44 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — 3D, phase 11: mesh pipeline
+
+- `mesh`: `Vertex` (`#[repr(C)]` + `Pod`, 32 bytes, interleaved position/normal/uv),
+  `Mesh` with a VBO, an EBO and an **optional** vertex array object, plus procedural
+  `cube`/`plane` and a `tobj`-based OBJ loader.
+- `shader`: `Program` with full `glGetShaderInfoLog`/`glGetProgramInfoLog` on failure,
+  cached uniform locations, and `BuiltinShader::{Flat, Textured}` read from
+  `giochi-engine-3d/shaders/*.vert|frag` with `include_str!` (R10).
+- `render3d`: `create_mesh`/`destroy_mesh`, `create_builtin_shader`/`load_shader`/
+  `destroy_shader`, `draw_mesh`, `draw_mesh_colored` and `release_all`.
+- `examples/cube_demo.rs` draws a tumbling cube, with `--quadro` to capture a BMP.
+
+### Fixed — two cube faces were wound backwards
+
+`+X` and `-X` wound clockwise seen from outside, so with culling on the cube looked
+hollow. The test that checked only the first face passed; the one that checks all six
+found both. There is now a test per face, and it compares the geometric normal against
+the declared one.
+
+### Fixed — the OBJ normal pass underflowed on multi-object files
+
+The derived-normals pass walked the whole index list instead of only the indices just
+appended, so a second object subtracted a `base` larger than its own indices. Debug
+builds panicked; release builds computed normals for the wrong vertices.
+
+### Added — the VAO fallback is tested
+
+`glGenVertexArrays` is core in GLES 3.0 only; GLES 2.0 needs
+`GL_OES_vertex_array_object` or nothing. No developer machine lacks VAOs, so
+`GIOCHI_FORCE_NO_VAO=1` forces the per-draw attribute path and CI runs the pipeline tests
+and the example through it. Both paths light the same pixels.
+
+### Added — CI exercises the 3D pipeline
+
+Under `SDL_VIDEODRIVER=offscreen` (the `dummy` driver has no OpenGL): shader compilation,
+a rasterised cube, the no-VAO fallback, and a frame capture whose BMP dimensions are
+asserted so an all-black image cannot pass.
+
 ### Added — 3D, phase 10: maths
 
 - `math3d::{Vec3, Quat, Mat4, Transform3D, Camera3D}`, all `#[repr(C)]`, with `glam` as

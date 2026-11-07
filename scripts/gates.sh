@@ -18,7 +18,12 @@ run() {
 run cargo fmt --all --check
 run cargo clippy --workspace --all-targets -- -D warnings
 run cargo build --workspace --target x86_64-unknown-linux-gnu
-run cargo test --workspace --target x86_64-unknown-linux-gnu
+# `SDL_VIDEODRIVER=offscreen` is what the 3D integration tests need: it provides a real
+# EGL/GLES context with no display attached, while `dummy` has no OpenGL at all. The
+# tests skip cleanly on a machine without a GL driver, so this cannot produce a false
+# failure on a headless builder.
+SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" \
+    run cargo test --workspace --target x86_64-unknown-linux-gnu
 run cargo doc --workspace --no-deps --document-private-items
 
 if command -v cbindgen >/dev/null 2>&1; then

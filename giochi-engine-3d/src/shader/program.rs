@@ -1,0 +1,288 @@
+//! GLSL program compilation and uniforms.
+//!
+//! Two rules from the 3D extension are enforced here:
+//!
+//! * **R10** — shader source lives in files, never as a string literal inside
+//!   `renderer.rs`. The built-ins are `include_str!`ed from `shaders/`, user shaders are
+//!   loaded from a path.
+//! * **Golden rule 5** — a compilation failure always carries the driver's complete
+//!   `glGetShaderInfoLog`/`glGetProgramInfoLog`. Without it, debugging a shader is
+//!   guesswork, and GLES drivers differ enough that the log is the only portable clue.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+use glow::HasContext;
+
+use crate::error::{Error3D, Result3D};
+use crate::math3d::{Color3D, Mat4, Vec3};
+
+/// Attribute slot for `a_position`.
+pub const ATTRIB_POSITION: u32 = 0;
+/// Attribute slot for `a_normal`.
+pub const ATTRIB_NORMAL: u32 = 1;
+/// Attribute slot for `a_uv`.
+pub const ATTRIB_UV: u32 = 2;
+
+/// A compiled, linked GLSL program with cached uniform locations.
+pub struct Program {
+    handle: glow::Program,
+    /// Locations are cached behind a `RefCell` so a uniform can be set through a
+    /// shared reference: the handle registry hands out `Rc<Program>`, and this is
+    /// the only interior mutability the type needs.
+    uniforms: RefCell<HashMap<String, Option<glow::UniformLocation>>>,
+    /// Kept for diagnostics: the driver reports which shader failed by object, and the
+    /// source is what a human needs to see.
+    vertex_source: String,
+    fragment_source: String,
+}
+
+impl std::fmt::Debug for Program {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Program")
+            .field("uniforms", &self.uniforms.borrow().len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Program {
+    /// Compiles and links a vertex/fragment pair.
+    ///
+    /// # Errors
+    ///
+    /// [`Error3D::Shader`] with the driver's full log when compilation or linking
+    /// fails. The log includes the stage and the offending source line the driver
+    /// reported, which is why the sources are kept on the struct.
+    pub fn from_source(
+        gl: &glow::Context,
+        vertex_source: &str,
+        fragment_source: &str,
+    ) -> Result3D<Self> {
+        let program = Self::compile(gl, vertex_source, fragment_source)?;
+
+        Ok(Self {
+            handle: program,
+            uniforms: RefCell::new(HashMap::new()),
+            vertex_source: vertex_source.to_owned(),
+            fragment_source: fragment_source.to_owned(),
+        })
+    }
+
+    fn compile(
+        gl: &glow::Context,
+        vertex_source: &str,
+        fragment_source: &str,
+    ) -> Result3D<glow::Program> {
+        // SAFETY: every call below is core GLES 2.0 on the current context. The shader
+        // objects are deleted on every exit path; the program object only survives on
+        // success.
+        unsafe {
+            let program = gl
+                .create_program()
+                .map_err(|err| Error3D::GlObject(format!("glCreateProgram failed: {err}")))?;
+
+            let mut shaders = Vec::with_capacity(2);
+            for (stage, source) in [("vertex", vertex_source), ("fragment", fragment_source)] {
+                let shader = match compile_stage(gl, stage, source) {
+                    Ok(shader) => shader,
+                    Err(error) => {
+                        for shader in shaders {
+                            gl.delete_shader(shader);
+                        }
+                        gl.delete_program(program);
+                        return Err(error);
+                    }
+                };
+                gl.attach_shader(program, shader);
+                shaders.push(shader);
+            }
+
+            // Attribute locations are bound explicitly *before* linking. GLES 2.0 has
+            // no `layout(location = N)` qualifier, and without this the driver assigns
+            // whatever index it likes per program — so a vertex array object built once
+            // for mesh+program A would feed the wrong slots to program B. Fixed
+            // locations make the attribute setup independent of the program, which is
+            // what lets a VAO be created once per mesh (see `mesh::Mesh`).
+            gl.bind_attrib_location(program, ATTRIB_POSITION, "a_position");
+            gl.bind_attrib_location(program, ATTRIB_NORMAL, "a_normal");
+            gl.bind_attrib_location(program, ATTRIB_UV, "a_uv");
+
+            gl.link_program(program);
+
+            if !gl.get_program_link_status(program) {
+                let log = gl.get_program_info_log(program);
+                for shader in shaders {
+                    gl.detach_shader(program, shader);
+                    gl.delete_shader(shader);
+                }
+                gl.delete_program(program);
+                return Err(Error3D::Shader {
+                    stage: "link",
+                    log: format!("{log}\n\n--- vertex ---\n{vertex_source}\n--- fragment ---\n{fragment_source}"),
+                });
+            }
+
+            // Shaders can be detached once linked; the program keeps what it needs.
+            for shader in shaders {
+                gl.detach_shader(program, shader);
+                gl.delete_shader(shader);
+            }
+
+            Ok(program)
+        }
+    }
+
+    /// Makes this program current.
+    pub fn bind(&self, gl: &glow::Context) {
+        // SAFETY: core GLES 2.0, current context.
+        unsafe { gl.use_program(Some(self.handle)) };
+    }
+
+    /// Returns the location of `name`, caching the lookup.
+    ///
+    /// A missing uniform is not an error: the driver optimises out uniforms a shader
+    /// does not read, and a caller setting `u_unused` should not fail a frame. `None`
+    /// is cached too, so the driver is asked only once.
+    fn location(&self, gl: &glow::Context, name: &str) -> Option<glow::UniformLocation> {
+        if let Some(cached) = self.uniforms.borrow().get(name) {
+            return *cached;
+        }
+
+        // SAFETY: `get_uniform_location` is core GLES 2.0 and returns `None` for an
+        // unknown name.
+        let location = unsafe { gl.get_uniform_location(self.handle, name) };
+        self.uniforms.borrow_mut().insert(name.to_owned(), location);
+        location
+    }
+
+    /// Uploads a `mat4`.
+    ///
+    /// `transpose = false`: [`Mat4`] is column-major, which is what GL expects. Passing
+    /// `true` here would work only if the storage were row-major, and the mixup is the
+    /// classic "my model is inside-out" bug.
+    pub fn set_mat4(&self, gl: &glow::Context, name: &str, value: &Mat4) {
+        if let Some(location) = self.location(gl, name) {
+            // SAFETY: 16 floats, column-major, matching the uniform type.
+            unsafe {
+                gl.uniform_matrix_4_f32_slice(Some(&location), false, &value.to_cols_array());
+            }
+        }
+    }
+
+    /// Uploads a `vec3`.
+    pub fn set_vec3(&self, gl: &glow::Context, name: &str, value: Vec3) {
+        if let Some(location) = self.location(gl, name) {
+            // SAFETY: 3 floats, matching the uniform type.
+            unsafe { gl.uniform_3_f32(Some(&location), value.x, value.y, value.z) };
+        }
+    }
+
+    /// Uploads an `f32`.
+    pub fn set_f32(&self, gl: &glow::Context, name: &str, value: f32) {
+        if let Some(location) = self.location(gl, name) {
+            // SAFETY: one float, matching the uniform type.
+            unsafe { gl.uniform_1_f32(Some(&location), value) };
+        }
+    }
+
+    /// Uploads a colour as a `vec4`.
+    pub fn set_color(&self, gl: &glow::Context, name: &str, color: Color3D) {
+        if let Some(location) = self.location(gl, name) {
+            let [r, g, b, a] = color.to_array();
+            // SAFETY: 4 floats, matching the uniform type.
+            unsafe { gl.uniform_4_f32(Some(&location), r, g, b, a) };
+        }
+    }
+
+    /// Binds `texture` to `unit` and points the sampler uniform at it.
+    ///
+    /// The sampler must be set to the same unit number that the texture is bound to;
+    /// setting one without the other is a black texture with no error.
+    pub fn set_texture(&self, gl: &glow::Context, name: &str, texture: glow::Texture, unit: u32) {
+        // SAFETY: `active_texture` and `bind_texture` are core GLES 2.0; `unit` is
+        // clamped by the caller to the implementation's limit.
+        unsafe {
+            gl.active_texture(glow::TEXTURE0 + unit);
+            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+        }
+
+        if let Some(location) = self.location(gl, name) {
+            // SAFETY: a sampler uniform takes one integer, the texture unit index.
+            unsafe { gl.uniform_1_i32(Some(&location), unit as i32) };
+        }
+    }
+
+    /// The vertex source this program was built from, for diagnostics.
+    pub fn vertex_source(&self) -> &str {
+        &self.vertex_source
+    }
+
+    /// The fragment source this program was built from, for diagnostics.
+    pub fn fragment_source(&self) -> &str {
+        &self.fragment_source
+    }
+}
+
+impl Program {
+    /// Deletes the GL program.
+    ///
+    /// Explicit rather than `Drop`: deleting a GL object needs the context that
+    /// created it, and a `Drop` impl has no access to one. Dropping without calling
+    /// this leaks exactly one GL object, which is why programs are only reachable
+    /// through [`RenderContext3D`](crate::RenderContext3D)'s registry — every path a
+    /// caller can take goes through `destroy_shader`, which calls this.
+    pub fn destroy(self, gl: &glow::Context) {
+        // SAFETY: `gl` is the context that created the handle. `self` is consumed, so
+        // the handle cannot be deleted twice.
+        unsafe { gl.delete_program(self.handle) };
+    }
+}
+
+fn compile_stage(gl: &glow::Context, stage: &'static str, source: &str) -> Result3D<glow::Shader> {
+    // SAFETY: core GLES 2.0 on the current context; the shader is deleted by the
+    // caller on failure and after linking on success.
+    unsafe {
+        let kind = if stage == "vertex" {
+            glow::VERTEX_SHADER
+        } else {
+            glow::FRAGMENT_SHADER
+        };
+
+        let shader = gl
+            .create_shader(kind)
+            .map_err(|err| Error3D::GlObject(format!("glCreateShader({stage}) failed: {err}")))?;
+
+        gl.shader_source(shader, source);
+        gl.compile_shader(shader);
+
+        if !gl.get_shader_compile_status(shader) {
+            let log = gl.get_shader_info_log(shader);
+            gl.delete_shader(shader);
+            return Err(Error3D::Shader {
+                stage,
+                log: format!("{log}\n\n--- source ---\n{source}"),
+            });
+        }
+
+        Ok(shader)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_shader_error_names_the_stage_and_keeps_the_log() {
+        // The message shape is relied on for support: it must name the stage and keep
+        // the driver text verbatim.
+        let error = Error3D::Shader {
+            stage: "fragment",
+            log: "0:4(12): error: `undefined_thing` undeclared".to_owned(),
+        };
+        let text = error.to_string();
+
+        assert!(text.contains("fragment"), "{text}");
+        assert!(text.contains("undeclared"), "{text}");
+    }
+}

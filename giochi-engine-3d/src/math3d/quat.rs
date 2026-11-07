@@ -108,6 +108,18 @@ impl Default for Quat {
     }
 }
 
+impl std::ops::Mul for Quat {
+    type Output = Quat;
+
+    /// Composes two rotations: `a * b` applies `b` first, then `a`.
+    ///
+    /// Same convention as matrix multiplication and as `glam`, so a chain reads in the
+    /// order the transforms are named rather than the reverse.
+    fn mul(self, rhs: Quat) -> Quat {
+        Quat::from_glam(self.to_glam() * rhs.to_glam())
+    }
+}
+
 impl From<GlamQuat> for Quat {
     fn from(value: GlamQuat) -> Self {
         Self::from_glam(value)
@@ -188,6 +200,42 @@ mod tests {
     fn identity_leaves_a_vector_untouched() {
         let point = Vec3::new(1.5, -2.5, 7.0);
         assert_eq!(Quat::IDENTITY.rotate_vec3(point), point);
+    }
+
+    #[test]
+    fn composing_two_quarter_turns_is_a_half_turn() {
+        // Two 90 degree turns about +Z compose to 180 degrees. If the multiplication
+        // order were reversed the result would still be a half turn here, so the
+        // asymmetric case below is the one that pins the order.
+        let quarter = Quat::from_axis_angle(Vec3::new(0.0, 0.0, 1.0), PI / 2.0);
+        let half = quarter * quarter;
+        let rotated = half.rotate_vec3(Vec3::new(1.0, 0.0, 0.0));
+
+        assert!((rotated.x + 1.0).abs() < 1e-6, "got {rotated:?}");
+        assert!(rotated.y.abs() < 1e-6, "got {rotated:?}");
+    }
+
+    #[test]
+    fn multiplication_applies_the_right_hand_rotation_first() {
+        // Rotate +90 about Z, then +90 about X. Applying Z first sends +X to +Y, then X
+        // turns +Y into +Z. `x_then_z * z_then_x` must give that, not the reverse.
+        let about_z = Quat::from_axis_angle(Vec3::new(0.0, 0.0, 1.0), PI / 2.0);
+        let about_x = Quat::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), PI / 2.0);
+
+        let z_then_x = about_x * about_z;
+        let result = z_then_x.rotate_vec3(Vec3::new(1.0, 0.0, 0.0));
+
+        assert!(result.x.abs() < 1e-6, "got {result:?}");
+        assert!(result.y.abs() < 1e-6, "got {result:?}");
+        assert!((result.z - 1.0).abs() < 1e-6, "got {result:?}");
+    }
+
+    #[test]
+    fn multiplying_by_the_identity_is_a_no_op() {
+        let rotation = Quat::from_euler_angles(0.3, -0.2, 0.1);
+
+        assert_eq!(rotation * Quat::IDENTITY, rotation);
+        assert_eq!(Quat::IDENTITY * rotation, rotation);
     }
 
     #[test]

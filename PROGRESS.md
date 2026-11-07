@@ -1,9 +1,9 @@
 # Estado — GIOCHI-ENGINE
 
-## Última fase concluída: 10 — Math 3D
+## Última fase concluída: 11 — Pipeline de mesh + shaders
 Data: 2026-11-07
 
-**Fases 0–8 (2D) concluídas. Extensão v2.1 (3D) em andamento: fases 9 e 10 concluídas.**
+**Fases 0–8 (2D) concluídas. Extensão v2.1 (3D) em andamento: fases 9, 10 e 11 concluídas.**
 
 ## Status 2D (Fases 0–8)
 
@@ -14,7 +14,7 @@ extensão v2.1). Gates 2D revalidados a cada fase 3D.
 
 - [x] Fase 9 — Bootstrap 3D: contexto GLES/EGL, clear, swap
 - [x] Fase 10 — Math 3D (`Vec3`, `Quat`, `Mat4`, `Transform3D`, `Camera3D`)
-- [ ] Fase 11 — Pipeline de mesh + shaders
+- [x] Fase 11 — Pipeline de mesh + shaders
 - [ ] Fase 12 — Câmera com controle + `mini_fps`
 - [ ] Fase 13 — Iluminação Phong (opcional)
 - [ ] Fase 14 — C ABI 3D (v2)
@@ -26,8 +26,8 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 305 testes, 0 falhas
-      (209 das fases 0–8 + 96 da crate 3D)
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 347 testes, 0 falhas
+      (209 das fases 0–8 + 138 da crate 3D)
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
 - [x] `cargo doc --workspace --no-deps --document-private-items` (0 warnings)
 - [x] `scripts/gen-header.sh --check` — `giochi.h` em sincronia com o crate
@@ -46,6 +46,63 @@ Verificações manuais da fase:
   recolha pelo GC, `giochi.quit()`, propagação de erro, `app:step`, `arg`).
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
+
+## Entregue na fase 11 — Pipeline de mesh + shaders
+
+Primeira geometria 3D real na tela: VBO/EBO, shaders GLSL ES 1.00, depth buffer.
+
+- `mesh/vertex.rs`: `Vertex` `#[repr(C)]` + `Pod`, 32 bytes, interleaved
+  `position/normal/uv`, upload sem passe de conversão.
+- `mesh/gpu_mesh.rs`: `Mesh` com VBO, EBO e **VAO opcional**. `glGenVertexArrays` é
+  core só no GLES 3.0; no 2.0 depende de `GL_OES_vertex_array_object`. Sem a extensão,
+  os atributos são reespecificados a cada draw — o chamador não vê diferença.
+- `shader/program.rs`: compilação com log completo do driver (`glGetShaderInfoLog` /
+  `glGetProgramInfoLog`) mais o source; uniformes com cache por nome via `RefCell`.
+- `shader/builtin.rs` + `shaders/*.vert|frag`: `flat` e `textured`, `include_str!`ed.
+- `mesh/obj_loader.rs`: OBJ via `tobj`, interleaving, normais derivadas quando o ficheiro
+  não as traz, múltiplos objectos concatenados com índices rebaseados.
+- `mesh/primitives.rs`: `cube` e `plane` procedurais — o exemplo não depende de asset
+  binário.
+- `render3d/renderer.rs`: `create_mesh`/`destroy_mesh`, `create_builtin_shader`/
+  `load_shader`/`destroy_shader`, `draw_mesh`, `release_all`, contadores.
+- `examples/cube_demo.rs`: cubo a girar em dois eixos, `--frames`, `--quadro`.
+
+### Detalhe que faz o desenho funcionar
+
+Os slots de atributo são fixados com `glBindAttribLocation` **antes** do link
+(`a_position`=0, `a_normal`=1, `a_uv`=2). Sem isso o GLES 2.0 — que não tem
+`layout(location=)`) — atribui índices diferentes por programa, e um VAO por mesh não
+poderia servir mais de um shader.
+
+### Bugs encontrados pelos testes
+
+1. **Duas faces do cubo com winding invertido** (+X e −X). O teste que verifica só a
+   primeira face passava; o que verifica as seis encontrou as duas. Com culling activo o
+   cubo parecia oco.
+2. **Underflow no loader OBJ**: a passagem de normais percorria a lista de índices
+   inteira, então o segundo objecto subtraía um `base` maior que os próprios índices e
+   entrava em pânico em debug / corrompia em release.
+3. **Teste de sintaxe GLES 3 com falso positivo**: procurava `"out "` e encontrava a
+   palavra inglesa "without" num comentário. Agora remove comentários primeiro.
+
+### Medido (GL real, Mesa 26.0.8 / AMD RX 580, `SDL_VIDEODRIVER=offscreen`)
+
+| Verificação | Resultado |
+|---|---|
+| `cargo test -p giochi-engine-3d` | **138 testes** (106 lib + 9 layout + 3 contexto + 7 matemática + 8 pipeline + 5 doc) |
+| Shaders `flat` e `textured` num driver real | compilam |
+| Shader inválido | erro com o log do driver e o source |
+| Cubo rasterizado | **97 147 pixels** acesos, bbox 313×314 centrada em (643, 357) em 1280×720 |
+| Cubo atrás da câmara | **0 pixels** acesos |
+| Caminho sem VAO (`GIOCHI_FORCE_NO_VAO=1`) | mesmos pixels que o caminho com VAO |
+| `release_all` | 0 meshes, 0 shaders |
+| Captura `--quadro` | BMP 1280×720, 3,7 MB, quadrado sólido centrado |
+| Build cruzado aarch64 `--all-targets` | linka, `cube_demo` é ELF ARM aarch64 |
+
+**Teste manual em hardware pendente — bloqueado.** Continua sem acesso ao PX30 (ver
+§"Bloqueios"). O cubo a girar foi verificado em GL real no desktop e por leitura de
+pixels, que é a mesma evidência que o teste manual daria — mas falta a confirmação no
+Mali-G31, sobretudo do caminho sem VAO.
 
 ## Entregue na fase 10 — Math 3D
 
@@ -365,7 +422,13 @@ As oito fases do prompt mestre estão completas. Trabalho futuro, por ordem de v
 ## Bloqueios / pendências
 
 - Nenhum bloqueio de gate.
-- **PX30 inacessível (2026-11-07, tarde).** Depois de a bateria esgotar e voltar, o
+- **PX30 inacessível (2026-11-07, tarde) — confirmado de novo às 13:00.** O adaptador
+  USB-ethernet voltou (`enx0247494f4348`, 10.55.0.1/24) e o aparelho responde a ping,
+  mas `ssh` oferece a chave e o servidor **rejeita**: `Permission denied (publickey,
+  password, keyboard-interactive)`. A chave de host também mudou
+  (`SHA256:dxsN4ork...` agora). Só a porta 22 está aberta; não há consola série (o
+  adaptador CH341 desapareceu do `lsusb`). Recuperação exige acesso físico.
+  Contexto original: Depois de a bateria esgotar e voltar, o
   aparelho regenerou a chave de host SSH e perdeu as chaves autorizadas:
   `Permission denied (publickey,password,keyboard-interactive)`. Antes disso a mesma
   unidade tinha aceitado a chave sem intervenção, então isto indica reflash do rootfs

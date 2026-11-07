@@ -176,7 +176,7 @@ jobs:
           cargo run -q -p giochi-demo -- lua giochi-engine-lua/examples/mini_game.lua \
             --auto --frames 120
 
-      - name: 3D context smoke test
+      - name: 3D context and mesh pipeline
         # `SDL_VIDEODRIVER=dummy` has no OpenGL at all; `offscreen` provides a real
         # EGL/GLES context with no display attached. Measured on a developer machine:
         # dummy fails with "OpenGL support is either not configured in SDL", offscreen
@@ -186,7 +186,38 @@ jobs:
           SDL_VIDEODRIVER: offscreen
         run: |
           cargo test -q -p giochi-engine-3d --test context_smoke
+          cargo test -q -p giochi-engine-3d --test mesh_pipeline
           cargo run -q -p giochi-engine-3d --example cube_demo -- --frames 60
+
+      - name: 3D without vertex array objects
+        # GLES 2.0 devices without `GL_OES_vertex_array_object` take the per-draw
+        # attribute path, and no developer machine has that driver. This is the only
+        # way that fallback is ever exercised before it reaches a console.
+        env:
+          SDL_VIDEODRIVER: offscreen
+          GIOCHI_FORCE_NO_VAO: "1"
+        run: |
+          cargo test -q -p giochi-engine-3d --test mesh_pipeline
+          cargo run -q -p giochi-engine-3d --example cube_demo -- --frames 30
+
+      - name: 3D frame capture
+        # "It drew a frame" and "it drew the right frame" are different claims. The
+        # capture is a real BMP read back with glReadPixels, and the size is asserted so
+        # an all-black 0x0 image cannot pass.
+        env:
+          SDL_VIDEODRIVER: offscreen
+        run: |
+          cargo run -q -p giochi-engine-3d --example cube_demo -- \
+            --frames 3 --quadro /tmp/cube-3d.bmp
+          test -s /tmp/cube-3d.bmp
+          python3 - <<'PY'
+          import struct
+          data = open("/tmp/cube-3d.bmp", "rb").read()
+          assert data[:2] == b"BM", "not a BMP"
+          width, height = struct.unpack("<ii", data[18:26])
+          assert width > 0 and height > 0, f"empty capture: {width}x{height}"
+          print(f"captured {width}x{height}, {len(data)} bytes")
+          PY
 
       - name: 3D opt-in GLES 3.0 path
         # The fallback is the interesting part: the driver may answer 2.0 and the code

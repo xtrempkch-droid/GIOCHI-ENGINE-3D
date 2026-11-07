@@ -46,9 +46,12 @@
 
 pub mod context;
 pub mod math3d;
+pub mod mesh;
 pub mod render3d;
+pub mod shader;
 
 mod error;
+mod registry;
 
 pub use error::{Error3D, Result3D};
 pub use render3d::RenderContext3D;
