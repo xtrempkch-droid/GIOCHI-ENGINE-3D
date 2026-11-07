@@ -20,7 +20,7 @@ jobs:
     name: Build x86_64 release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         run: |
@@ -71,7 +71,7 @@ jobs:
     # `ubuntu-latest` moving releases is exactly what broke it once.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         run: |
