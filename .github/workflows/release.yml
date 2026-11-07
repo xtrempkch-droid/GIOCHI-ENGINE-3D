@@ -234,9 +234,17 @@ jobs:
           # Not a draft: the two verification steps above are the gate, and they block.
           # A draft only helps if a human remembers to run the thing; these run it.
           draft: false
-          # Deliberately off. `generate_release_notes` appends GitHub's own "What's Changed"
-          # to the supplied body, and on an update it appends it to the *existing* body --
-          # so re-running the release left the v0.2.0 page with the same section twice.
-          # The body above is now the whole body, which makes publishing idempotent.
+          # Deliberately off: it appends GitHub's own "What's Changed" on top of the body
+          # above, so re-running a release made the page grow a section each time.
           generate_release_notes: false
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+
+      - name: Make the release body match the file
+        # The action above does not rewrite the body of a release that already exists --
+        # re-running it left v0.2.0 with a stale, duplicated page while reporting success.
+        # Setting the notes explicitly makes a re-run idempotent, which is the only thing
+        # that makes "just re-run the workflow" a safe answer.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.event.inputs.tag || github.ref_name }}
+        run: gh release edit "$REF" --notes-file release-notes.md
