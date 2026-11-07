@@ -76,9 +76,19 @@ fn sanitize(value: f32) -> f32 {
 ///
 /// Uses `std::time::Instant` (CLOCK_MONOTONIC) so it works identically on
 /// development machines and on the target consoles, and needs no SDL timer.
+///
+/// # C ABI
+///
+/// Not exposed: frame pacing belongs to the loop, and a C host that owns its own
+/// pacing calls `giochi_engine_step(frame_time)` with the time *it* measured.
+/// `#[repr(C)]` and `_reserved` are kept anyway, because R1/R3 apply to every public
+/// struct in this crate regardless of whether it ever reaches the boundary.
+#[repr(C)]
 #[derive(Debug, Clone)]
 pub struct FrameClock {
     last: Instant,
+    /// Reserved for future ABI-compatible fields. Must be zero.
+    _reserved: [u32; 4],
 }
 
 impl FrameClock {
@@ -86,6 +96,7 @@ impl FrameClock {
     pub fn new() -> Self {
         Self {
             last: Instant::now(),
+            _reserved: [0; 4],
         }
     }
 

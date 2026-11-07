@@ -749,3 +749,42 @@ determinism, and `docs/LUA_BINDING.md` §6 states both.
 **Consequences.** `mini_game.lua` ends with `app:texture_count() == 0`; the reference
 game and both integration tests assert it. Sounds and music are process-scoped, which
 matches how a scripted game uses them.
+
+## ADR-032 — The C-shaped rules are checked by a test, not by review
+
+**Context.** R1 and R3 are invariants about *every* public item: `#[repr(C)]` on every
+user-visible type, `_reserved: [u32; N ≥ 4]` as the last field of every `#[repr(C)]`
+struct, no `Rc`/`Arc`/`Box`/`String`/`Vec`/`HashMap` in a public field, no generic or
+explicitly-borrowing public function. A reviewer checks the code in front of them; a new
+module, a new field or a new `pub` helper can break the rule silently, and the failure
+only appears when a C consumer tries to use the type — months later, in another language.
+
+**Decision.** `giochi-engine/tests/c_shape.rs` reads the crate's own source and fails the
+gate on any violation. It runs as part of `cargo test`, so it needs no extra tooling and
+no CI step of its own. The scan is textual rather than `syn`-based, because the codebase
+is `rustfmt`-formatted and a readable 200-line test beats an extra dependency.
+
+**What the test deliberately allows.**
+
+* **Private `_reserved`.** R3 asks for the space, not for the visibility. A private
+  padding field occupies the same bytes and is strictly better: a C caller cannot
+  corrupt padding it was told to ignore.
+* **`#[repr(C)]` enums without a tail.** R3 names structs. A C enum is the size of its
+  discriminant, a reserved tail would need a variant, and the ABI maps these to plain
+  `int`s anyway (`docs/C_ABI_CONTRACT.md` §3).
+* **`GiochiError`.** R4 requires a `thiserror` enum with `String` payloads that never
+  crosses the boundary. It sits in an allow-list that also demands the cited rule, and a
+  second test asserts every entry names a real type and a real rule, so the list cannot
+  rot into a way of silencing failures.
+
+**Why the test checks itself.** `the_scanner_finds_the_crate_types` fails if the scan
+stops finding the types it is meant to check, and the allow-list test fails if an entry
+goes stale. Without that, a refactor that moved every file would turn the whole suite
+green and prove nothing.
+
+**Consequences.** The audit that produced this ADR found three real violations, fixed in
+the same change: `FrameClock` had neither `#[repr(C)]` nor `_reserved`, and
+`SceneManager` had `_reserved` but no `#[repr(C)]`. Both are marked `#[repr(C)]` now,
+with `FrameClock` gaining its reserved tail. Verified by breaking the rule on purpose
+(removing `#[repr(C)]` from `Sprite`, shrinking `RunStats::_reserved` to `[u32; 2]`):
+each failure names the file, the line and the rule.

@@ -15,9 +15,10 @@ use crate::render::{TextureHandle, TextureRegistry};
 /// filesystem again, which defeats the point of the cache.
 ///
 /// `i32` is deliberately absent from the Rust methods: they return
-/// [`GiochiResult`](crate::error::GiochiResult). The C ABI's
-/// `load_texture(handle_out, path) -> i32` wrapper lands in phase 7 on top of
-/// [`ResourceManager::load_texture`].
+/// [`GiochiResult`](crate::error::GiochiResult). At the boundary, `giochi_texture_create`
+/// returns the handle directly (or `0` on failure) and goes through
+/// [`ResourceManager::load_texture`], so two C callers loading the same path share one
+/// texture.
 ///
 /// # C ABI
 ///

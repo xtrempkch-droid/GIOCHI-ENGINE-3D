@@ -11,9 +11,14 @@
 //!
 //! # Status
 //!
-//! Phase 0 (bootstrap): the module tree, the C ABI contract and the value types
-//! exist. Behaviour is added phase by phase; functions that are not implemented
-//! yet panic with `todo!("fase N")` and say so in their documentation.
+//! **Complete.** All eight phases of the project are implemented: the platform layer
+//! and the fixed-timestep loop, the 2D renderer with opaque texture handles, input,
+//! the asset loader and the mixer, the scene stack and the [`core::engine::Engine`]
+//! facade. The C ABI lives in `giochi-engine-capi` and the Lua binding in
+//! `giochi-engine-lua`; neither changes anything here.
+//!
+//! There are no `todo!()` stubs left in this crate, and `tests/c_shape.rs` enforces the
+//! C-shaped rules over the whole source tree.
 //!
 //! # Layering rules
 //!

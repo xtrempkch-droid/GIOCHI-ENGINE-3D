@@ -16,7 +16,9 @@ use crate::scene::scene::Scene;
 /// # C ABI
 ///
 /// Not exposed. C consumers use `giochi_scene_create`/`giochi_scene_destroy` plus
-/// `giochi_engine_run_scene`; the stack is engine-owned (ADR-012).
+/// `giochi_engine_run_scene`; the stack is engine-owned (ADR-012). `#[repr(C)]` is
+/// kept because R1 applies to every public struct in this crate.
+#[repr(C)]
 pub struct SceneManager {
     stack: Vec<Box<dyn Scene>>,
     _reserved: [u32; 4],

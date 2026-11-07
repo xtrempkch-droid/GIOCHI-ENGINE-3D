@@ -98,9 +98,9 @@ impl TextureRegistry {
 
     /// Loads the image at `path` (PNG/JPG/BMP/…) and returns its handle.
     ///
-    /// The path is read once; the registry does not cache by path (that is the
-    /// `ResourceManager`'s job in phase 4). Returns [`GiochiError::Asset`] when
-    /// the file is missing or not a supported image.
+    /// The registry does not cache by path — that is
+    /// [`ResourceManager`](crate::assets::ResourceManager)'s job. Returns
+    /// [`GiochiError::Asset`] when the file is missing or not a supported image.
     pub fn create_texture(&self, path: &str) -> Result<TextureHandle, GiochiError> {
         if path.trim().is_empty() {
             return Err(GiochiError::InvalidArgument("texture path is empty"));

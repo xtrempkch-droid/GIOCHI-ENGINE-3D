@@ -12,7 +12,7 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 203 testes, 0 falhas
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 209 testes, 0 falhas
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
 - [x] `cargo doc --workspace --no-deps --document-private-items` (0 warnings)
 - [x] `scripts/gen-header.sh --check` — `giochi.h` em sincronia com o crate
@@ -55,6 +55,31 @@ Verificações manuais da fase:
 - `ci.yml` corre `mini_game.lua` no job de smoke; `release.yml` empacota
   `lua/mini_game.lua` e testa-o com o binário de release.
 - Testes: `giochi-engine-lua/tests/lua_smoke.rs` e `tests/mini_game_script.rs`.
+
+## Auditoria final do prompt mestre
+
+Depois da fase 8, o prompt foi reauditado item a item contra o repositório. Astrês
+entregas em falta encontradas **e corrigidas** na mesma alteração:
+
+- `FrameClock` era `pub` sem `#[repr(C)]` e sem `_reserved` — violava R1 e R3.
+- `SceneManager` tinha `_reserved` mas não `#[repr(C)]` — violava R1.
+- `giochi-engine/src/lib.rs` anunciava no doc de topo que as funções ainda faziam
+  `todo!("fase N")`, o que deixou de ser verdade desde a fase 5.
+
+E uma lacuna de processo: as regras R1/R3 eram verificadas por revisão. Agora
+`giochi-engine/tests/c_shape.rs` verifica-as mecanicamente sobre todo o código-fonte
+(ADR-032), incluindo a excepção única e deliberada (`GiochiError`, exigida pela R4).
+Verificado por violação provocada: retirar `#[repr(C)]` a `Sprite` e encolher
+`RunStats::_reserved` para `[u32; 2]` falham o gate com ficheiro, linha e regra.
+
+Confirmado presente e conforme: os 70 ficheiros da estrutura do prompt (workspace,
+8 docs, 3 workflows, árvore `src/`, `cbindgen.toml`, `giochi.h`, os três testes da
+capi, `mini_game.lua`); `MAX_FRAME_TIME = 0.25` e `FIXED_TIMESTEP = 1/60`;
+`init_sdl()` com os seis hints de KMSDRM documentados; `HandleRegistry` com
+`HashMap<u64, Rc<T>>` e contador `AtomicU64`; zero `unwrap()`/`expect()` em código de
+biblioteca (só em `#[cfg(test)]`); zero `todo!()`; zero `unsafe` fora da capi, onde
+cada bloco tem `// SAFETY:`; nenhuma `pub fn` com generics ou lifetime explícito;
+nenhum campo público com `Rc`/`Arc`/`Box`/`String`/`Vec`/`HashMap`.
 
 ## Roadmap
 

@@ -16,6 +16,26 @@ rather than a rewrite. Runs on `x86_64-unknown-linux-gnu` and
 `aarch64-unknown-linux-gnu`; auto-selects KMSDRM on a bare Linux console and
 falls back to the desktop driver elsewhere.
 
+### Added — post-release audit
+
+- `giochi-engine/tests/c_shape.rs`: the C-shaped rules (R1, R3) are now checked
+  mechanically over the whole crate source and run as part of `cargo test` — every
+  public type `#[repr(C)]`, every `#[repr(C)]` struct ending in `_reserved: [u32; N ≥ 4]`,
+  no public field holding `Rc`/`Arc`/`Box`/`String`/`Vec`/`HashMap`, and no public
+  function with generic parameters or an explicit lifetime. The one deliberate
+  exception (`GiochiError`, required by R4) is an allow-list entry that must cite the
+  rule that allows it. ADR-032.
+
+### Fixed — post-release audit
+
+- `FrameClock` was public without `#[repr(C)]` **and** without `_reserved`, violating
+  R1 and R3; `SceneManager` had `_reserved` but no `#[repr(C)]`, violating R1. Both are
+  `#[repr(C)]` now, and `FrameClock` gained its reserved tail.
+- `giochi-engine/src/lib.rs` still announced that unimplemented functions panic with
+  `todo!("fase N")`, which stopped being true at phase 5.
+- `assets/manager.rs` and `render/texture.rs` referred to work "landing in phase 7" and
+  "the ResourceManager's job in phase 4"; both now describe the finished behaviour.
+
 ### Added — phase 8 (Lua binding)
 
 - **`giochi-engine-lua`** is a working binding, not a stub: a `giochi` module for Lua
