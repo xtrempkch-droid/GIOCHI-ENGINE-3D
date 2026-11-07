@@ -632,3 +632,60 @@ link check runs where ARM64 libraries are guaranteed to exist.
 multiarch recipe. `README.md` no longer claims `scripts/check-aarch64.sh --release`
 performs a link — it never did, and `--release` was simply forwarded to
 `cargo check`.
+
+## ADR-028 — A callback may use exactly what the engine lends it
+
+**Context.** The C ABI is singleton-based (ADR-012): `giochi_render_draw_rect` has no
+context parameter, so it must find the renderer somewhere. Inside a scene callback
+the engine is already holding `&mut RenderContext`, so a nested lookup through the
+singleton would either panic (`RefCell`) or be undefined behaviour (a second `&mut`
+into an already-borrowed value).
+
+The naive fix — a thread-local `*mut RenderContext` set for the whole run — is UB
+under Rust's aliasing rules: the pointer outlives the `&mut` it was derived from and
+is used after `clear`/`present` invalidated it.
+
+**Decision.**
+
+1. The **texture registry** became `Rc<TextureRegistry>` inside `RenderContext`
+   (`RenderContext::shared_textures`). Every registry operation takes `&self`, so
+   `giochi_texture_*` works from any context with no borrow at all.
+2. `update` and `render` install the subsystems they were *given as parameters* into
+   thread-local slots, and clear them when the callback returns. A pointer is only
+   ever dereferenced while the reference it came from is alive and not used.
+3. `on_enter`/`on_exit` are delivered by the C layer **outside** the engine borrow
+   (`giochi_engine_run_scene` calls them around `Engine::run`; the deferred exit is
+   delivered after the stack is emptied), so they can use everything.
+4. Anything not lent reports `GIOCHI_ERROR_SCENE` with a message naming the callback
+   the call belongs in.
+
+The resulting matrix (also in `docs/C_ABI_CONTRACT.md` §3.8):
+
+| Callback | Renderer | Input | Mixer | Textures |
+|---|---|---|---|---|
+| `on_enter` / `on_exit` | yes | — | yes | yes |
+| `update` | — | yes | yes | yes |
+| `render` | yes | — | — | yes |
+
+**Consequences.** A scene can create textures anywhere but can only draw in
+`render`, which the contract already required. `on_exit` fires once per
+`giochi_engine_run_scene` call rather than once per stack residency, so a C host has
+a simple, symmetric contract instead of the full Rust stack semantics. The engine's
+`Scene` trait is unchanged: no existing scene had to be edited.
+
+## ADR-029 — `Engine::step` shares the loop body with `run_current`
+
+**Context.** The ABI publishes `giochi_engine_step(float frame_time)`: one frame,
+caller-supplied frame time, no sleeping. `Engine::run_current` takes its frame time
+from an internal clock and sleeps, and `Engine::set_frame_limit(1)` would abuse the
+statistics and still ignore the parameter.
+
+**Decision.** Extract the frame body into `Engine::run_frame(frame_time)`, returning
+`FrameOutcome::{Continue, Transitioned, Stop}`. `run_current` keeps the loop, the
+sleep and the transition guard; `Engine::step` runs one frame and accumulates
+statistics without resetting them.
+
+**Consequences.** There is exactly one implementation of the mandated frame order, so
+`run` and `step` cannot drift. A host driving `step` in its own loop gets cumulative
+`frames`/`steps`/`elapsed`, which is what an editor's profiler wants. The refactor
+was verified by the existing `engine_smoke` test and by all five example smoke runs.

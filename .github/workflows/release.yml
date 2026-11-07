@@ -49,8 +49,12 @@ jobs:
 
       - name: Package
         run: |
-          mkdir -p dist
+          mkdir -p dist/include dist/lib
           cp target/x86_64-unknown-linux-gnu/release/giochi-demo dist/
+          # The C ABI: header plus both linkable forms.
+          cp giochi-engine-capi/include/giochi.h dist/include/
+          cp target/x86_64-unknown-linux-gnu/release/libgiochi.so dist/lib/
+          cp target/x86_64-unknown-linux-gnu/release/libgiochi.a dist/lib/
           cp README.md LICENSE CHANGELOG.md PROGRESS.md dist/
           cp -r docs assets dist/
           tar -C dist -czf giochi-engine-x86_64-unknown-linux-gnu.tar.gz .
@@ -105,8 +109,12 @@ jobs:
 
       - name: Package
         run: |
-          mkdir -p dist
+          mkdir -p dist/include dist/lib
           cp target/aarch64-unknown-linux-gnu/release/giochi-demo dist/
+          # The C ABI: header plus both linkable forms.
+          cp giochi-engine-capi/include/giochi.h dist/include/
+          cp target/aarch64-unknown-linux-gnu/release/libgiochi.so dist/lib/
+          cp target/aarch64-unknown-linux-gnu/release/libgiochi.a dist/lib/
           cp README.md LICENSE CHANGELOG.md PROGRESS.md dist/
           cp -r docs assets dist/
           tar -C dist -czf giochi-engine-aarch64-unknown-linux-gnu.tar.gz .
@@ -135,6 +143,9 @@ jobs:
             echo "|---|---|"
             echo "| x86_64-unknown-linux-gnu | giochi-engine-x86_64-unknown-linux-gnu.tar.gz |"
             echo "| aarch64-unknown-linux-gnu | giochi-engine-aarch64-unknown-linux-gnu.tar.gz |"
+            echo
+            echo "Each archive contains the demo binary, the C ABI (\`include/giochi.h\`,"
+            echo "\`lib/libgiochi.so\`, \`lib/libgiochi.a\`), the docs and the assets."
             echo
             echo "Requires libdrm, libgbm and libEGL on the target (see docs/KMSDRM.md)."
             echo

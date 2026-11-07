@@ -311,6 +311,32 @@ impl Engine {
         self.run_current()
     }
 
+    /// Runs exactly one iteration of the loop with the supplied frame time.
+    ///
+    /// This is the loop body of [`Engine::run_current`] without the sleep, and is
+    /// what a host that owns its own pacing (an editor, a test harness, the C ABI's
+    /// `giochi_engine_step`) uses:
+    ///
+    /// ```text
+    /// poll events → input → fixed steps → clear → render → present → transition
+    /// ```
+    ///
+    /// `frame_time` is the wall-clock time the caller wants the simulation to
+    /// believe elapsed; it is clamped like any other frame. Nothing is slept here,
+    /// so the caller decides the rate.
+    ///
+    /// Unlike [`Engine::run_current`] this does **not** reset [`Engine::run_stats`],
+    /// so a host stepping in its own loop gets cumulative statistics. It also does
+    /// not require [`Engine::is_running`] to be true; a scene that has asked to quit
+    /// is left quit, and the caller decides whether to call
+    /// [`Engine::reset_quit`].
+    pub fn step(&mut self, frame_time: f32) -> Result<(), GiochiError> {
+        let frame_time = clamp_frame_time(frame_time);
+        self.run_frame(frame_time)?;
+        self.stats.elapsed += frame_time;
+        Ok(())
+    }
+
     /// Runs the current scene until it quits, the window closes, or `Escape` is
     /// pressed.
     ///
@@ -335,54 +361,19 @@ impl Engine {
             let frame_started = std::time::Instant::now();
             let frame_time = self.clock.tick();
 
-            let events = self.platform.poll_events();
-            self.input.update(&events);
-            for event in &events {
-                self.game_loop.handle_quit_signal(quit_signal(event));
-            }
-
-            let steps = self.game_loop.advance(frame_time);
-            for _ in 0..steps {
-                self.time.advance(self.game_loop.fixed_timestep());
-                let time = self.time;
-                if let Some(scene) = self.scenes.current_mut() {
-                    scene.update(time, &self.input, &mut self.audio);
-                }
-                self.stats.steps += 1;
-            }
-
-            self.render.clear(self.clear_color);
-            if let Some(scene) = self.scenes.current_mut() {
-                scene.render(&mut self.render);
-            }
-            self.render.present();
-            self.stats.frames += 1;
-
-            if self
-                .frame_limit
-                .is_some_and(|limit| self.stats.frames >= limit)
-            {
-                break;
-            }
-
-            let transition = self
-                .scenes
-                .current_mut()
-                .map(|scene| scene.transition())
-                .unwrap_or(SceneTransition::Continue);
-            if transition != SceneTransition::Continue {
-                transitions += 1;
-                if !self.apply_transition(transition) {
-                    break;
-                }
-                // A scene change must not be counted as a stall: restart the frame
-                // budget so the new scene's first frame is not starved.
-                self.clock.reset();
-            } else {
-                self.platform.delay_ms(
+            let outcome = self.run_frame(frame_time)?;
+            match outcome {
+                FrameOutcome::Continue => self.platform.delay_ms(
                     self.game_loop
                         .sleep_ms(frame_started.elapsed().as_secs_f32()),
-                );
+                ),
+                FrameOutcome::Transitioned => {
+                    transitions += 1;
+                    // A scene change must not be counted as a stall: restart the
+                    // frame budget so the new scene's first frame is not starved.
+                    self.clock.reset();
+                }
+                FrameOutcome::Stop => break,
             }
 
             // A scene that transitions every frame would spin forever; that is a
@@ -403,6 +394,55 @@ impl Engine {
             self.stats.fps()
         );
         Ok(())
+    }
+
+    /// One iteration of the loop: poll, update, clear, render, present, transition.
+    ///
+    /// Shared by [`Engine::run_current`] and [`Engine::step`] so the two can never
+    /// disagree about the order of a frame.
+    fn run_frame(&mut self, frame_time: f32) -> Result<FrameOutcome, GiochiError> {
+        let events = self.platform.poll_events();
+        self.input.update(&events);
+        for event in &events {
+            self.game_loop.handle_quit_signal(quit_signal(event));
+        }
+
+        let steps = self.game_loop.advance(frame_time);
+        for _ in 0..steps {
+            self.time.advance(self.game_loop.fixed_timestep());
+            let time = self.time;
+            if let Some(scene) = self.scenes.current_mut() {
+                scene.update(time, &self.input, &mut self.audio);
+            }
+            self.stats.steps += 1;
+        }
+
+        self.render.clear(self.clear_color);
+        if let Some(scene) = self.scenes.current_mut() {
+            scene.render(&mut self.render);
+        }
+        self.render.present();
+        self.stats.frames += 1;
+
+        if self
+            .frame_limit
+            .is_some_and(|limit| self.stats.frames >= limit)
+        {
+            return Ok(FrameOutcome::Stop);
+        }
+
+        let transition = self
+            .scenes
+            .current_mut()
+            .map(|scene| scene.transition())
+            .unwrap_or(SceneTransition::Continue);
+        if transition == SceneTransition::Continue {
+            Ok(FrameOutcome::Continue)
+        } else if self.apply_transition(transition) {
+            Ok(FrameOutcome::Transitioned)
+        } else {
+            Ok(FrameOutcome::Stop)
+        }
     }
 
     /// Applies a scene transition. Returns `false` when the loop must stop.
@@ -577,6 +617,16 @@ impl Drop for Engine {
 
 /// Upper bound on scene transitions per run before the engine reports a bug.
 const MAX_TRANSITIONS: u32 = 10_000;
+
+/// What [`Engine::run_frame`] decided about the loop.
+enum FrameOutcome {
+    /// Nothing happened: keep going.
+    Continue,
+    /// The scene changed the stack; the frame budget restarts.
+    Transitioned,
+    /// The loop must stop (quit, empty transition target, or frame limit).
+    Stop,
+}
 
 /// One fixed simulation step, exposed for tests that assert on `MAX_FRAME_TIME`.
 pub fn clamp_frame_time(frame_time: f32) -> f32 {

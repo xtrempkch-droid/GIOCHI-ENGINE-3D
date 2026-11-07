@@ -45,6 +45,8 @@ scripts/gates.sh
 | Tests | `cargo test --workspace --target x86_64-unknown-linux-gnu` |
 | Docs | `cargo doc --workspace --no-deps --document-private-items` |
 | ARM64 | `scripts/check-aarch64.sh` |
+| C header | `scripts/gen-header.sh --check` |
+| C/Python consumers | `scripts/ffi-smoke.sh` |
 
 If a gate cannot pass for an environmental reason, document the blocker in
 `PROGRESS.md` and leave the phase open. Do not mark it complete.
@@ -73,6 +75,8 @@ they drift, which is deliberate.
 | Document | Update it when |
 |---|---|
 | `docs/C_ABI_CONTRACT.md` | Any public type or function changes (mandatory) |
+| `giochi-engine-capi/include/giochi.h` | Never by hand: run `scripts/gen-header.sh` |
+| `docs/C_ABI.md` | The C consumption workflow or the callback rules change |
 | `docs/ARCHITECTURE.md` | A module is added, removed, or changes layer |
 | `docs/API_GUIDE.md` + `tests/api_guide.rs` | The user-facing API changes |
 | `docs/KMSDRM.md` | Driver negotiation or target requirements change |

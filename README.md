@@ -9,12 +9,12 @@ A **2D** game engine in Rust on top of SDL2, designed from day one to be consume
 from any language through a C ABI. Primary target: `aarch64-unknown-linux-gnu`
 (Linux consoles with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 
-> **Status: 0.1.0 — phases 0 to 6 complete.** The workspace, the C ABI contract, the
-> value types, the SDL2 platform layer, the fixed-timestep loop, the 2D renderer with
-> opaque texture handles, keyboard/mouse/gamepad input, the asset cache, the audio
-> mixer, the scene stack and the `Engine` facade all exist, with CI, release packaging
-> and the guides in place. The `extern "C"` surface and the Lua binding land in
-> phases 7 and 8 — see [PROGRESS.md](PROGRESS.md).
+> **Status: 0.1.0 — phases 0 to 7 complete.** The workspace, the SDL2 platform layer,
+> the fixed-timestep loop, the 2D renderer with opaque texture handles,
+> keyboard/mouse/gamepad input, the asset cache, the audio mixer, the scene stack, the
+> `Engine` facade, and the **C ABI** — `libgiochi.so` / `libgiochi.a` plus a generated
+> `giochi.h` — with CI, release packaging and the guides in place. The Lua binding
+> lands in phase 8 — see [PROGRESS.md](PROGRESS.md).
 
 
 ## Why "C-shaped" Rust?
@@ -44,7 +44,7 @@ is authoritative.
 | Crate | Kind | Purpose |
 |---|---|---|
 | [`giochi-engine`](giochi-engine/) | lib | Idiomatic Rust API, C-shaped data, no `unsafe` |
-| [`giochi-engine-capi`](giochi-engine-capi/) | `cdylib` + `staticlib` | `extern "C"` surface and generated `giochi.h` |
+| [`giochi-engine-capi`](giochi-engine-capi/) | `cdylib` + `staticlib` | `libgiochi` C ABI and generated `giochi.h` |
 | [`giochi-engine-lua`](giochi-engine-lua/) | lib | Reference binding (Lua 5.4 via mLua) |
 | [`giochi-demo`](giochi-demo/) | bin | Bootstrap binary, examples, `lua` subcommand |
 
@@ -116,6 +116,61 @@ which additionally needs the ARM64 `libSDL2_image`/`libSDL2_mixer`/`libSDL2_ttf`
 (`bundled` builds core SDL2 only). Details, including the verified multiarch
 recipe and how to supply a console sysroot:
 [docs/CROSS_COMPILE.md](docs/CROSS_COMPILE.md).
+
+### From C (and any language with a C FFI)
+
+```bash
+cargo build -p giochi-engine-capi --release
+# target/<triple>/release/libgiochi.so, libgiochi.a, and giochi-engine-capi/include/giochi.h
+```
+
+```c
+#include "giochi.h"
+
+static void update(void *user_data, const GiochiTime *t) {
+    (void)user_data; (void)t;
+    if (giochi_input_key_pressed(27 /* SDLK_ESCAPE */)) {
+        giochi_engine_request_quit();
+    }
+}
+
+static void render(void *user_data) {
+    (void)user_data;
+    GiochiRect bar = { .x = 10, .y = 10, .w = 120, .h = 24 };
+    GiochiColor green = { .r = 40, .g = 160, .b = 90, .a = 255 };
+    giochi_render_draw_rect(&bar, green);
+}
+
+int main(void) {
+    GiochiEngineConfig cfg = { .width = 960, .height = 540,
+                               .target_fps = 60, .vsync = 1, .title = "my game" };
+    if (giochi_engine_init(&cfg) != GIOCHI_ERROR_OK) {
+        fprintf(stderr, "%s\n", giochi_get_last_error());
+        return 1;
+    }
+    GiochiSceneCallbacks cb = { .update = update, .render = render };
+    GiochiScene scene = giochi_scene_create(&cb);
+    int32_t code = giochi_engine_run_scene(scene);
+    giochi_scene_destroy(scene);
+    giochi_engine_shutdown();
+    return code == GIOCHI_ERROR_OK ? 0 : 1;
+}
+```
+
+```bash
+cc -std=c11 -I giochi-engine-capi/include my_game.c \
+   -L target/x86_64-unknown-linux-gnu/release -lgiochi -o my_game
+```
+
+Resources are `uint64_t` handles with explicit create/destroy, `0` is never valid, and
+every fallible call returns `0` or a negative code with the reason in
+`giochi_get_last_error()`. Full guide: [docs/C_ABI.md](docs/C_ABI.md); the normative
+specification is [docs/C_ABI_CONTRACT.md](docs/C_ABI_CONTRACT.md).
+
+```bash
+scripts/gen-header.sh --check   # the committed header matches the Rust crate
+scripts/ffi-smoke.sh            # builds libgiochi, runs the C and Python consumers
+```
 
 ### Minimal render loop
 
@@ -259,6 +314,7 @@ other the way they do: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | File | Contents |
 |---|---|
 | [docs/API_GUIDE.md](docs/API_GUIDE.md) | Task-oriented guide: scenes, rendering, input, audio, assets, errors |
+| [docs/C_ABI.md](docs/C_ABI.md) | Consuming the engine from C, Python, Go, Zig, C# |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layers, dependency rules, ownership, per-frame order, testing |
 | [docs/C_ABI_CONTRACT.md](docs/C_ABI_CONTRACT.md) | Authoritative C ABI: types, sizes, error codes, functions |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Architecture decision records |

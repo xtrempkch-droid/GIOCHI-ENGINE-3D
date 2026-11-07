@@ -9,6 +9,9 @@ authors.workspace = true
 repository.workspace = true
 
 [lib]
+# `name = "giochi"` makes the artefacts `libgiochi.so` / `libgiochi.a`, which is what
+# the docs, the header and every example link against.
+name = "giochi"
 crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]

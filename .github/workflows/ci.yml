@@ -55,6 +55,43 @@ jobs:
       - name: Docs
         run: cargo doc --workspace --no-deps --document-private-items
 
+      - name: Install cbindgen
+        run: cargo install cbindgen --version 0.27.0 --locked
+
+      - name: C header is up to date
+        # giochi.h is generated from the Rust crate; a stale copy would ship an ABI
+        # that does not match the library.
+        run: ./scripts/gen-header.sh --check
+
+  ffi:
+    name: C and Python consumers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Install SDL2 build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config clang libclang-dev \
+            libasound2-dev libudev-dev libdrm-dev libgbm-dev \
+            libgl1-mesa-dev libegl1-mesa-dev
+
+      - name: Install cbindgen
+        run: cargo install cbindgen --version 0.27.0 --locked
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build libgiochi and run the C and Python smoke tests
+        # Compiles giochi-engine-capi/tests/c_smoke.c with -Wall -Wextra -Werror
+        # against the generated header, runs it, then runs python_smoke.py.
+        run: ./scripts/ffi-smoke.sh
+
   cross-check:
     name: Cross-check (aarch64)
     runs-on: ubuntu-latest

@@ -1,0 +1,359 @@
+//! Process-wide state: the engine singleton, the thread-local error slot, the
+//! panic guard, and the "current subsystem" slots used while a scene callback runs.
+//!
+//! # Why a singleton
+//!
+//! ABI v1 is singleton-based (ADR-012): the C side never sees an opaque context
+//! pointer, it calls `giochi_*` functions that act on the one engine instance.
+//! The instance lives in a `thread_local!` cell, which is also what makes the
+//! single-threaded contract (ADR-010) enforceable: a call from another thread finds
+//! no engine and gets `GIOCHI_ERROR_NOT_INITIALIZED` instead of racing.
+//!
+//! # Why the raw pointers
+//!
+//! A scene callback runs *inside* the engine's loop, so the engine cell is already
+//! borrowed and a nested borrow would panic. The three slots below are set by the
+//! scene adapter from the references the engine lends to `Scene::update` and
+//! `Scene::render`, and cleared immediately after the callback returns. They are
+//! therefore only ever dereferenced while the value they point at is alive and
+//! exclusively ours — the same reborrow-to-raw-pointer pattern the standard library
+//! uses, not a shared global.
+
+use core::ffi::{c_char, CStr};
+use std::cell::{Cell, RefCell};
+use std::ffi::CString;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use giochi_engine::error::codes;
+use giochi_engine::{AudioSystem, Engine, GiochiError, Input, RenderContext, TextureRegistry};
+
+thread_local! {
+    /// The single engine instance. `None` until `giochi_engine_init`.
+    static ENGINE: RefCell<Option<Engine>> = const { RefCell::new(None) };
+
+    /// Shared handle to the engine's texture registry.
+    ///
+    /// `TextureRegistry` methods all take `&self`, so this clone is usable from
+    /// anywhere — including inside a callback while the engine is borrowed.
+    static TEXTURES: RefCell<Option<Rc<TextureRegistry>>> = const { RefCell::new(None) };
+
+    /// Message reported by `giochi_get_last_error`, NUL-terminated.
+    static LAST_ERROR: RefCell<CString> = RefCell::new(CString::default());
+
+    /// Renderer lent to the callback that is running right now, if any.
+    static CURRENT_RENDER: Cell<*mut RenderContext> = const { Cell::new(core::ptr::null_mut()) };
+
+    /// Input snapshot lent to the running `update` callback, if any.
+    static CURRENT_INPUT: Cell<*const Input> = const { Cell::new(core::ptr::null()) };
+
+    /// Mixer lent to the running callback, if any.
+    static CURRENT_AUDIO: Cell<*mut AudioSystem> = const { Cell::new(core::ptr::null_mut()) };
+
+    /// `true` while a scene callback is on the stack, i.e. while re-entering the
+    /// engine would deadlock or corrupt the scene stack.
+    static IN_CALLBACK: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Set by `giochi_engine_request_quit`, consumed by the running scene adapter.
+static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// `true` between the start and the end of a `giochi_engine_run*`/`step` call.
+static RUN_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+// ---------------------------------------------------------------------------
+// Last error
+// ---------------------------------------------------------------------------
+
+/// Stores `message` as the thread's last error, making it NUL-safe first.
+pub(crate) fn set_last_error(message: &str) {
+    let sanitised = message.replace('\0', " ");
+    LAST_ERROR.with(|slot| {
+        *slot.borrow_mut() = CString::new(sanitised).unwrap_or_default();
+    });
+}
+
+/// Clears the thread's last error. Called on entry to every `giochi_*` function so
+/// that a successful call always leaves `giochi_get_last_error()` empty.
+fn clear_last_error() {
+    LAST_ERROR.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if !slot.as_bytes().is_empty() {
+            *slot = CString::default();
+        }
+    });
+}
+
+/// Pointer to the thread's last error message; never NULL.
+pub(crate) fn last_error_pointer() -> *const c_char {
+    LAST_ERROR.with(|slot| slot.borrow().as_ptr())
+}
+
+/// Records `err` and returns its ABI code.
+pub(crate) fn fail(err: &GiochiError) -> i32 {
+    set_last_error(&err.to_string());
+    error_code(err)
+}
+
+/// Maps an engine error onto the numeric ABI code.
+///
+/// `GiochiError` is `#[non_exhaustive]`, so the wildcard arm is reachable when a
+/// later phase adds a variant: an unknown error must degrade to `INTERNAL`, never
+/// to success.
+pub(crate) fn error_code(err: &GiochiError) -> i32 {
+    match err {
+        GiochiError::InvalidHandle(_) => codes::INVALID_HANDLE,
+        GiochiError::InvalidArgument(_) => codes::INVALID_ARGUMENT,
+        GiochiError::NotInitialized => codes::NOT_INITIALIZED,
+        GiochiError::Platform(_) => codes::PLATFORM,
+        GiochiError::Render(_) => codes::RENDER,
+        GiochiError::Asset(_) => codes::ASSET,
+        GiochiError::Audio(_) => codes::AUDIO,
+        GiochiError::Scene(_) => codes::SCENE,
+        GiochiError::Unsupported(_) => codes::UNSUPPORTED,
+        _ => codes::INTERNAL,
+    }
+}
+
+/// Records an argument error and returns its code.
+pub(crate) fn invalid_argument(message: &str) -> i32 {
+    set_last_error(message);
+    codes::INVALID_ARGUMENT
+}
+
+/// Records "this subsystem is not available here" and returns `GIOCHI_ERROR_SCENE`.
+pub(crate) fn unavailable(message: &str) -> i32 {
+    set_last_error(message);
+    codes::SCENE
+}
+
+fn not_initialized() -> i32 {
+    set_last_error("the engine is not initialised; call giochi_engine_init() first");
+    codes::NOT_INITIALIZED
+}
+
+// ---------------------------------------------------------------------------
+// Panic guard
+// ---------------------------------------------------------------------------
+
+/// Runs `body`, turning a panic into `fallback` plus `GIOCHI_ERROR_INTERNAL`.
+///
+/// No Rust panic may cross the boundary: an `extern "C"` function that unwinds is
+/// undefined behaviour (and aborts since Rust 1.81). Every exported function is
+/// wrapped in this, which also gives the "clear the error on entry" behaviour for
+/// free.
+pub(crate) fn guard<R>(fallback: R, body: impl FnOnce() -> R) -> R {
+    clear_last_error();
+    match catch_unwind(AssertUnwindSafe(body)) {
+        Ok(value) => value,
+        Err(payload) => {
+            set_last_error(&format!(
+                "caught a panic at the C boundary: {}",
+                panic_message(&payload)
+            ));
+            fallback
+        }
+    }
+}
+
+fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(text) = payload.downcast_ref::<&str>() {
+        (*text).to_owned()
+    } else if let Some(text) = payload.downcast_ref::<String>() {
+        text.clone()
+    } else {
+        "non-string panic payload".to_owned()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Engine access
+// ---------------------------------------------------------------------------
+
+/// Runs `body` with a shared reference to the engine.
+pub(crate) fn with_engine<R>(hint: &str, body: impl FnOnce(&Engine) -> R) -> Result<R, i32> {
+    ENGINE.with(|cell| match cell.try_borrow() {
+        Ok(guard) => match guard.as_ref() {
+            Some(engine) => Ok(body(engine)),
+            None => Err(not_initialized()),
+        },
+        Err(_) => Err(unavailable(hint)),
+    })
+}
+
+/// Runs `body` with a mutable reference to the engine.
+pub(crate) fn with_engine_mut<R>(
+    hint: &str,
+    body: impl FnOnce(&mut Engine) -> R,
+) -> Result<R, i32> {
+    ENGINE.with(|cell| match cell.try_borrow_mut() {
+        Ok(mut guard) => match guard.as_mut() {
+            Some(engine) => Ok(body(engine)),
+            None => Err(not_initialized()),
+        },
+        Err(_) => Err(unavailable(hint)),
+    })
+}
+
+/// Stores the engine and the shared texture registry.
+pub(crate) fn install(engine: Engine) {
+    TEXTURES.with(|slot| *slot.borrow_mut() = Some(engine.render().shared_textures()));
+    ENGINE.with(|slot| *slot.borrow_mut() = Some(engine));
+}
+
+/// Drops the engine and the shared registry.
+pub(crate) fn uninstall() {
+    ENGINE.with(|slot| *slot.borrow_mut() = None);
+    TEXTURES.with(|slot| *slot.borrow_mut() = None);
+}
+
+/// Returns whether an engine is currently installed.
+pub(crate) fn is_installed() -> bool {
+    ENGINE.with(|cell| {
+        cell.try_borrow()
+            .map(|guard| guard.is_some())
+            .unwrap_or(true)
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Subsystem access
+// ---------------------------------------------------------------------------
+
+/// Runs `body` with the texture registry.
+///
+/// Uses the shared `Rc`, so this works before, during and after a run: texture
+/// handles can be created and destroyed from any callback.
+pub(crate) fn with_textures<R>(body: impl FnOnce(&TextureRegistry) -> R) -> Result<R, i32> {
+    TEXTURES.with(|cell| match cell.borrow().as_ref() {
+        Some(registry) => Ok(body(registry)),
+        None => Err(not_initialized()),
+    })
+}
+
+/// Runs `body` with the renderer.
+///
+/// Inside a `render` callback the renderer is the one the engine lent to the scene;
+/// otherwise it is the engine's own, reached through a normal borrow.
+///
+/// # Safety
+///
+/// The pointer is only read while a callback is running, and the scene adapter
+/// clears it before returning.
+pub(crate) fn with_render<R>(
+    hint: &str,
+    body: impl FnOnce(&mut RenderContext) -> R,
+) -> Result<R, i32> {
+    let current = CURRENT_RENDER.with(Cell::get);
+    if !current.is_null() {
+        // SAFETY: `current` was derived from the `&mut RenderContext` the engine
+        // handed to the running scene, and is cleared as soon as the callback
+        // returns. It is not used by the engine in between.
+        return Ok(body(unsafe { &mut *current }));
+    }
+    with_engine_mut(hint, |engine| body(engine.render_mut()))
+}
+
+/// Runs `body` with the input snapshot.
+pub(crate) fn with_input<R>(hint: &str, body: impl FnOnce(&Input) -> R) -> Result<R, i32> {
+    let current = CURRENT_INPUT.with(Cell::get);
+    if !current.is_null() {
+        // SAFETY: shared reference derived from `&Input` lent to the running
+        // callback; `&Input` aliases freely.
+        return Ok(body(unsafe { &*current }));
+    }
+    with_engine(hint, |engine| body(engine.input()))
+}
+
+/// Runs `body` with the mixer.
+pub(crate) fn with_audio<R>(
+    hint: &str,
+    body: impl FnOnce(&mut AudioSystem) -> R,
+) -> Result<R, i32> {
+    let current = CURRENT_AUDIO.with(Cell::get);
+    if !current.is_null() {
+        // SAFETY: derived from the `&mut AudioSystem` lent to the running callback,
+        // and cleared when it returns.
+        return Ok(body(unsafe { &mut *current }));
+    }
+    with_engine_mut(hint, |engine| body(engine.audio_mut()))
+}
+
+/// Marks a callback as running and installs the subsystems it may use.
+pub(crate) fn enter_callback(
+    render: *mut RenderContext,
+    input: *const Input,
+    audio: *mut AudioSystem,
+) {
+    CURRENT_RENDER.with(|slot| slot.set(render));
+    CURRENT_INPUT.with(|slot| slot.set(input));
+    CURRENT_AUDIO.with(|slot| slot.set(audio));
+    IN_CALLBACK.with(|slot| slot.set(true));
+}
+
+/// Removes the subsystem slots and clears the callback flag.
+pub(crate) fn leave_callback() {
+    IN_CALLBACK.with(|slot| slot.set(false));
+    CURRENT_RENDER.with(|slot| slot.set(core::ptr::null_mut()));
+    CURRENT_INPUT.with(|slot| slot.set(core::ptr::null()));
+    CURRENT_AUDIO.with(|slot| slot.set(core::ptr::null_mut()));
+}
+
+/// Returns whether a scene callback is currently executing.
+pub(crate) fn in_callback() -> bool {
+    IN_CALLBACK.with(Cell::get)
+}
+
+// ---------------------------------------------------------------------------
+// Quit flag and run state
+// ---------------------------------------------------------------------------
+
+/// Records a quit request, to be consumed by the running scene.
+pub(crate) fn request_quit() {
+    QUIT_REQUESTED.store(true, Ordering::SeqCst);
+}
+
+/// Returns and clears the pending quit request.
+pub(crate) fn take_quit_request() -> bool {
+    QUIT_REQUESTED.swap(false, Ordering::SeqCst)
+}
+
+/// Returns whether a quit has been requested but not consumed yet.
+pub(crate) fn quit_requested() -> bool {
+    QUIT_REQUESTED.load(Ordering::SeqCst)
+}
+
+/// Discards a pending quit request.
+pub(crate) fn clear_quit_request() {
+    QUIT_REQUESTED.store(false, Ordering::SeqCst);
+}
+
+/// Marks a `run`/`step` call as in progress.
+pub(crate) fn set_run_in_progress(value: bool) {
+    RUN_IN_PROGRESS.store(value, Ordering::SeqCst);
+}
+
+/// Returns whether a `run`/`step` call is in progress on this thread.
+pub(crate) fn run_in_progress() -> bool {
+    RUN_IN_PROGRESS.load(Ordering::SeqCst)
+}
+
+// ---------------------------------------------------------------------------
+// C string helpers
+// ---------------------------------------------------------------------------
+
+/// Borrows a NUL-terminated UTF-8 string from a C pointer.
+///
+/// Returns `None` for a NULL pointer, invalid UTF-8, or a string whose interior
+/// bytes are unusable; the caller is expected to report
+/// `GIOCHI_ERROR_INVALID_ARGUMENT`.
+pub(crate) fn cstr(pointer: *const c_char) -> Option<String> {
+    if pointer.is_null() {
+        return None;
+    }
+    // SAFETY: the contract states the caller passes a NUL-terminated string that
+    // stays valid for the duration of the call.
+    let text = unsafe { CStr::from_ptr(pointer) };
+    text.to_str().ok().map(str::to_owned)
+}

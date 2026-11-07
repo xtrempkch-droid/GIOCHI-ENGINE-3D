@@ -160,6 +160,24 @@ impl TextureRegistry {
         Ok(self.registry.insert(texture))
     }
 
+    /// Creates a texture from an encoded image held in memory (PNG, JPEG, BMP, …).
+    ///
+    /// The format is sniffed from the bytes, so no size or format is needed. This
+    /// is what `giochi_texture_create_memory` uses, and it is the only way to load
+    /// an image on a target without a filesystem.
+    pub fn create_texture_from_bytes(&self, bytes: &[u8]) -> Result<TextureHandle, GiochiError> {
+        if bytes.is_empty() {
+            return Err(GiochiError::InvalidArgument("image buffer is empty"));
+        }
+
+        let mut texture = self.creator.load_texture_bytes(bytes).map_err(|err| {
+            GiochiError::Asset(format!("failed to decode texture from memory: {err}"))
+        })?;
+        texture.set_blend_mode(BlendMode::Blend);
+
+        Ok(self.registry.insert(texture))
+    }
+
     /// Releases the texture behind `handle`.
     ///
     /// Returns `false` when the handle is `0` or was already destroyed; a double

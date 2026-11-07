@@ -6,16 +6,13 @@
 cannot be expressed in the C form below, the *type* is redesigned — the contract
 is never relaxed.
 
-The header `giochi-engine-capi/include/giochi.h` is generated from this contract
-by `cbindgen` (phase 7) and must match it exactly.
+The header `giochi-engine-capi/include/giochi.h` is generated from the Rust crate
+by `cbindgen` and must match this document exactly; `scripts/gen-header.sh --check`
+enforces that in CI.
 
-Implementation progress: phase 0 delivered the value types and the two version
-queries; phase 1 delivered the platform layer behind `giochi_engine_init`
-(`Platform`, `Window`, `Time`, `GameLoop`); phase 2 delivered the 2D renderer and
-the texture registry behind `giochi_texture_*`/`giochi_render_*`; phase 3 delivered
-the input state behind `giochi_input_*`/`giochi_gamepad_*`; phase 4 delivered the
-asset loader and the audio system behind `giochi_asset_*`, `giochi_sound_*` and
-`giochi_music_*`. The `extern "C"` functions themselves land in phase 7.
+**Status: complete.** Every function below is implemented and tested. The
+per-phase history is in `PROGRESS.md`; the practical guide to consuming the ABI is
+`docs/C_ABI.md`.
 
 ---
 
@@ -64,9 +61,9 @@ typedef uint64_t GiochiFont;   /* reserved in ABI v1, no functions */
   the duration of the call. The engine never retains the pointer.
 * Fixed-size string buffers (`GiochiEngineConfig.title`) are truncated on a UTF-8
   character boundary and always NUL-terminated.
-* Strings returned by the engine (`giochi_get_last_error`) are owned by the
-  engine, valid until the next engine call on the same thread, and must not be
-  freed or modified by the caller.
+* Strings returned by the engine (`giochi_get_last_error`,
+  `giochi_engine_video_driver`) are owned by the engine, valid until the next engine
+  call on the same thread, and must not be freed or modified by the caller.
 
 ### 2.3 Errors
 
@@ -74,10 +71,17 @@ typedef uint64_t GiochiFont;   /* reserved in ABI v1, no functions */
   [§4](#4-error-codes) on failure.
 * Functions that return a handle signal failure by returning `0`; the reason is
   then available through `giochi_get_last_error()`.
+* **Destructors return `int32_t`.** `giochi_texture_destroy`, `giochi_sound_destroy`,
+  `giochi_music_destroy` and `giochi_scene_destroy` report
+  `GIOCHI_ERROR_INVALID_HANDLE` for `0`, an unknown handle or a second destroy — a
+  double destroy is always visible, never a silent success.
 * `giochi_get_last_error()` is **thread-local**. It returns `""` when the last
-  call succeeded.
-* No Rust `panic` may cross the boundary: the C ABI implementation catches
-  unwinding and reports `GIOCHI_ERROR_INTERNAL` (phase 7).
+  call succeeded, because **every function clears the slot on entry**; a stale
+  message can never be mistaken for a new failure.
+* No Rust `panic` may cross the boundary: every exported function is wrapped in a
+  `catch_unwind` guard that reports `GIOCHI_ERROR_INTERNAL` with the panic message.
+* Calls made before `giochi_engine_init`, or from a thread other than the one that
+  initialised the engine, report `GIOCHI_ERROR_NOT_INITIALIZED` rather than racing.
 
 ### 2.4 Reserved fields
 
@@ -275,6 +279,30 @@ Callbacks must not unwind (in C++ terms: must not throw) and must not call
 `update` may run zero, one or several times per `render`. A scene must not assume a
 1:1 ratio, and must not read input in `render` to drive simulation.
 
+#### What a callback may call
+
+A callback runs inside the engine's frame, so it can use exactly what the engine
+lends it. Using anything else returns `GIOCHI_ERROR_SCENE` with a message naming the
+callback the function belongs in — never a crash, never silently wrong behaviour.
+
+| Callback | `giochi_render_*`, `giochi_camera_*`, `giochi_sprite_draw` | `giochi_input_*`, `giochi_gamepad_*` | `giochi_sound_*`, `giochi_music_*`, `giochi_audio_*` | `giochi_texture_*` | `giochi_asset_*` |
+|---|---|---|---|---|---|
+| `on_enter` | yes | no | yes | yes | yes |
+| `update` | no | yes | yes | yes | yes |
+| `render` | yes | no | no | yes | yes |
+| `on_exit` | yes | no | yes | yes | yes |
+| outside a run | yes | yes | yes | yes | yes |
+
+`on_enter`/`on_exit` are delivered by the library *outside* the frame, which is why
+they have the widest access: resource loading and teardown belong there.
+
+The texture registry is shared rather than borrowed (`Rc<TextureRegistry>`, ADR-028),
+so `giochi_texture_*` works from every context, including `update`.
+
+Engine control (`giochi_engine_init`, `giochi_engine_run`, `giochi_engine_run_scene`,
+`giochi_engine_step`, `giochi_engine_shutdown`) is **not** callable from a callback;
+`giochi_engine_request_quit` and `giochi_engine_is_running` are.
+
 The engine calls `on_enter`/`on_exit` exactly once per scene and only while that
 scene is on top of the stack. A scene below an overlay keeps its state and receives
 no callbacks until the overlay is popped; it is **not** re-entered.
@@ -282,9 +310,13 @@ no callbacks until the overlay is popped; it is **not** re-entered.
 #### Scene lifetime and destroying a running scene
 
 `giochi_scene_create` returns a handle; `giochi_engine_run_scene` blocks until the
-scene quits. Destroying the handle of a scene that is currently running is an error
+scene quits. Each call brackets exactly one `on_enter`/`on_exit` pair and leaves the
+engine's scene stack empty, so the same handle can be run again (menu → game → menu).
+
+Destroying the handle of a scene that is currently running is an error
 (`GIOCHI_ERROR_SCENE`) — stop the engine first. Destroying a scene that is not
-running is always safe.
+running is always safe, and destroying it twice reports
+`GIOCHI_ERROR_INVALID_HANDLE`.
 
 #### Transitions
 
@@ -321,28 +353,46 @@ counterparts are `giochi_engine::error::codes`.
 
 ## 5. Functions
 
-Every function below is declared in `giochi.h` in phase 7. "Phase" is the
-implementation phase in `PROGRESS.md`, not the ABI version.
+Every function below is declared in `giochi.h`. The trailing comment is the phase
+of `PROGRESS.md` that implemented it, kept as history; all of them are implemented.
 
 ### 5.1 Version and diagnostics
 
 ```c
-/* Always available. */
-uint32_t    giochi_abi_version(void);      /* == 1               (phase 0, done) */
-uint32_t    giochi_engine_version(void);   /* major<<16|minor<<8|patch (phase 0, done) */
-const char* giochi_get_last_error(void);   /* thread-local, never NULL (phase 7) */
+/* Always available, safe to call before giochi_engine_init. */
+uint32_t    giochi_abi_version(void);      /* == GIOCHI_ABI_VERSION (1) */
+uint32_t    giochi_engine_version(void);   /* major<<16|minor<<8|patch */
+const char* giochi_get_last_error(void);   /* thread-local, never NULL */
+
+/* Diagnostics; return 0 / 0.0 before initialisation instead of failing. */
+const char* giochi_engine_video_driver(void);  /* "kmsdrm", "x11", "dummy", … */
+uint32_t    giochi_engine_scene_depth(void);   /* scenes on the engine's stack */
 ```
+
+`giochi_engine_video_driver` returns the driver SDL actually opened, which is how a
+deployment proves the KMSDRM path was taken. The string is owned by the library and
+valid until the next call on the same thread.
+
+The header also defines the codes from §4 and `GIOCHI_MAX_ASSET_SIZE` (64 MiB) as
+`#define`s, generated from `giochi-engine-capi/src/abi_types.rs`.
 
 ### 5.2 Engine lifecycle
 
 ```c
-int32_t giochi_engine_init(const GiochiEngineConfig* config);  /* phase 1 */
-void    giochi_engine_shutdown(void);                          /* phase 1 */
-int32_t giochi_engine_run(void);         /* blocks until quit     (phase 5) */
-int32_t giochi_engine_run_scene(GiochiScene scene); /* phase 5 */
-int32_t giochi_engine_step(float frame_time);/* one iteration    (phase 5) */
-void    giochi_engine_request_quit(void);                      /* phase 5 */
-int32_t giochi_engine_is_running(void);   /* 1/0                  (phase 5) */
+int32_t giochi_engine_init(const GiochiEngineConfig* config);  /* NULL = defaults */
+void    giochi_engine_shutdown(void);                          /* idempotent */
+int32_t giochi_engine_run(void);              /* blocks until quit */
+int32_t giochi_engine_run_scene(GiochiScene scene);
+int32_t giochi_engine_step(float frame_time); /* one iteration, never sleeps */
+void    giochi_engine_request_quit(void);     /* safe inside a callback */
+int32_t giochi_engine_is_running(void);       /* 1/0 */
+int32_t giochi_engine_reset_quit(void);       /* re-arm after a quit */
+
+/* Statistics, accumulated by run and by step. */
+uint64_t giochi_engine_frames(void);
+uint64_t giochi_engine_steps(void);
+float    giochi_engine_elapsed(void);         /* seconds */
+float    giochi_engine_timestep(void);        /* fixed step, seconds */
 ```
 
 * `giochi_engine_init` may be called only once per process (until shutdown).
@@ -377,8 +427,8 @@ fall back. Hints honoured by the KMSDRM backend: `SDL_KMSDRM_REQUIRE_DRM_MASTER`
 
 ```c
 GiochiTexture giochi_texture_create(const char* path);                       /* phase 2 */
-GiochiTexture giochi_texture_create_memory(const uint8_t* data, size_t len); /* phase 7 */
-void          giochi_texture_destroy(GiochiTexture texture);                 /* phase 2 */
+GiochiTexture giochi_texture_create_memory(const uint8_t* data, size_t len); /* decodes PNG/JPEG */
+int32_t       giochi_texture_destroy(GiochiTexture texture);                 /* phase 2 */
 uint32_t      giochi_texture_width(GiochiTexture texture);                   /* phase 2 */
 uint32_t      giochi_texture_height(GiochiTexture texture);                  /* phase 2 */
 ```
@@ -391,11 +441,19 @@ each call uploads its own texture. Width/height return `0` for an invalid handle
 and destroying an unknown or already-destroyed handle returns
 `GIOCHI_ERROR_INVALID_HANDLE` — a double destroy is always reported.
 
+`giochi_texture_create_memory` decodes an encoded image (PNG, JPEG, BMP, …) whose
+format is sniffed from the bytes, so a target without a filesystem can ship its
+assets inside the executable. NULL or empty input is
+`GIOCHI_ERROR_INVALID_ARGUMENT`.
+
 In the Rust API the same operations are `TextureRegistry::create_texture`,
-`create_texture_from_rgba`, `destroy_texture`, `dimensions` and `len`, or their
-`RenderContext` delegations. `create_texture_from_rgba` has no ABI v1 counterpart
-because it takes a pixel buffer; `giochi_texture_create_memory` covers it in
-phase 7.
+`create_texture_from_bytes`, `create_texture_from_rgba`, `destroy_texture`,
+`dimensions` and `len`, or their `RenderContext` delegations.
+`create_texture_from_rgba` has no ABI v1 counterpart because it takes raw pixels
+whose dimensions the caller would also have to pass.
+
+Destroying a handle that came from the cache leaves a stale cache entry behind; the
+next `giochi_texture_create` for that path detects it and reloads (ADR-022).
 
 ### 5.4 Rendering
 
@@ -469,14 +527,15 @@ Input semantics, implemented in phase 3 and shared by Rust and C:
 
 ```c
 GiochiSound giochi_sound_load(const char* path);                 /* phase 4 */
-void        giochi_sound_destroy(GiochiSound sound);             /* phase 4 */
+int32_t     giochi_sound_destroy(GiochiSound sound);             /* phase 4 */
 int32_t     giochi_sound_play(GiochiSound sound, int32_t loops); /* phase 4 */
 void        giochi_audio_set_volume(int32_t volume);             /* phase 4, 0..=128 */
+int32_t     giochi_audio_volume(void);                           /* phase 4 */
 
 int32_t     giochi_audio_available(void);                        /* phase 4 */
 
 GiochiMusic giochi_music_load(const char* path);                 /* phase 4 */
-void        giochi_music_destroy(GiochiMusic music);             /* phase 4 */
+int32_t     giochi_music_destroy(GiochiMusic music);             /* phase 4 */
 int32_t     giochi_music_play(GiochiMusic music, int32_t loops); /* phase 4 */
 void        giochi_music_pause(void);                            /* phase 4 */
 void        giochi_music_resume(void);                           /* phase 4 */
@@ -523,7 +582,7 @@ Assets larger than `GIOCHI_MAX_ASSET_SIZE` (64 MiB) are rejected with
 
 ```c
 GiochiScene giochi_scene_create(const GiochiSceneCallbacks* callbacks);  /* phase 5 */
-void        giochi_scene_destroy(GiochiScene scene);                     /* phase 5 */
+int32_t     giochi_scene_destroy(GiochiScene scene);                     /* phase 5 */
 ```
 
 `giochi_scene_create` copies the callback table and returns `0` if `callbacks`,
@@ -543,11 +602,13 @@ void        giochi_scene_destroy(GiochiScene scene);                     /* phas
 
 ---
 
-## 7. Compliance checklist for phase 7
+## 7. Compliance checklist
 
-1. `giochi.h` is generated by `cbindgen` and diffed against the committed header.
-2. Every error path sets the thread-local message.
-3. No function unwinds across the boundary (`catch_unwind` at the boundary).
-4. `rust_ffi`, `c_smoke` and `python_smoke` tests exercise version, lifecycle,
-   texture and render paths.
-5. `GIOCHI_ABI_VERSION` is `1` and matches `giochi_abi_version()`.
+| Requirement | Where it is enforced |
+|---|---|
+| `giochi.h` is generated by `cbindgen` and diffed against the committed header | `scripts/gen-header.sh --check`, run by `scripts/ffi-smoke.sh` and CI |
+| Every error path sets the thread-local message | `state::fail` / `invalid_argument` / `unavailable`, asserted throughout `tests/rust_ffi.rs` |
+| No function unwinds across the boundary | every export is wrapped in `state::guard` (`catch_unwind`) |
+| `rust_ffi`, `c_smoke` and `python_smoke` exercise version, lifecycle, texture, render and scene paths | `cargo test -p giochi-engine-capi` and `scripts/ffi-smoke.sh` |
+| `GIOCHI_ABI_VERSION` is `1` and matches `giochi_abi_version()` | `tests::abi_version_matches_contract` |
+| The C structs have the documented size and alignment | `tests/rust_ffi.rs::abi_type_layouts_match_the_contract` and `giochi-engine/tests/abi_layout.rs` |

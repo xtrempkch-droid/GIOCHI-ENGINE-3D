@@ -35,7 +35,10 @@ pub struct RenderContext {
     // Dropped before `_context`: the canvas must be destroyed while SDL is still
     // initialised.
     canvas: WindowCanvas,
-    textures: TextureRegistry,
+    // `Rc` so the C ABI can hold the registry independently of the canvas: every
+    // `TextureRegistry` method takes `&self`, so a shared copy lets `giochi_texture_*`
+    // work from inside a scene callback, where the engine is already borrowed.
+    textures: Rc<TextureRegistry>,
     resources: ResourceManager,
     camera: Camera,
     _context: Rc<SdlContext>,
@@ -68,7 +71,7 @@ impl RenderContext {
 
         Ok(RenderContext {
             canvas,
-            textures,
+            textures: Rc::new(textures),
             resources: ResourceManager::new(),
             camera: Camera::new(Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32)),
             _context: context,
@@ -82,6 +85,16 @@ impl RenderContext {
     /// `draw_*`, `present`), so prefer the delegating methods below in draw loops.
     pub fn textures(&self) -> &TextureRegistry {
         &self.textures
+    }
+
+    /// A shared handle to the texture registry.
+    ///
+    /// Every registry operation takes `&self`, so this clone is usable while the
+    /// context itself is borrowed mutably. That is what the C ABI needs:
+    /// `giochi_texture_create` must work from inside a scene callback, where the
+    /// engine is already holding `&mut RenderContext` (see `docs/C_ABI.md`).
+    pub fn shared_textures(&self) -> Rc<TextureRegistry> {
+        Rc::clone(&self.textures)
     }
 
     /// Loads a texture and returns its handle. See [`TextureRegistry::create_texture`].
