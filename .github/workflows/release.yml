@@ -33,7 +33,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build release
-        run: cargo build --release --workspace --target x86_64-unknown-linux-gnu
+        # Two invocations, not one with `--examples` added: `--examples` *filters* the
+        # target selection rather than adding to it, so `--workspace --examples` builds the
+        # example binaries and the libraries they need, and silently skips `giochi-demo`
+        # and the `libgiochi` cdylib. That is how 0.2.0 nearly shipped a 0.1.1 library
+        # under a 0.2.0 header -- caught by `verify-release-artifact.sh`, which compares
+        # the archive's header against the archive's library.
+        run: |
+          cargo build --release --workspace --target x86_64-unknown-linux-gnu
+          cargo build --release --workspace --examples --target x86_64-unknown-linux-gnu
 
       - name: Smoke the release binary
         # A release build is where LTO and codegen-units settings can break things that
@@ -53,6 +61,12 @@ jobs:
           cp giochi-engine-capi/include/giochi.h dist/include/
           cp target/x86_64-unknown-linux-gnu/release/libgiochi.so dist/lib/
           cp target/x86_64-unknown-linux-gnu/release/libgiochi.a dist/lib/
+          # The 3D examples. They are separate binaries, not subcommands of the demo:
+          # they need a GL context and the 2D demo deliberately never asks for one.
+          mkdir -p dist/bin
+          for example in cube_demo mini_fps ball_balance; do
+            cp "target/x86_64-unknown-linux-gnu/release/examples/$example" dist/bin/
+          done
           # The Lua binding's reference game ships with the binary that runs it.
           cp giochi-engine-lua/examples/mini_game.lua dist/lua/
           cp README.md LICENSE CHANGELOG.md PROGRESS.md dist/
@@ -89,7 +103,11 @@ jobs:
           key: aarch64-release
 
       - name: Build release for ARM64
-        run: ./scripts/build-aarch64.sh --release --workspace
+        # Two invocations for the same reason as the x86_64 job: `--examples` filters the
+        # target selection instead of adding to it.
+        run: |
+          ./scripts/build-aarch64.sh --release --workspace
+          ./scripts/build-aarch64.sh --release --workspace --examples
 
       - name: Package
         run: |
@@ -98,6 +116,10 @@ jobs:
           cp giochi-engine-capi/include/giochi.h dist/include/
           cp target/aarch64-unknown-linux-gnu/release/libgiochi.so dist/lib/
           cp target/aarch64-unknown-linux-gnu/release/libgiochi.a dist/lib/
+          mkdir -p dist/bin
+          for example in cube_demo mini_fps ball_balance; do
+            cp "target/aarch64-unknown-linux-gnu/release/examples/$example" dist/bin/
+          done
           cp giochi-engine-lua/examples/mini_game.lua dist/lua/
           cp README.md LICENSE CHANGELOG.md PROGRESS.md dist/
           cp -r docs assets dist/
@@ -114,6 +136,12 @@ jobs:
     needs: [build-x86_64, build-aarch64]
     runs-on: ubuntu-latest
     steps:
+      # The verification steps below run repository scripts, and this job starts from an
+      # empty workspace: without a checkout they fail with "No such file or directory".
+      # That went unnoticed until 0.2.0 because the step was added after the previous
+      # tag had already been released.
+      - uses: actions/checkout@v7
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -132,7 +160,8 @@ jobs:
             echo
             echo "Each archive contains the demo binary, the C ABI (\`include/giochi.h\`,"
             echo "\`lib/libgiochi.so\`, \`lib/libgiochi.a\`), the Lua reference game"
-            echo "(\`lua/mini_game.lua\`), the docs and the assets."
+            echo "(\`lua/mini_game.lua\`), the docs, the assets, and the three 3D examples"
+            echo "in \`bin/\` (\`cube_demo\`, \`mini_fps\`, \`ball_balance\`)."
             echo
             echo "Requires libdrm, libgbm and libEGL on the target (see docs/KMSDRM.md)."
             echo

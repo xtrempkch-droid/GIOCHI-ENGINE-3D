@@ -76,6 +76,17 @@ for path in giochi-demo include/giochi.h lib/libgiochi.so lib/libgiochi.a \
             assets/player.png assets/player.bmp assets/checker.png assets/checker.bmp; do
     check "$path" test -e "$work/$path"
 done
+# The 3D examples are how a user sees the renderer; an archive whose only 3D artifact is
+# a shared library is one nobody can run.
+for example in cube_demo mini_fps ball_balance; do
+    if [[ -x "$work/bin/$example" ]]; then
+        echo "  ok    bin/$example present"
+    else
+        echo "  FAIL  bin/$example missing from the archive" >&2
+        failures=$((failures + 1))
+    fi
+done
+
 for doc in C_ABI_CONTRACT ARCHITECTURE KMSDRM CROSS_COMPILE API_GUIDE C_ABI LUA_BINDING DECISIONS; do
     check "docs/$doc.md" test -f "$work/docs/$doc.md"
 done
