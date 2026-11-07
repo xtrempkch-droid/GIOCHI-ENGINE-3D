@@ -172,7 +172,8 @@ jobs:
             echo
             echo "Requires libdrm, libgbm and libEGL on the target (see docs/KMSDRM.md)."
             echo
-            echo "See CHANGELOG.md for the full history."
+            echo "See CHANGELOG.md for the full history, and PROGRESS.md for what was"
+            echo "validated where — including which claims were checked on real hardware."
           } > release-notes.md
 
       - name: Check both archives are present
@@ -233,5 +234,9 @@ jobs:
           # Not a draft: the two verification steps above are the gate, and they block.
           # A draft only helps if a human remembers to run the thing; these run it.
           draft: false
-          generate_release_notes: true
+          # Deliberately off. `generate_release_notes` appends GitHub's own "What's Changed"
+          # to the supplied body, and on an update it appends it to the *existing* body --
+          # so re-running the release left the v0.2.0 page with the same section twice.
+          # The body above is now the whole body, which makes publishing idempotent.
+          generate_release_notes: false
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
