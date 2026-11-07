@@ -60,6 +60,22 @@ affine-only restriction is now documented on `transform_point`.
 The balance game's camera and marker layout, extracted from the example so that "are the
 indicators on screen" became a test instead of an opinion.
 
+### Fixed — the phase-13 acceptance criterion could not be observed
+
+The criterion is that a cube's top face reads brighter than a side face. It could not be,
+and nothing said so: `mini_fps` drew 2-metre obstacles from a walker whose eyes are at
+1.7 m, so every top face sat above the camera and the player only ever saw sides. The
+lighting tests asserted the behaviour on a cube they placed themselves, which is a good
+unit test and not the acceptance check.
+
+- `mini_fps` now also draws 24 **low crates** (0.6 m, between the obstacles) and reports the
+  count, so a top face is genuinely on screen while walking and CI can assert it is.
+- `a_crates_top_face_reads_brighter_than_its_side_the_phase_13_acceptance_check` measures
+  it with the example's own numbers — crate size, eye height, and the exact light
+  `mini_fps` sets — projecting a point on the top face and one on the front face with
+  `Mat4::project_point` and sampling a patch around each, rather than guessing where the
+  faces landed.
+
 ### Fixed — 3D by the lighting work
 
 - `read_pixels`-based assertions initially passed for the wrong reason: the sample bands

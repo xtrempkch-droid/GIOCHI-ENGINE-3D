@@ -418,6 +418,106 @@ fn a_cube_lit_from_above_shows_a_bright_top_face() {
     );
 }
 
+/// Mean luma of a small square patch centred on a pixel.
+fn patch_at(pixels: &[u8], x: usize, y: usize, half: usize) -> f32 {
+    let mut total = 0.0;
+    let mut count = 0.0;
+    for py in y.saturating_sub(half)..=(y + half).min(HEIGHT as usize - 1) {
+        for px in x.saturating_sub(half)..=(x + half).min(WIDTH as usize - 1) {
+            let at = (py * WIDTH as usize + px) * 4;
+            total += 0.299 * pixels[at] as f32
+                + 0.587 * pixels[at + 1] as f32
+                + 0.114 * pixels[at + 2] as f32;
+            count += 1.0;
+        }
+    }
+    if count == 0.0 {
+        0.0
+    } else {
+        total / count
+    }
+}
+
+/// Where a world point lands, in `glReadPixels` pixel coordinates (row 0 is the bottom).
+fn to_pixels(camera: &Camera3D, point: Vec3) -> (usize, usize) {
+    let ndc = camera
+        .with_drawable_size(WIDTH, HEIGHT)
+        .view_projection()
+        .expect("valid camera")
+        .project_point(point)
+        .unwrap_or_else(|| panic!("{point:?} is behind the camera"));
+
+    let x = ((ndc.x * 0.5 + 0.5) * WIDTH as f32) as usize;
+    // ndc.y of -1 is the bottom of the frame, which is row 0 of the readback.
+    let y = ((ndc.y * 0.5 + 0.5) * HEIGHT as f32) as usize;
+    (x.min(WIDTH as usize - 1), y.min(HEIGHT as usize - 1))
+}
+
+#[test]
+fn a_crates_top_face_reads_brighter_than_its_side_the_phase_13_acceptance_check() {
+    let Some((_platform, window)) = headless_context() else {
+        eprintln!("skipped: no OpenGL ES driver available");
+        return;
+    };
+    let mut render = RenderContext3D::new(context::create(&window).expect("context"));
+    let shader = render
+        .create_builtin_shader(BuiltinShader::Phong)
+        .expect("phong");
+    // The crate `mini_fps` draws: 0.6 units, resting on the floor, seen by a walker whose
+    // eyes are 1.7 units up. These are that example's own numbers, not convenient ones.
+    let crate_size = 0.6_f32;
+    let crate_mesh = render.create_cube_mesh(crate_size).expect("cube");
+    let camera = Camera3D::from_parts(Vec3::new(0.0, 1.7, 6.0), Vec3::new(0.0, 0.3, 0.0), Vec3::UP)
+        .with_clip_planes(0.1, 100.0);
+    // Exactly the light `mini_fps` sets.
+    let light = DirectionalLight::sun()
+        .with_direction(Vec3::new(0.4, -1.0, 0.3))
+        .with_specular(0.3, 24.0);
+
+    render.set_light(light);
+    render.set_clear_color(Color3D::BLACK);
+    render.begin_frame(&window);
+    render.resize(WIDTH, HEIGHT);
+    render
+        .draw_mesh_colored(
+            crate_mesh,
+            shader,
+            &Transform3D::from_translation(Vec3::new(0.0, crate_size * 0.5, 0.0)),
+            &camera,
+            Color3D::WHITE,
+        )
+        .expect("draw");
+    let error = render.take_gl_error();
+    assert_eq!(error, 0, "GL error 0x{error:04x} drawing the crate");
+    let pixels = render.read_pixels(WIDTH, HEIGHT).expect("read back");
+
+    // A point on the top face and a point on the face turned towards the camera. Both are
+    // chosen from the geometry, so the patches cannot land on the wrong surface: the top
+    // face is at y = crate_size, the front at z = +half.
+    let half = crate_size * 0.5;
+    let (top_x, top_y) = to_pixels(&camera, Vec3::new(0.0, crate_size, 0.0));
+    let (side_x, side_y) = to_pixels(&camera, Vec3::new(0.0, crate_size * 0.5, half));
+
+    let top = patch_at(&pixels, top_x, top_y, 3);
+    let side = patch_at(&pixels, side_x, side_y, 3);
+
+    // "Face superior mais clara que lateral", as a measurement. The margin is large because
+    // the difference is: the sun is 0.89 of the way to straight up, so the top face gets
+    // ambient + 0.7 * 0.89, while the front face's normal points away from the light and
+    // gets ambient alone.
+    assert!(
+        top > side + 30.0,
+        "the top face must read brighter than the front face: \
+         top ({top_x},{top_y})={top:.1}, front ({side_x},{side_y})={side:.1}"
+    );
+    // And both must actually be on the crate, not on the black background behind it.
+    assert!(top > 60.0, "the top patch is on the background: {top:.1}");
+    assert!(
+        side > 20.0,
+        "the front patch is on the background: {side:.1}"
+    );
+}
+
 #[test]
 fn the_light_is_sanitised_before_it_reaches_the_shader() {
     let mut scene = scene_or_skip!();

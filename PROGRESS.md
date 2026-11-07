@@ -30,8 +30,8 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 407 testes, 0 falhas
-      (209 das fases 0–8 + 198 da crate 3D)
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 408 testes, 0 falhas
+      (209 das fases 0–8 + 199 da crate 3D)
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
 - [x] `cargo doc --workspace --no-deps --document-private-items` (0 warnings)
 - [x] `scripts/gen-header.sh --check` — `giochi.h` em sincronia com o crate
@@ -169,6 +169,26 @@ com a luz apontada para qualquer lado. A correcção foi aproximar a câmara par
 (silhueta de ~60 px, o equador continua em `y = HEIGHT/2`) e amostrar um **rectângulo**
 estreito sobre o eixo vertical, que se prova dentro da silhueta. O perigo real é que o
 teste era verde: um teste de pixel satisfeito pela geometria errada é pior do que nenhum.
+
+### O critério de aceitação não era observável
+
+O prompt pede "`mini_fps` com cubos iluminados (face superior mais clara que lateral)".
+Durante a fase 13 isso não era observável, e nada o dizia: o `mini_fps` desenhava
+obstáculos de 2 m vistos por um caminhante com os olhos a 1,7 m, portanto a face de cima
+de cada cubo ficava sempre **acima** da câmara e só se viam as laterais. Os testes de
+iluminação verificavam o comportamento num cubo colocado por eles próprios — é um bom
+teste unitário e não é a verificação de aceitação.
+
+Correcção:
+
+- O `mini_fps` passa a desenhar **24 caixotes baixos** (0,6 m, entre os obstáculos), e
+  reporta quantos desenhou. É isso que põe uma face de cima no ecrã enquanto se caminha, e
+  o CI passa a exigir que sejam mais de zero.
+- `a_crates_top_face_reads_brighter_than_its_side_the_phase_13_acceptance_check` mede-o com
+  os números do próprio exemplo — tamanho do caixote, altura dos olhos e a luz exacta do
+  `mini_fps` — projectando um ponto na face de cima e outro na frontal com
+  `Mat4::project_point` e amostrando um pequeno quadrado à volta de cada. Projectar em vez
+  de adivinhar onde as faces calharam é o que impede as amostras de caírem no fundo.
 
 ### O que a fase 13 não muda
 

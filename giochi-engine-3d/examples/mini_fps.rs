@@ -1,7 +1,12 @@
 //! First-person walker — the phase 12 acceptance check.
 //!
-//! A textured floor, some cubes to navigate around, WASD movement, mouse look, TAB to
-//! toggle wireframe and ESC to release the mouse (a second ESC quits).
+//! A textured floor, some cubes to navigate around, low crates to look down on, WASD
+//! movement, mouse look, TAB to toggle wireframe and ESC to release the mouse (a second
+//! ESC quits).
+//!
+//! The crates exist for the phase-13 acceptance check: a top face is only on screen if the
+//! camera is above it, and a walker at eye height sees nothing but the sides of anything
+//! taller than itself.
 //!
 //! "Playable" is not something a test can assert, so this example is built to be
 //! *measurable* instead: it prints the frame rate once a second and can run
@@ -36,6 +41,13 @@ const SPACING: f32 = 6.0;
 const OBSTACLE_SIZE: f32 = 2.0;
 /// Eye height above the floor.
 const EYE_HEIGHT: f32 = 1.7;
+/// Edge length of the low crates.
+///
+/// Deliberately **below** the eye. The phase-13 acceptance criterion is that a cube's top
+/// face reads brighter than its side, and with obstacles taller than the camera no top face
+/// is ever visible — the player looks up at them. These crates put a top face in view so
+/// the lighting can be judged rather than merely trusted.
+const CRATE_SIZE: f32 = 0.6;
 
 #[derive(Debug, Default)]
 struct Options {
@@ -135,6 +147,10 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     controller.set_mouse_captured(mouse.as_ref(), !options.auto);
 
     let mut wireframe = false;
+    // Reported at the end: a crate whose top face is visible is what makes the phase-13
+    // acceptance criterion observable at all, and "zero crates drawn" would mean the
+    // criterion is being asserted on geometry the player never sees.
+    let mut crates_drawn: u64 = 0;
     let mut frames: u64 = 0;
     let mut fps_timer: f32 = 0.0;
     let mut fps_frames: u32 = 0;
@@ -151,7 +167,14 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         let events = platform.poll_events();
         for event in &events {
             if quit_signal(event) != QuitSignal::None {
-                finish(&mut render, [floor, cube], shader, frames, wireframe);
+                finish(
+                    &mut render,
+                    [floor, cube],
+                    shader,
+                    frames,
+                    wireframe,
+                    crates_drawn,
+                );
                 return Ok(());
             }
             // TAB toggles wireframe: the fastest way to see whether a face is missing
@@ -191,6 +214,7 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         let (width, height) = render.drawable_size();
         let camera = controller.camera().with_drawable_size(width, height);
 
+        crates_drawn = 0;
         render.begin_frame(&window);
         if wireframe {
             render.set_wireframe(true);
@@ -227,6 +251,29 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
                     &camera,
                     Color3D::new(0.85, 0.62, 0.35, 1.0),
                 )?;
+
+                // A crate between this obstacle and the next one along X. Low enough that
+                // the camera looks down on it, which is the only way a top face is ever on
+                // screen, and a slightly different colour so the two are distinguishable in
+                // a capture.
+                let crate_x = x + SPACING * 0.5;
+                if crate_x.abs() < FLOOR_SIZE * 0.45 {
+                    crates_drawn += 1;
+                    let crate_model =
+                        Transform3D::from_translation(Vec3::new(crate_x, CRATE_SIZE * 0.5, z))
+                            .with_rotation(Quat::from_axis_angle(
+                                Vec3::UP,
+                                (row * OBSTACLES + column) as f32 * 0.61,
+                            ));
+
+                    render.draw_mesh_colored(
+                        cube,
+                        shader,
+                        &crate_model,
+                        &camera,
+                        Color3D::new(0.62, 0.70, 0.82, 1.0),
+                    )?;
+                }
             }
         }
 
@@ -270,7 +317,14 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
 
         if let Some(limit) = options.frames {
             if frames >= limit {
-                finish(&mut render, [floor, cube], shader, frames, wireframe);
+                finish(
+                    &mut render,
+                    [floor, cube],
+                    shader,
+                    frames,
+                    wireframe,
+                    crates_drawn,
+                );
                 return Ok(());
             }
             continue;
@@ -295,8 +349,12 @@ fn finish(
     shader: u64,
     frames: u64,
     wireframe: bool,
+    crates_drawn: u64,
 ) {
-    println!("{frames} frames rendered, no GL error (wireframe {wireframe})");
+    println!(
+        "{frames} frames rendered, no GL error (wireframe {wireframe}); \
+         {crates_drawn} low crates on the last frame"
+    );
 
     for mesh in meshes {
         render.destroy_mesh(mesh);
