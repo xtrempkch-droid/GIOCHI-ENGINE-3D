@@ -142,6 +142,13 @@ jobs:
       # tag had already been released.
       - uses: actions/checkout@v7
 
+      - name: Install runtime dependencies
+        # The verification below compiles and *runs* the archive's C consumer, so the
+        # runner needs what the archive needs: libgiochi.so has a NEEDED entry for
+        # SDL2, SDL2_image and SDL2_mixer, and without them the consumer fails to link
+        # with a wall of "undefined reference to SDL_*" rather than a useful message.
+        run: sudo ./scripts/install-deps.sh
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -193,11 +200,17 @@ jobs:
           tar -C "$work" -xzf "$archive"
           for path in giochi-demo include/giochi.h lib/libgiochi.so lib/libgiochi.a \
                       lua/mini_game.lua assets/player.bmp assets/checker.bmp \
+                      bin/cube_demo bin/mini_fps bin/ball_balance \
                       docs/KMSDRM.md docs/C_ABI_CONTRACT.md; do
             test -e "$work/$path" || { echo "missing: $path" >&2; exit 1; }
           done
           file "$work/giochi-demo" | grep -q 'ARM aarch64'
           file "$work/lib/libgiochi.so" | grep -q 'ARM aarch64'
+          # The 3D examples are how a console user sees the renderer at all.
+          for example in cube_demo mini_fps ball_balance; do
+            file "$work/bin/$example" | grep -q 'ARM aarch64' \
+              || { echo "not AArch64: bin/$example" >&2; exit 1; }
+          done
           grep -q 'For version' "$work/include/giochi.h"
           echo "ARM64 archive layout OK"
 
