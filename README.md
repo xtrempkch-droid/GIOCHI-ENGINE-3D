@@ -54,7 +54,7 @@ is authoritative.
 
 | Requirement | Notes |
 |---|---|
-| Rust stable | `rustup toolchain install stable`; the workspace declares `rust-version = 1.75` |
+| Rust stable | `rustup toolchain install stable`; the verified minimum is **1.82** (`rust-version` in `Cargo.toml`, driven by `mlua`) |
 | A C toolchain | `build-essential` (GCC or Clang) |
 | CMake ≥ 3.5 | SDL2 is built from source by the `bundled` feature, so a system SDL2 is **not** needed |
 | `pkg-config` | locates optional SDL2 backends |
@@ -63,9 +63,12 @@ Optional backends are picked up when their headers are present; missing ones are
 simply disabled:
 
 ```bash
-sudo apt install libasound2-dev libudev-dev libdrm-dev libgbm-dev \
-                 libgl1-mesa-dev libegl1-mesa-dev
+sudo scripts/install-deps.sh   # the whole list, in one place
 ```
+
+That script is what CI runs, so a local build and a CI build use the same package set.
+Copying it into a job is how the X11 headers and the SDL2 satellites once went missing
+from CI while working perfectly on a developer desktop.
 
 On Ubuntu 24.04+ the bundled CMake files are older than the policy minimum CMake 4
 accepts. [`cmake/aarch64-linux-toolchain.cmake`](cmake/aarch64-linux-toolchain.cmake)

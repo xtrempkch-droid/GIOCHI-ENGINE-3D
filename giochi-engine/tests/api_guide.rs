@@ -191,9 +191,17 @@ impl Scene for GuideScene {
 
     fn update(&mut self, _time: Time, input: &Input, audio: &mut AudioSystem) {
         self.updates += 1;
-        // The guide's "ignore audio errors" rule.
+        // The guide's "ignore audio errors" rule. Which error comes back depends on
+        // the machine, and both are documented:
+        //   * handle 0 is invalid                          -> INVALID_HANDLE
+        //   * no audio device, so the mixer is silent      -> AUDIO (ADR-021)
+        // A CI runner has no sound card, a developer desktop does; asserting one of the
+        // two would make this test environment-dependent, which it must not be.
         if let Err(error) = audio.play_sound(0, 0) {
-            assert_eq!(error.code(), codes::INVALID_HANDLE);
+            assert!(
+                matches!(error.code(), codes::INVALID_HANDLE | codes::AUDIO),
+                "play_sound(0) must report an invalid handle or a silent mixer, got {error}"
+            );
         }
         assert!(!input.key_down(KEY_SPACE));
     }

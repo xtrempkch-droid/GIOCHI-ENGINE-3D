@@ -52,8 +52,8 @@ Verificações manuais da fase:
   devolvida ao host.
 - `docs/LUA_BINDING.md`, `docs/DECISIONS.md` (ADR-030, ADR-031),
   `docs/ARCHITECTURE.md` §5c, `README.md` com secção "From Lua", `CHANGELOG.md`.
-- `ci.yml` corre `mini_game.lua` no job de smoke; `release.yml` empacota
-  `lua/mini_game.lua` e testa-o com o binário de release.
+- `ci.yml` corre `mini_game.lua` no job de smoke; `cross-compile.yml` faz o link ARM64
+  real; `release.yml` empacota os dois alvos com a ABI C e o `mini_game.lua`.
 - Testes: `giochi-engine-lua/tests/lua_smoke.rs` e `tests/mini_game_script.rs`.
 
 ## Auditoria final do prompt mestre
@@ -80,6 +80,39 @@ capi, `mini_game.lua`); `MAX_FRAME_TIME = 0.25` e `FIXED_TIMESTEP = 1/60`;
 biblioteca (só em `#[cfg(test)]`); zero `todo!()`; zero `unsafe` fora da capi, onde
 cada bloco tem `// SAFETY:`; nenhuma `pub fn` com generics ou lifetime explícito;
 nenhum campo público com `Rc`/`Arc`/`Box`/`String`/`Vec`/`HashMap`.
+
+## Saúde do repositório (verificação de 2026-11-07)
+
+O CI no GitHub **falhava em todos os jobs** desde a fase 6. Causas encontradas e
+corrigidas:
+
+1. **Faltavam os headers X11** (`libxext-dev` e o resto do conjunto). O SDL2 `bundled`
+   configura o backend X11 em qualquer runner que tenha bibliotecas X11 e falha com
+   *"Missing Xext.h, maybe you need to install the libxext-dev"*. Passava localmente
+   porque esta máquina tem os headers.
+2. **Faltavam os satélites SDL2 no host** (`libsdl2-image/mixer/ttf-dev`): o `bundled`
+   só compila o SDL2 core, e o link da `cdylib` falha com `cannot find -lSDL2_mixer`.
+   Já estava documentado para ARM64; nunca tinha sido testado em x86_64.
+3. **Lista de pacotes duplicada em quatro jobs** — a razão de 1 e 2 passarem
+   despercebidos. Substituída por `scripts/install-deps.sh`, uma só lista.
+4. **Três workflows tinham sido substituídos por versões reduzidas**, e os commits
+   `feat(phase-7)`/`feat(phase-8)` (`git add -A`) levaram-nas consigo: `ci.yml` sem os
+   jobs `ffi`/`smoke`/cross-check. Os três foram restaurados e passaram a chamar os
+   scripts em vez de duplicarem comandos.
+5. **Teste dependente do ambiente**: `api_guide.rs` exigia `INVALID_HANDLE` de
+   `play_sound(0, 0)`, mas sem placa de som o mixer devolve `AUDIO` (ADR-021). Passava
+   numa máquina com áudio, falhava num runner sem ele.
+
+Também corrigido: `rust-version` declarava **1.75**, que nenhuma combinação das
+dependências fixadas satisfaz (`mlua 0.10` exige 1.79; `size_of` no prelude exige 1.80).
+Sondado com `cargo +1.79` (falha) e `cargo +1.82` (passa): o piso declarado é agora
+**1.82**, com o mesmo número em `clippy.toml` e no README. ADR-033. Efeito imediato: o
+clippy passou a sugerir `Result::inspect` (estável desde 1.76) em `read_asset_vec`, que
+estava escrito à moda antiga por causa do piso falso.
+
+Validação: a matriz completa de CI espelhada num contentor `ubuntu:24.04` limpo — fmt,
+clippy, build, 209 testes, doc, header, FFI (C + Python), demo, os cinco exemplos e o
+`mini_game.lua` — **16/16 passos**, 0 falhas.
 
 ## Roadmap
 
@@ -117,8 +150,8 @@ As oito fases do prompt mestre estão completas. Trabalho futuro, por ordem de v
   continua sendo `cargo check` e o link é verificado no CI (receita multiarch) e em
   container limpo. ADR-027.
 - Até a fase 6 o alvo de produção não linkava (`cargo check` não linka): faltava o
-  linker no `.cargo/config.toml` **e** os satélites ARM64. Corrigido e agora
-  coberto pelo job `link` do `cross-compile.yml`.
+  linker no `.cargo/config.toml` **e** os satélites ARM64. Corrigido; o link é
+  verificado pelo job `link` do `cross-compile.yml` e pelo `build-aarch64` da release.
 - `giochi.h` é gerado pelo `cbindgen` 0.27: quem não o tiver instalado vê o gate do
   header ser saltado em `scripts/gates.sh`, mas o CI falha se estiver desatualizado.
 - A ABI v1 não expõe pilha de cenas: `giochi_engine_run_scene` deixa a pilha vazia no

@@ -788,3 +788,31 @@ the same change: `FrameClock` had neither `#[repr(C)]` nor `_reserved`, and
 with `FrameClock` gaining its reserved tail. Verified by breaking the rule on purpose
 (removing `#[repr(C)]` from `Sprite`, shrinking `RunStats::_reserved` to `[u32; 2]`):
 each failure names the file, the line and the rule.
+
+## ADR-033 — The MSRV is verified, and it is not the one the prompt suggested
+
+**Context.** The workspace declared `rust-version = "1.75"`. Nothing checked it. A
+declared MSRV is a promise to whoever is on an older toolchain: cargo will refuse to build
+with a clear message instead of failing somewhere inside a dependency.
+
+Probing it (`cargo +1.75.0 build --workspace`, then 1.79, 1.82) shows the promise was
+already false:
+
+* `mlua 0.10.5` requires rustc **1.79**;
+* `size_of` as a bare prelude function needs **1.80** (used by `tests/abi_layout.rs`);
+* 1.79 fails, **1.82 builds the whole workspace**.
+
+The prompt's own dependency list (`mlua = "0.10"`) makes 1.75 unreachable, so the
+specification contradicts itself here; the declaration is what has to change.
+
+**Decision.** `rust-version = "1.82"`, with a comment saying how it was measured and that
+bumping a dependency requires probing again. The README's prerequisite row names the same
+number.
+
+**Why not keep 1.75 and pin `mlua` lower.** Downgrading the reference binding to satisfy a
+number nobody uses would trade a real capability for a cosmetic claim. The honest fix is to
+publish the floor the project actually has.
+
+**Consequences.** Anyone on 1.75–1.81 now gets cargo's clear "requires rustc 1.82" message
+instead of a confusing failure inside `mlua`. The floor is a measured value, not a guess:
+1.79 was tried and failed, 1.82 was tried and passed.

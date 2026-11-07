@@ -24,6 +24,17 @@ The authoritative reference for the external surface is
 [docs/C_ABI_CONTRACT.md](docs/C_ABI_CONTRACT.md). If a type does not fit C, the
 type is redesigned — the contract is not relaxed.
 
+## Environment
+
+```bash
+sudo scripts/install-deps.sh          # native build dependencies (Debian/Ubuntu)
+sudo scripts/install-deps.sh --cross  # adds the ARM64 cross toolchain
+```
+
+One script, used by every workflow. Do not copy its package list into a CI job: an
+incomplete copy is invisible until the build fails on a machine that lacks what your
+machine happens to have, which is exactly how the CI stayed red through phases 6–8.
+
 ## Workflow
 
 1. Read `PROGRESS.md` and pick the next phase. One phase per session.
@@ -56,11 +67,17 @@ If a gate cannot pass for an environmental reason, document the blocker in
 `PROGRESS.md` and leave the phase open. Do not mark it complete.
 
 The same gates run in GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)),
-plus a smoke job that executes the demo and every example headlessly
-(`SDL_VIDEODRIVER=dummy`). [`cross-compile.yml`](.github/workflows/cross-compile.yml)
-builds and inspects the ARM64 binaries on every relevant push, and
-[`release.yml`](.github/workflows/release.yml) packages both targets for a tagged
-release. A pull request is expected to be green on all three.
+plus a `smoke` job that executes the demo, every example and the Lua reference game
+headlessly (`SDL_VIDEODRIVER=dummy`), and an `ffi` job that compiles `c_smoke.c` against
+the generated header and runs the Python consumer.
+
+[`cross-compile.yml`](.github/workflows/cross-compile.yml) adds the job `ci.yml` cannot
+afford on every push: a real ARM64 **link** with the multiarch SDL2 packages.
+[`release.yml`](.github/workflows/release.yml) packages both targets for a tag.
+
+All three call the same scripts rather than reimplementing them, so a fix lands once:
+`scripts/install-deps.sh`, `scripts/check-aarch64.sh`, `scripts/build-aarch64.sh`,
+`scripts/gen-header.sh`, `scripts/ffi-smoke.sh`, `scripts/gates.sh`.
 
 ## Style
 

@@ -76,10 +76,9 @@ pub fn read_asset_vec(path: &str) -> Result<Vec<u8>, GiochiError> {
     let size = asset_size(path)?;
     fs::read(path)
         .map_err(|err| GiochiError::Asset(format!("failed to read asset '{path}': {err}")))
-        .map(|bytes| {
-            debug_assert_eq!(bytes.len(), size);
-            bytes
-        })
+        // The file could have been rewritten between the two syscalls; catch that in
+        // debug builds instead of handing back a length the caller was not told about.
+        .inspect(|bytes| debug_assert_eq!(bytes.len(), size))
 }
 
 /// Returns the file name of `path` without its directory, for diagnostics.

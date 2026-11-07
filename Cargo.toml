@@ -10,7 +10,11 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+# Verified floor, not an aspiration: mlua 0.10 needs 1.79, `size_of` in the prelude
+# (used by tests/abi_layout.rs) needs 1.80, and 1.82 is the oldest toolchain verified to
+# build the whole workspace. Checked with `cargo +<version> build --workspace`; raising a
+# dependency can raise this, so probe again when you bump one.
+rust-version = "1.82"
 license = "MIT"
 authors = ["GIOCHI-SYSTEM contributors"]
 repository = "https://github.com/xtrempkch-droid/GIOCHI-SYSTEM"

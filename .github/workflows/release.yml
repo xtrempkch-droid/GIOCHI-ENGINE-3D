@@ -2,34 +2,165 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*.*.*'
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (e.g. v0.1.0)"
+        required: true
 
 permissions:
   contents: write
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  release-arm64:
-    name: Release ARM64
+  build-x86_64:
+    name: Build x86_64 release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-unknown-linux-gnu
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Install build dependencies
+        run: sudo ./scripts/install-deps.sh
+
       - uses: Swatinem/rust-cache@v2
-      - name: Build release ARM64
-        run: cross build --workspace --release --target aarch64-unknown-linux-gnu
+
+      - name: Build release
+        run: cargo build --release --workspace --target x86_64-unknown-linux-gnu
+
+      - name: Smoke the release binary
+        # A release build is where LTO and codegen-units settings can break things that
+        # a debug build tolerates.
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          ./target/x86_64-unknown-linux-gnu/release/giochi-demo --verify
+          ./target/x86_64-unknown-linux-gnu/release/giochi-demo \
+            lua giochi-engine-lua/examples/mini_game.lua --auto --frames 60
+
       - name: Package
         run: |
-          mkdir -p dist
-          cp target/aarch64-unknown-linux-gnu/release/giochi-demo dist/
-          tar -czf dist/giochi-engine-${{ github.ref_name }}-aarch64.tar.gz \
-            -C dist giochi-demo
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+          mkdir -p dist/include dist/lib dist/lua
+          cp target/x86_64-unknown-linux-gnu/release/giochi-demo dist/
+          # The C ABI: header plus both linkable forms.
+          cp giochi-engine-capi/include/giochi.h dist/include/
+          cp target/x86_64-unknown-linux-gnu/release/libgiochi.so dist/lib/
+          cp target/x86_64-unknown-linux-gnu/release/libgiochi.a dist/lib/
+          # The Lua binding's reference game ships with the binary that runs it.
+          cp giochi-engine-lua/examples/mini_game.lua dist/lua/
+          cp README.md LICENSE CHANGELOG.md PROGRESS.md dist/
+          cp -r docs assets dist/
+          tar -C dist -czf giochi-engine-x86_64-unknown-linux-gnu.tar.gz .
+
+      - uses: actions/upload-artifact@v4
         with:
-          files: dist/giochi-engine-*.tar.gz
+          name: giochi-engine-x86_64-unknown-linux-gnu
+          path: giochi-engine-x86_64-unknown-linux-gnu.tar.gz
+          if-no-files-found: error
+
+  build-aarch64:
+    name: Build aarch64 release (cross)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-unknown-linux-gnu
+
+      - name: Install ARM64 SDL2 libraries
+        run: |
+          set -euo pipefail
+          sudo sed -i 's/^Types: deb$/Types: deb\nArchitectures: amd64/' \
+            /etc/apt/sources.list.d/ubuntu.sources
+          sudo dpkg --add-architecture arm64
+          sudo tee /etc/apt/sources.list.d/ubuntu-arm64.sources > /dev/null <<'EOF'
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports
+          Suites: noble noble-updates noble-security
+          Components: main universe
+          Architectures: arm64
+          EOF
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config file \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            libsdl2-image-dev:arm64 libsdl2-mixer-dev:arm64 libsdl2-ttf-dev:arm64
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: aarch64-release
+
+      - name: Build release for ARM64
+        run: ./scripts/build-aarch64.sh --release --workspace
+
+      - name: Package
+        run: |
+          mkdir -p dist/include dist/lib dist/lua
+          cp target/aarch64-unknown-linux-gnu/release/giochi-demo dist/
+          cp giochi-engine-capi/include/giochi.h dist/include/
+          cp target/aarch64-unknown-linux-gnu/release/libgiochi.so dist/lib/
+          cp target/aarch64-unknown-linux-gnu/release/libgiochi.a dist/lib/
+          cp giochi-engine-lua/examples/mini_game.lua dist/lua/
+          cp README.md LICENSE CHANGELOG.md PROGRESS.md dist/
+          cp -r docs assets dist/
+          tar -C dist -czf giochi-engine-aarch64-unknown-linux-gnu.tar.gz .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: giochi-engine-aarch64-unknown-linux-gnu
+          path: giochi-engine-aarch64-unknown-linux-gnu.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    needs: [build-x86_64, build-aarch64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release notes
+        run: |
+          {
+            echo "Binaries built from \`${{ github.ref_name }}\`."
+            echo
+            echo "| Target | Asset |"
+            echo "|---|---|"
+            echo "| x86_64-unknown-linux-gnu | giochi-engine-x86_64-unknown-linux-gnu.tar.gz |"
+            echo "| aarch64-unknown-linux-gnu | giochi-engine-aarch64-unknown-linux-gnu.tar.gz |"
+            echo
+            echo "Each archive contains the demo binary, the C ABI (\`include/giochi.h\`,"
+            echo "\`lib/libgiochi.so\`, \`lib/libgiochi.a\`), the Lua reference game"
+            echo "(\`lua/mini_game.lua\`), the docs and the assets."
+            echo
+            echo "Requires libdrm, libgbm and libEGL on the target (see docs/KMSDRM.md)."
+            echo
+            echo "See CHANGELOG.md for the full history."
+          } > release-notes.md
+
+      - name: Check both archives are present
+        run: |
+          set -euo pipefail
+          test -f artifacts/giochi-engine-x86_64-unknown-linux-gnu/giochi-engine-x86_64-unknown-linux-gnu.tar.gz
+          test -f artifacts/giochi-engine-aarch64-unknown-linux-gnu/giochi-engine-aarch64-unknown-linux-gnu.tar.gz
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/giochi-engine-x86_64-unknown-linux-gnu/giochi-engine-x86_64-unknown-linux-gnu.tar.gz
+            artifacts/giochi-engine-aarch64-unknown-linux-gnu/giochi-engine-aarch64-unknown-linux-gnu.tar.gz
+          body_path: release-notes.md
+          draft: true
           generate_release_notes: true
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}

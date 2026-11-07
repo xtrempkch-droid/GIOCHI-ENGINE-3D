@@ -16,6 +16,44 @@ rather than a rewrite. Runs on `x86_64-unknown-linux-gnu` and
 `aarch64-unknown-linux-gnu`; auto-selects KMSDRM on a bare Linux console and
 falls back to the desktop driver elsewhere.
 
+### Fixed — false minimum Rust version
+
+- `rust-version` declared **1.75**, which no combination of the pinned dependencies can
+  satisfy: `mlua 0.10` requires 1.79 and `size_of` in the prelude requires 1.80. Probed
+  with `cargo +1.79 build --workspace` (fails) and `cargo +1.82 build --workspace`
+  (passes), so the declared floor is now **1.82** and the README says the same. Anyone on
+  an older toolchain gets cargo's clear message instead of a confusing failure inside a
+  dependency. `clippy.toml` carried the same stale number and is aligned. ADR-033.
+- Correcting the MSRV immediately unlocked a lint that had been suppressed by the false
+  1.75 floor: `read_asset_vec` used the pre-`Result::inspect` idiom (stable since 1.76).
+  It is now `inspect`, so the length check reads as a check rather than a rewrite.
+
+### Fixed — CI never passed
+
+Every workflow run on `main` failed, from phase 6 onwards. Four causes:
+
+- **The X11 headers were missing.** SDL2's bundled CMake configure enables the X11
+  video backend whenever it can see any X11 library, then requires `Xext.h` and the
+  rest. The apt list never installed them; the build worked locally only because a
+  desktop dev machine has them.
+- **The host SDL2 satellites were missing.** `bundled` builds core SDL2 only, so
+  linking the `cdylib` failed with `cannot find -lSDL2_mixer`. This was already
+  documented for ARM64 and had never been tested on x86_64.
+- **The package list was duplicated across four jobs**, which is how both omissions
+  survived. Replaced by `scripts/install-deps.sh`, a single list.
+- **Three workflows had been replaced by cut-down versions**, and the `git add -A`
+  commits of phases 7 and 8 swept them in: `ci.yml` without the `ffi`, `smoke` and
+  cross-check jobs, `cross-compile.yml` with a single job, `release.yml` ARM64-only.
+  Restored to what the documentation describes.
+
+- `tests/api_guide.rs` asserted that `play_sound(0, 0)` returns `INVALID_HANDLE`, but a
+  machine without a sound card returns `AUDIO` (ADR-021). It passed on a desktop and
+  would have failed on every runner; it now accepts both documented codes.
+
+Verified by mirroring the entire CI matrix in a clean `ubuntu:24.04` container: 16/16
+steps pass (fmt, clippy, build, 209 tests, doc, header, C and Python FFI, demo, five
+examples, `mini_game.lua`).
+
 ### Added — post-release audit
 
 - `giochi-engine/tests/c_shape.rs`: the C-shaped rules (R1, R3) are now checked

@@ -190,10 +190,15 @@ remain the source of truth and what CI runs.
 ## In CI
 
 - [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) `cross-check`:
-  `scripts/check-aarch64.sh`.
+  `scripts/check-aarch64.sh` — the fast, link-free check, on every push.
 - [`.github/workflows/cross-compile.yml`](../.github/workflows/cross-compile.yml)
-  `link`: multiarch setup, then `scripts/build-aarch64.sh --workspace --all-targets`.
-- [`.github/workflows/release.yml`](../.github/workflows/release.yml)
-  `build-aarch64`: multiarch setup, then
-  `scripts/build-aarch64.sh --release --workspace`, packaged into
-  `giochi-engine-aarch64-unknown-linux-gnu.tar.gz`.
+  `link`: the multiarch setup above, then
+  `scripts/build-aarch64.sh --workspace --all-targets`. Runs only when engine sources,
+  `cmake/`, `scripts/` or the manifests change.
+- [`.github/workflows/release.yml`](../.github/workflows/release.yml) `build-aarch64`:
+  the same recipe with `--release`, packaged into
+  `giochi-engine-aarch64-unknown-linux-gnu.tar.gz` (binary, `include/giochi.h`,
+  `lib/libgiochi.{so,a}`, `lua/mini_game.lua`, docs, assets).
+
+All three were verified in a clean `ubuntu:24.04` container, running the exact `run:`
+steps of each job.

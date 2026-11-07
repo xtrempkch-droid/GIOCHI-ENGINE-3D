@@ -139,6 +139,8 @@ mod tests {
 
     #[test]
     fn last_error_is_empty_before_any_call() {
+        // SAFETY: `giochi_get_last_error` never returns NULL and the buffer stays valid
+        // until the next call on this thread; the reference is used immediately.
         let message = unsafe { std::ffi::CStr::from_ptr(giochi_get_last_error()) };
         assert_eq!(message.to_str().unwrap(), "");
     }
@@ -150,6 +152,8 @@ mod tests {
             giochi_asset_size(std::ptr::null(), std::ptr::null_mut()),
             GIOCHI_ERROR_INVALID_ARGUMENT
         );
+        // SAFETY: `giochi_get_last_error` never returns NULL and the buffer stays valid
+        // until the next call on this thread; the reference is used immediately.
         let message = unsafe { std::ffi::CStr::from_ptr(giochi_get_last_error()) };
         assert!(message.to_str().unwrap().contains("out_size"));
 
@@ -158,6 +162,8 @@ mod tests {
         let mut size = 0usize;
         assert_eq!(giochi_asset_size(path.as_ptr(), &mut size), GIOCHI_ERROR_OK);
         assert!(size > 0);
+        // SAFETY: `giochi_get_last_error` never returns NULL and the buffer stays valid
+        // until the next call on this thread; the reference is used immediately.
         let message = unsafe { std::ffi::CStr::from_ptr(giochi_get_last_error()) };
         assert_eq!(message.to_str().unwrap(), "");
     }
@@ -167,6 +173,8 @@ mod tests {
         assert_eq!(giochi_engine_is_running(), 0);
         assert_eq!(giochi_texture_create(std::ptr::null()), 0);
         assert_eq!(giochi_engine_run(), GIOCHI_ERROR_NOT_INITIALIZED);
+        // SAFETY: `giochi_get_last_error` never returns NULL and the buffer stays valid
+        // until the next call on this thread; the reference is used immediately.
         let message = unsafe { std::ffi::CStr::from_ptr(giochi_get_last_error()) };
         assert!(message.to_str().unwrap().contains("not initialised"));
     }

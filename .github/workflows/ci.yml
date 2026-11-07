@@ -5,68 +5,149 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
-  fmt:
-    name: Rustfmt
+  gates:
+    name: Quality gates (x86_64)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+          rustc --version
+
+      - name: Install build dependencies
+        # One script, not a copy-pasted apt list. SDL2's bundled CMake build needs the
+        # X11 headers *and* the SDL2 satellites, and a list duplicated across four jobs
+        # is how both went missing. See the header of the script.
+        run: sudo ./scripts/install-deps.sh
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --target x86_64-unknown-linux-gnu -- -D warnings
+
+      - name: Build
+        run: cargo build --workspace --target x86_64-unknown-linux-gnu
+
+      - name: Test
+        # Every integration test uses SDL's `dummy` driver, so no display is needed.
+        run: cargo test --workspace --target x86_64-unknown-linux-gnu
+
+      - name: Docs
+        run: cargo doc --workspace --no-deps --document-private-items
+
+      - name: Install cbindgen
+        run: cargo install cbindgen --version 0.27.0 --locked
+
+      - name: C header is up to date
+        # giochi.h is generated from the Rust crate; a stale copy would ship an ABI that
+        # does not match the library.
+        run: ./scripts/gen-header.sh --check
+
+  ffi:
+    name: C and Python consumers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Install build dependencies
+        run: sudo ./scripts/install-deps.sh
+
+      - name: Install cbindgen
+        run: cargo install cbindgen --version 0.27.0 --locked
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build libgiochi and run the C and Python smoke tests
+        # Compiles c_smoke.c with -Wall -Wextra -Werror against the generated header,
+        # runs it, then runs python_smoke.py (ctypes, standard library only).
+        run: ./scripts/ffi-smoke.sh
+
+  cross-check:
+    name: Cross-check (aarch64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust and the ARM64 cross toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-unknown-linux-gnu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          aarch64-linux-gnu-gcc --version
+
+      - uses: Swatinem/rust-cache@v2
         with:
-          components: rustfmt
-      - run: cargo fmt --all -- --check
+          key: aarch64-check
 
-  clippy:
-    name: Clippy
+      - name: cargo check --target aarch64-unknown-linux-gnu
+        run: ./scripts/check-aarch64.sh
+
+  smoke:
+    name: Demo, examples and the Lua game
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - name: Install SDL2 dev libs
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
-            libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev \
-            libudev-dev libasound2-dev pkg-config cmake build-essential
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets -- -D warnings
 
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install SDL2 dev libs
+      - name: Install Rust
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
-            libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev \
-            libudev-dev libasound2-dev pkg-config cmake build-essential
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --target x86_64-unknown-linux-gnu
+          rustup toolchain install stable --profile minimal
+          rustup default stable
 
-  build-x86_64:
-    name: Build x86_64
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install SDL2 dev libs
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
-            libdrm-dev libgbm-dev libegl1-mesa-dev libgles2-mesa-dev \
-            libudev-dev libasound2-dev pkg-config cmake build-essential
+      - name: Install build dependencies
+        run: sudo ./scripts/install-deps.sh
+
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --workspace --release --target x86_64-unknown-linux-gnu
+
+      - name: Demo pipeline check
+        # `--verify` runs one frame through the whole `Engine` and reports the live
+        # texture/sound counts, catching link or init regressions that `cargo test` can
+        # miss because the test binaries do not build the cdylib.
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          cargo run -q -p giochi-demo -- --verify
+          cargo run -q -p giochi-demo -- --frames 60
+
+      - name: Examples
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          cargo run -q -p giochi-engine --example hello_rect -- --frames 30
+          cargo run -q -p giochi-engine --example moving_sprite -- --frames 30
+          cargo run -q -p giochi-engine --example input_test -- --frames 30
+          cargo run -q -p giochi-engine --example audio_test -- --frames 10
+          cargo run -q -p giochi-engine --example mini_game -- --auto --frames 120
+
+      - name: Lua reference game
+        # The binding's own end-to-end check: a real script, the real engine, no keyboard.
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          cargo run -q -p giochi-demo -- lua giochi-engine-lua/examples/mini_game.lua \
+            --auto --frames 120
