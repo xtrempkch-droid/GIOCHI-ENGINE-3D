@@ -95,6 +95,17 @@ class GiochiCamera3D(Structure):
     ]
 
 
+class GiochiDirectionalLight(Structure):
+    _fields_ = [
+        ("direction", GiochiVec3),
+        ("color", GiochiColor3D),
+        ("ambient", c_float),
+        ("specular", c_float),
+        ("shininess", c_float),
+        ("_reserved", c_uint32 * 4),
+    ]
+
+
 class GiochiWindowConfig(Structure):
     _fields_ = [
         ("width", c_uint32),
@@ -160,6 +171,11 @@ def declare(lib: ctypes.CDLL) -> None:
 
     lib.giochi_renderer3d_clear.argtypes = [c_void_p, GiochiColor3D]
     lib.giochi_renderer3d_clear.restype = c_int32
+    lib.giochi_renderer3d_set_light.argtypes = [
+        c_void_p,
+        POINTER(GiochiDirectionalLight),
+    ]
+    lib.giochi_renderer3d_set_light.restype = c_int32
     lib.giochi_renderer3d_draw_mesh.argtypes = [
         c_void_p,
         c_uint64,
@@ -266,6 +282,26 @@ def main() -> int:
     moved = lib.giochi_transform3d_from_translation(vec3(1.0, 2.0, 3.0))
     check(moved.position.y == 2.0, "from_translation stored the position")
     check(moved.scale.x == 1.0, "from_translation kept the unit scale")
+
+    # ---- lighting -----------------------------------------------------------
+    # Passed by pointer, so this is the one place a struct-by-reference boundary in part
+    # II is exercised from a second FFI implementation.
+    light = GiochiDirectionalLight(
+        direction=vec3(-0.4, -1.0, -0.3),
+        color=color(1.0, 0.94, 0.82, 1.0),
+        ambient=0.25,
+        specular=0.45,
+        shininess=32.0,
+        _reserved=(c_uint32 * 4)(0, 0, 0, 0),
+    )
+    check(
+        lib.giochi_renderer3d_set_light(engine, ctypes.byref(light)) == GIOCHI_ERROR_OK,
+        "a valid light is accepted",
+    )
+    check(
+        lib.giochi_renderer3d_set_light(engine, None) == GIOCHI_ERROR_INVALID_ARGUMENT,
+        "a NULL light is refused",
+    )
 
     # ---- three frames -------------------------------------------------------
     background = color(0.07, 0.09, 0.14, 1.0)

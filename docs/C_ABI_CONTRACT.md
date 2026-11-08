@@ -729,20 +729,21 @@ typedef struct GiochiDirectionalLight {
 } GiochiDirectionalLight;        /* size 88, align 4 */
 ```
 
-Phase 13 introduced this for `BuiltinShader::Phong`. It is written here even though no
-part-II function takes one yet, because rule R5 is that the C form is decided *now*: it
-is `#[repr(C)]` with primitive members only, so adding
-`giochi_renderer3d_set_light(GiochiEngine3D*, const GiochiDirectionalLight*)` later is a
-header change and nothing else.
+Phase 13 introduced this for `BuiltinShader::Phong`, and §10.4a takes one. The struct was
+written down in §9.4a one revision before the function that consumes it, on purpose: rule
+R5 is that the C form is decided *now*, and because it is `#[repr(C)]` with primitive
+members only, adding `giochi_renderer3d_set_light(GiochiEngine3D*,
+const GiochiDirectionalLight*)` was a header change and nothing else.
 
 `direction` follows the photons, not the eye: `(0, -1, 0)` lights a floor from above.
 A reader who assumes the opposite convention gets a scene lit from underneath, which is
 why the field carries the comment.
 
-`giochi_renderer3d_set_light` would sanitise on entry exactly as the Rust
+`giochi_renderer3d_set_light` sanitises on entry exactly as the Rust
 `RenderContext3D::set_light` does, so a C caller cannot produce a black frame by zeroing
 `shininess` (where `pow(x, 0)` is 1 everywhere) or by passing a zero-length direction
-(which normalises to NaN).
+(which normalises to NaN). The sanitised values are what the renderer stores and what a
+subsequent read of the light returns.
 
 ### 9.5 Handles
 
@@ -795,6 +796,10 @@ int32_t giochi_renderer3d_draw_mesh(GiochiEngine3D* engine,
                                     const GiochiTransform3D* model,
                                     const GiochiCamera3D* camera,
                                     GiochiColor3D color);
+
+/* 10.4a Lighting — the input GIOCHI_SHADER_PHONG reads */
+int32_t giochi_renderer3d_set_light(GiochiEngine3D* engine,
+                                    const GiochiDirectionalLight* light);
 ```
 
 Every one returns `int32_t` and reports through `giochi_get_last_error()`, unchanged from
@@ -824,10 +829,15 @@ one". This mirrors part I, where `giochi_texture_*` also takes no handle (ADR-01
 holds: there is no function that takes shader **source** as a string, and
 `giochi_shader_load` is the only way to supply your own.
 
-`GIOCHI_SHADER_PHONG` reads the engine's light, which part II does not expose yet — the
-default (a white sun, ambient 0.3, specular 0.25 at 24) is what a caller gets. §9.4a
-already specifies the C form for `giochi_renderer3d_set_light`; it is the one function
-left for a later revision.
+`GIOCHI_SHADER_PHONG` reads the engine's light. Until a caller sets one, the default is
+what it gets: a white sun from above, ambient 0.3, specular 0.25 at 24. A caller that
+sets a light keeps it for every later frame on that engine — the light is engine state,
+not a per-draw argument, because `GiochiTransform3D` and `GiochiCamera3D` already fill
+the by-value slots that GLES 2.0 uniform limits make affordable.
+
+A NULL `light` is `GIOCHI_ERROR_INVALID_ARGUMENT` and leaves the current light untouched;
+an engine pointer that is not the live one for this thread is `GIOCHI_ERROR_INVALID_HANDLE`.
+Both match §10.5.
 
 ### 10.7 Why `draw_mesh` takes a colour
 
@@ -872,3 +882,6 @@ The same type the Rust side calls `WindowConfig`, so there is nothing to keep in
 | `GIOCHI_ABI_VERSION == 2` and `giochi_abi_version()` agrees | `python_smoke_3d.py`, `rust_ffi_3d.rs` |
 | No `glow`, `glam` or `sdl2` type appears in a public struct field | the same test that checks the 2D crate's rule (ADR-032) |
 | 3D additions never change a part I signature | `git diff` review plus `c_smoke.c` continuing to pass untouched |
+| The sizes in §9 are the ones a C compiler produces | `c_smoke_3d.c` `_Static_assert`s them — 28, 32, 88 |
+| Every type this document names is in `giochi.h` | `scripts/gen-header.sh --check`. A type defined here but missing from `cbindgen.toml`'s `include` is silently not emitted; `GiochiDirectionalLight` was, until the third audit |
+| Every function in §10 exists and is exported | `scripts/ffi-smoke.sh` links each one from C. A documented-but-unimplemented function is a link error at the consumer, which is how the missing `giochi_renderer3d_set_light` would have been caught before shipping |

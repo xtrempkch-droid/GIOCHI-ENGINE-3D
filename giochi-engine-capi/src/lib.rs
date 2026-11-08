@@ -103,8 +103,9 @@ pub use lib3d::{
     giochi_camera3d_look_at, giochi_camera3d_new, giochi_engine3d_begin_frame,
     giochi_engine3d_create, giochi_engine3d_destroy, giochi_engine3d_end_frame,
     giochi_mesh_create_cube, giochi_mesh_destroy, giochi_mesh_load_obj, giochi_renderer3d_clear,
-    giochi_renderer3d_draw_mesh, giochi_shader_builtin, giochi_shader_destroy, giochi_shader_load,
-    giochi_transform3d_from_translation, giochi_transform3d_identity, GiochiEngine3D,
+    giochi_renderer3d_draw_mesh, giochi_renderer3d_set_light, giochi_shader_builtin,
+    giochi_shader_destroy, giochi_shader_load, giochi_transform3d_from_translation,
+    giochi_transform3d_identity, GiochiEngine3D,
 };
 pub use render::{
     giochi_camera_get, giochi_camera_set, giochi_render_clear, giochi_render_draw_rect,
@@ -126,6 +127,7 @@ pub use giochi_engine_3d::math3d::{
     Camera3D as GiochiCamera3D, Color3D as GiochiColor3D, Quat as GiochiQuat,
     Transform3D as GiochiTransform3D, Vec3 as GiochiVec3,
 };
+pub use giochi_engine_3d::DirectionalLight as GiochiDirectionalLight;
 
 /// Numeric error codes, re-exported so Rust callers do not need the engine crate.
 pub use giochi_engine::error::codes;

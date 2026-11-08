@@ -50,6 +50,7 @@ use giochi_engine::platform::Platform;
 use giochi_engine_3d::context::{self as context3d, GlesVersion};
 use giochi_engine_3d::math3d::{Camera3D, Color3D, Transform3D, Vec3};
 use giochi_engine_3d::shader::BuiltinShader;
+use giochi_engine_3d::DirectionalLight;
 use giochi_engine_3d::{Error3D, RenderContext3D};
 
 use crate::state::{self, guard};
@@ -685,6 +686,53 @@ fn builtin_shader(which: i32) -> Option<BuiltinShader> {
     }
 }
 
+/// Replaces the light every draw in the next frames is shaded with.
+///
+/// `GIOCHI_SHADER_PHONG` reads it; the other two built-ins ignore it. The light is engine
+/// state and stays in force until it is set again — it is not a per-draw argument, because
+/// GLES 2.0's uniform limits make uploading once per change cheaper than once per mesh.
+///
+/// `light` is sanitised on the way in, exactly as the Rust `RenderContext3D::set_light`
+/// does: a zero-length direction falls back to straight down instead of normalising to a
+/// NaN the driver renders as black, and `shininess` is floored at 1 because `pow(x, 0)`
+/// paints a disc rather than a highlight. A caller cannot produce a black frame by leaving
+/// a field at zero.
+///
+/// # Errors
+///
+/// `GIOCHI_ERROR_INVALID_ARGUMENT` if `light` is NULL; `GIOCHI_ERROR_INVALID_HANDLE` if
+/// `engine` is not the live engine on the calling thread.
+///
+/// # C ABI
+///
+/// ```c
+/// int32_t giochi_renderer3d_set_light(GiochiEngine3D* engine,
+///                                     const GiochiDirectionalLight* light);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_renderer3d_set_light(
+    engine: *mut GiochiEngine3D,
+    light: *const DirectionalLight,
+) -> i32 {
+    guard(codes::INTERNAL, || {
+        let engine = match validate_engine(engine) {
+            Ok(engine) => engine,
+            Err(code) => return code,
+        };
+        if light.is_null() {
+            state::invalid_argument(
+                "light must not be NULL; build one with the fields of GiochiDirectionalLight",
+            );
+            return codes::INVALID_ARGUMENT;
+        }
+
+        // SAFETY: non-NULL pointer to a caller-provided `#[repr(C)]` value; copied, never
+        // retained. `set_light` sanitises what it stores.
+        engine.render.set_light(unsafe { *light });
+        codes::OK
+    })
+}
+
 // ---- 10.4 drawing -------------------------------------------------------
 
 /// Sets the clear colour and clears colour and depth immediately.
@@ -869,6 +917,12 @@ mod tests {
             giochi_engine3d_end_frame(core::ptr::null_mut()),
             codes::INVALID_ARGUMENT
         );
+
+        let light = DirectionalLight::default();
+        assert_eq!(
+            giochi_renderer3d_set_light(core::ptr::null_mut(), &light),
+            codes::INVALID_ARGUMENT
+        );
     }
 
     #[test]
@@ -925,6 +979,10 @@ mod tests {
         assert_eq!(giochi_engine3d_end_frame(dangling), codes::INVALID_HANDLE);
         assert_eq!(
             giochi_renderer3d_clear(dangling, Color3D::WHITE),
+            codes::INVALID_HANDLE
+        );
+        assert_eq!(
+            giochi_renderer3d_set_light(dangling, &DirectionalLight::default()),
             codes::INVALID_HANDLE
         );
         assert!(

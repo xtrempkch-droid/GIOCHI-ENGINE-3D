@@ -347,9 +347,26 @@ or point `giochi_shader_load` at a `.vert`/`.frag` pair on disk. The compiler's 
 comes back through `giochi_get_last_error()`, which is the only thing that makes a shader
 bug findable.
 
-`GIOCHI_SHADER_PHONG` reads the engine's built-in sun (white, ambient 0.3, specular 0.25
-at exponent 24). Part II does not expose `giochi_renderer3d_set_light` yet; its C form is
-already specified in `docs/C_ABI_CONTRACT.md` §9.4a.
+`GIOCHI_SHADER_PHONG` reads the engine's light. Until you set one, that is the built-in
+sun: white, ambient 0.3, specular 0.25 at exponent 24. `giochi_renderer3d_set_light`
+replaces it, and the light is **engine state** — it applies to every later frame until you
+change it again, not just the next draw:
+
+```c
+GiochiDirectionalLight sun = {
+    .direction = {-0.4f, -1.0f, -0.3f, {0}},  /* the way the photons travel */
+    .color     = {1.0f, 0.94f, 0.82f, 1.0f, {0}},
+    .ambient   = 0.25f,
+    .specular  = 0.45f,
+    .shininess = 32.0f,
+    ._reserved = {0},
+};
+giochi_renderer3d_set_light(engine, &sun);
+```
+
+`direction` is normalised and `shininess` is floored at 1 for you, so a `memset`-and-forget
+struct gives a dim but correct frame rather than a black one. Values above 1.0 in `color`
+are legal and blow highlights out, which is how a bright sun reads.
 
 ### 9.5 Freeing things
 

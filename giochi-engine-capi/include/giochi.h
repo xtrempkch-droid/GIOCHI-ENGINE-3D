@@ -296,6 +296,31 @@ typedef struct GiochiColor3D {
     uint32_t _reserved[4];
 } GiochiColor3D;
 
+// The light every draw in a frame is shaded with.
+//
+// The direction convention is spelled out on [`DirectionalLight::direction`] and in
+// `docs/3D.md` §5.1: the field follows the photons, not the eye.
+typedef struct GiochiDirectionalLight {
+    // The direction the light **travels**, normalised. `(0, -1, 0)` is straight down.
+    struct GiochiVec3 direction;
+    // The colour and intensity of the light. `WHITE` is full strength; values above
+    // 1.0 are legal and deliberately blow highlights out, which is how a bright sun
+    // reads.
+    struct GiochiColor3D color;
+    // How much of the surface colour survives where the light does not reach.
+    //
+    // Zero makes unlit faces black, which hides geometry; around 0.2–0.35 keeps the
+    // shape readable. Clamped to `0.0..=1.0` when used.
+    float ambient;
+    // The strength of the specular highlight. Zero is a matte surface.
+    float specular;
+    // The exponent of the specular highlight: 8 is a broad sheen, 128 a tight glint.
+    // Must be at least 1, or `pow` turns the highlight into a disc.
+    float shininess;
+    // Reserved for ABI-compatible growth. Must be zero.
+    uint32_t _reserved[4];
+} GiochiDirectionalLight;
+
 // Opaque texture handle. `0` is invalid/null.
 //
 // # C ABI
@@ -1056,6 +1081,32 @@ int32_t giochi_shader_builtin(int32_t which, uint64_t *out);
 // int32_t giochi_shader_destroy(GiochiShaderHandle shader);
 // ```
 int32_t giochi_shader_destroy(uint64_t shader);
+
+// Replaces the light every draw in the next frames is shaded with.
+//
+// `GIOCHI_SHADER_PHONG` reads it; the other two built-ins ignore it. The light is engine
+// state and stays in force until it is set again — it is not a per-draw argument, because
+// GLES 2.0's uniform limits make uploading once per change cheaper than once per mesh.
+//
+// `light` is sanitised on the way in, exactly as the Rust `RenderContext3D::set_light`
+// does: a zero-length direction falls back to straight down instead of normalising to a
+// NaN the driver renders as black, and `shininess` is floored at 1 because `pow(x, 0)`
+// paints a disc rather than a highlight. A caller cannot produce a black frame by leaving
+// a field at zero.
+//
+// # Errors
+//
+// `GIOCHI_ERROR_INVALID_ARGUMENT` if `light` is NULL; `GIOCHI_ERROR_INVALID_HANDLE` if
+// `engine` is not the live engine on the calling thread.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_renderer3d_set_light(GiochiEngine3D* engine,
+//                                     const GiochiDirectionalLight* light);
+// ```
+int32_t giochi_renderer3d_set_light(GiochiEngine3D *engine,
+                                    const struct GiochiDirectionalLight *light);
 
 // Sets the clear colour and clears colour and depth immediately.
 //

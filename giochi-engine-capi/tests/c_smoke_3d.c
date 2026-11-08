@@ -20,13 +20,22 @@
  *   - the mesh and shader functions, which take no engine argument, find the engine
  *     that giochi_engine3d_create made;
  *   - handles are invalidated by destroy;
- *   - creating a second engine on the same thread is refused.
+ *   - creating a second engine on the same thread is refused;
+ *   - the light is accepted, moved, and refuses a NULL struct;
+ *   - the struct sizes in the contract are the ones a C compiler produces.
  */
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "giochi.h"
+
+/* The sizes in docs/C_ABI_CONTRACT.md §9 are the contract, not a hint. Asserting them
+ * here makes a C compiler -- the side that actually lays these structs out -- the one
+ * that notices a drift, instead of a Rust test that agrees with the Rust layout. */
+_Static_assert(sizeof(GiochiVec3) == 28, "contract §9.2 says size 28");
+_Static_assert(sizeof(GiochiColor3D) == 32, "contract §9.1 says size 32");
+_Static_assert(sizeof(GiochiDirectionalLight) == 88, "contract §9.4a says size 88");
 
 #define SKIP_CODE 77
 
@@ -184,6 +193,22 @@ int main(void)
     CHECK(moved.position.y == 2.0f);
     CHECK(moved.scale.x == 1.0f);   /* translation must not zero the scale */
 
+    /* ---- lighting ---------------------------------------------------------- */
+    /* A sun from the side, warm, so that a shader which ignored this and kept the
+     * built-in default would visibly differ from what the caller asked for. */
+    GiochiDirectionalLight sun;
+    memset(&sun, 0, sizeof sun);
+    sun.direction = vec3(-0.4f, -1.0f, -0.3f);
+    sun.color = color3d(1.0f, 0.94f, 0.82f, 1.0f);
+    sun.ambient = 0.25f;
+    sun.specular = 0.45f;
+    sun.shininess = 32.0f;
+
+    CHECK_CODE(giochi_renderer3d_set_light(NULL, &sun), GIOCHI_ERROR_INVALID_ARGUMENT);
+    CHECK_CODE(giochi_renderer3d_set_light(engine, NULL), GIOCHI_ERROR_INVALID_ARGUMENT);
+    CHECK(strstr(giochi_get_last_error(), "light must not be NULL") != NULL);
+    CHECK_OK(giochi_renderer3d_set_light(engine, &sun));
+
     /* ---- drawing ---------------------------------------------------------- */
     const GiochiColor3D background = color3d(0.07f, 0.09f, 0.14f, 1.0f);
     const GiochiColor3D cube_color = color3d(0.85f, 0.62f, 0.35f, 1.0f);
@@ -203,6 +228,21 @@ int main(void)
     }
 
     /* ---- the error paths a caller will actually hit ----------------------- */
+    /* Every field at zero: the worst a caller can do with memset-and-forget. The renderer
+     * normalises the direction and floors the exponent, so the next frame has to draw
+     * rather than go black or hand the driver a NaN. */
+    {
+        GiochiDirectionalLight zeroed;
+        memset(&zeroed, 0, sizeof zeroed);
+        CHECK_OK(giochi_renderer3d_set_light(engine, &zeroed));
+
+        CHECK_OK(giochi_engine3d_begin_frame(engine));
+        CHECK_OK(giochi_renderer3d_clear(engine, background));
+        CHECK_OK(giochi_renderer3d_draw_mesh(engine, cube, shader, &model, &camera,
+                                             cube_color));
+        CHECK_OK(giochi_engine3d_end_frame(engine));
+    }
+
     CHECK_CODE(giochi_renderer3d_draw_mesh(engine, cube, shader, NULL, &camera, cube_color),
                GIOCHI_ERROR_INVALID_ARGUMENT);
     CHECK(strstr(giochi_get_last_error(), "giochi_transform3d_identity") != NULL);
@@ -234,6 +274,10 @@ int main(void)
     CHECK_CODE(giochi_shader_destroy(shader), GIOCHI_ERROR_INVALID_HANDLE);
 
     giochi_engine3d_destroy(engine);
+
+    /* The pointer is dead now. A caller that kept a copy must get a code rather than a
+     * use-after-free, which is the whole point of comparing against the live engine. */
+    CHECK_CODE(giochi_renderer3d_set_light(engine, &sun), GIOCHI_ERROR_INVALID_HANDLE);
 
     /* After destroy the mesh functions have no engine again. */
     {

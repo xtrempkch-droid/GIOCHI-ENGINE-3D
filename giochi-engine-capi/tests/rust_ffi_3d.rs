@@ -18,10 +18,11 @@ use giochi::{
     giochi_abi_version, giochi_camera3d_look_at, giochi_camera3d_new, giochi_engine3d_begin_frame,
     giochi_engine3d_create, giochi_engine3d_destroy, giochi_engine3d_end_frame,
     giochi_get_last_error, giochi_mesh_create_cube, giochi_mesh_destroy, giochi_mesh_load_obj,
-    giochi_renderer3d_clear, giochi_renderer3d_draw_mesh, giochi_shader_builtin,
-    giochi_shader_destroy, giochi_shader_load, giochi_transform3d_from_translation,
-    giochi_transform3d_identity, GiochiCamera3D, GiochiColor3D, GiochiEngine3D, GiochiQuat,
-    GiochiTransform3D, GiochiVec3, GiochiWindowConfig, GIOCHI_ABI_VERSION, GIOCHI_ERROR_ASSET,
+    giochi_renderer3d_clear, giochi_renderer3d_draw_mesh, giochi_renderer3d_set_light,
+    giochi_shader_builtin, giochi_shader_destroy, giochi_shader_load,
+    giochi_transform3d_from_translation, giochi_transform3d_identity, GiochiCamera3D,
+    GiochiColor3D, GiochiDirectionalLight, GiochiEngine3D, GiochiQuat, GiochiTransform3D,
+    GiochiVec3, GiochiWindowConfig, GIOCHI_ABI_VERSION, GIOCHI_ERROR_ASSET,
     GIOCHI_ERROR_INVALID_ARGUMENT, GIOCHI_ERROR_INVALID_HANDLE, GIOCHI_ERROR_NOT_INITIALIZED,
     GIOCHI_ERROR_OK, GIOCHI_SHADER_FLAT, GIOCHI_SHADER_PHONG,
 };
@@ -100,6 +101,7 @@ fn the_value_types_have_the_layout_giochi_h_documents() {
     assert_eq!(std::mem::size_of::<GiochiTransform3D>(), 104);
     assert_eq!(std::mem::size_of::<GiochiCamera3D>(), 116);
     assert_eq!(std::mem::size_of::<GiochiWindowConfig>(), 44);
+    assert_eq!(std::mem::size_of::<GiochiDirectionalLight>(), 88);
 
     for alignment in [
         std::mem::align_of::<GiochiVec3>(),
@@ -108,6 +110,7 @@ fn the_value_types_have_the_layout_giochi_h_documents() {
         std::mem::align_of::<GiochiTransform3D>(),
         std::mem::align_of::<GiochiCamera3D>(),
         std::mem::align_of::<GiochiWindowConfig>(),
+        std::mem::align_of::<GiochiDirectionalLight>(),
     ] {
         assert_eq!(alignment, 4, "a SIMD type would raise this to 8 or 16");
     }
@@ -252,6 +255,27 @@ fn the_full_3d_cycle_creates_draws_and_tears_down_cleanly() {
     let background = color(0.07, 0.09, 0.14, 1.0);
     let tint = color(0.85, 0.62, 0.35, 1.0);
 
+    // The one input GIOCHI_SHADER_PHONG reads. Passed by pointer, so this also exercises
+    // the struct-by-reference half of the boundary from Rust.
+    let mut light: GiochiDirectionalLight = GiochiDirectionalLight::sun();
+    light.direction = GiochiVec3 {
+        x: -0.4,
+        y: -1.0,
+        z: -0.3,
+        _reserved: [0; 4],
+    };
+    light.shininess = 32.0;
+    assert_eq!(giochi_renderer3d_set_light(engine, &light), GIOCHI_ERROR_OK);
+    assert_eq!(
+        giochi_renderer3d_set_light(engine, std::ptr::null()),
+        GIOCHI_ERROR_INVALID_ARGUMENT
+    );
+    assert!(
+        last_error().contains("light must not be NULL"),
+        "the message must name the argument: {}",
+        last_error()
+    );
+
     for frame in 0..3 {
         assert_eq!(giochi_engine3d_begin_frame(engine), GIOCHI_ERROR_OK);
         assert_eq!(giochi_renderer3d_clear(engine, background), GIOCHI_ERROR_OK);
@@ -316,6 +340,13 @@ fn the_full_3d_cycle_creates_draws_and_tears_down_cleanly() {
     assert_eq!(giochi_shader_destroy(shader), GIOCHI_ERROR_INVALID_HANDLE);
 
     giochi_engine3d_destroy(engine);
+
+    // The pointer is dead now: a caller that kept a copy must get a code, not a
+    // use-after-free. This is the check `validate_engine` exists for.
+    assert_eq!(
+        giochi_renderer3d_set_light(engine, &light),
+        GIOCHI_ERROR_INVALID_HANDLE
+    );
 
     // And after destroy the mesh functions have no engine again.
     let mut after = 0u64;
