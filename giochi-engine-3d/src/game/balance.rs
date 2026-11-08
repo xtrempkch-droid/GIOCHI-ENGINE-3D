@@ -58,6 +58,34 @@ impl BalanceConfig {
     pub fn half_extent(&self) -> f32 {
         self.platform_size * 0.5
     }
+
+    /// A copy with `fixed_step` in a range the sub-stepping loop can actually terminate on.
+    ///
+    /// The fields are public, so a caller can set any of them. `fixed_step` is the one that
+    /// matters for termination: [`BalanceGame::update`] loops `while accumulator >=
+    /// fixed_step` and subtracts the step each time, so a step of zero never makes progress
+    /// and a negative one moves the accumulator *up* — both hang the game loop with no
+    /// error and no frame. Clamping here is deliberate rather than returning an error:
+    /// a game that asked for an impossible step still wants to run, and the alternative is a
+    /// frozen console.
+    ///
+    /// The floor is one millisecond, which is far finer than any display and bounded
+    /// enough that a `delta` clamped to 0.25 s needs at most 250 iterations.
+    pub fn sanitised(self) -> Self {
+        const MIN_STEP: f32 = 1.0e-3;
+
+        let fixed_step = if self.fixed_step.is_finite() && self.fixed_step >= MIN_STEP {
+            self.fixed_step
+        } else {
+            log::warn!(
+                "fixed_step {:?} cannot terminate; using {MIN_STEP}",
+                self.fixed_step
+            );
+            MIN_STEP
+        };
+
+        Self { fixed_step, ..self }
+    }
 }
 
 /// Where the ball is and how it is moving, in platform-local coordinates.
@@ -193,7 +221,8 @@ impl BalanceGame {
     /// Starts a round with the ball at the centre.
     pub fn new(config: BalanceConfig) -> Self {
         Self {
-            config,
+            // Sanitised here, once, so `update` can subtract a step it knows is positive.
+            config: config.sanitised(),
             ball: Ball::at_centre(),
             tilt: Quat::IDENTITY,
             accumulator: 0.0,
@@ -522,5 +551,58 @@ mod tests {
             seen.0 && seen.1 && seen.2 && seen.3,
             "script missed a direction: {seen:?}"
         );
+    }
+
+    #[test]
+    fn a_zero_or_negative_step_cannot_hang_the_game() {
+        // The fields are public and `update` loops `while accumulator >= fixed_step`,
+        // subtracting the step each iteration. A step of zero never makes progress and a
+        // negative one raises the accumulator, so either would freeze the console with no
+        // error at all. `sanitised` is the only thing standing between a mistyped config
+        // and a hang, so each bad value is asserted to produce a usable game.
+        for bad in [0.0_f32, -1.0 / 120.0, f32::NAN, f32::INFINITY] {
+            let config = BalanceConfig {
+                fixed_step: bad,
+                ..BalanceConfig::default()
+            }
+            .sanitised();
+
+            assert!(
+                config.fixed_step.is_finite() && config.fixed_step > 0.0,
+                "fixed_step {bad} was not sanitised: {}",
+                config.fixed_step
+            );
+
+            // And the game actually advances, which is the property that matters.
+            let mut game = BalanceGame::new(BalanceConfig {
+                fixed_step: bad,
+                ..BalanceConfig::default()
+            });
+
+            // Asserted *before* `update`, because that call is what would hang: a
+            // regression here must fail in milliseconds, not sit until the CI job's
+            // timeout expires with no message.
+            assert!(
+                game.config().fixed_step.is_finite() && game.config().fixed_step > 0.0,
+                "BalanceGame::new stored fixed_step {bad} unsanitised; update() would hang"
+            );
+
+            game.update((0.0, 0.0), 1.0 / 60.0);
+            assert!(
+                game.survived() > 0.0,
+                "a game with fixed_step {bad} never stepped"
+            );
+        }
+    }
+
+    #[test]
+    fn a_good_step_is_left_alone() {
+        let config = BalanceConfig {
+            fixed_step: 1.0 / 240.0,
+            ..BalanceConfig::default()
+        }
+        .sanitised();
+
+        assert_eq!(config.fixed_step, 1.0 / 240.0);
     }
 }

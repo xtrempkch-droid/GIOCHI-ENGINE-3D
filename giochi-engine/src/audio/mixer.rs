@@ -133,7 +133,25 @@ impl AudioSystem {
 
     /// Releases the sound behind `handle`. Returns `false` for an invalid or
     /// already-destroyed handle.
+    ///
+    /// Every sound-effect channel is halted first, and this is a safety requirement
+    /// rather than politeness: SDL_mixer keeps the `Mix_Chunk` pointer for as long as a
+    /// channel is playing it, so dropping the chunk mid-playback is a use-after-free in
+    /// the mixer thread — audible as garbage and reproducible as a crash. The `sdl2`
+    /// crate offers no way to ask *which* chunk a channel holds (`Channel::get_chunk`
+    /// returns a `Chunk` whose `PartialEq` also compares the ownership flag, and the raw
+    /// pointer is private), so the choice is between halting everything and freeing
+    /// memory that is still in use.
+    ///
+    /// [`AudioSystem::destroy_music`] already shipped with the same reasoning for the one
+    /// music stream; this path had been missed.
     pub fn destroy_sound(&mut self, handle: SoundHandle) -> bool {
+        if !self.sounds.contains(handle) {
+            return false;
+        }
+        if self.audio.is_some() {
+            Channel::all().halt();
+        }
         self.sounds.remove(handle)
     }
 
@@ -179,8 +197,12 @@ impl AudioSystem {
 
     /// Releases the music track behind `handle`.
     ///
-    /// If the handle is the track currently playing, playback is stopped first,
-    /// so a freed `Mix_Music` is never left in the mixer.
+    /// **Playback stops, whatever `handle` is**, and that is a limitation rather than a
+    /// choice: SDL_mixer exposes no way to ask which `Mix_Music` the single stream is
+    /// playing (`Mix_PlayingMusic` says whether, not what), so the only safe thing to do
+    /// before freeing is to halt. Freeing a `Mix_Music` that is still playing is a
+    /// use-after-free in the mixer thread. The earlier wording claimed playback stopped
+    /// only for the playing track, which the code never did.
     pub fn destroy_music(&mut self, handle: MusicHandle) -> bool {
         if self.music.get(handle).is_some() {
             Music::halt();

@@ -314,13 +314,16 @@ impl RenderContext3D {
 
     /// Releases a mesh. Returns `false` for `0` or an already-destroyed handle.
     pub fn destroy_mesh(&mut self, handle: MeshHandle) -> bool {
-        let Some(mesh) = self.meshes.get(handle) else {
+        // `take`, not `get`: `get` clones the `Rc`, and `Rc::try_unwrap` never succeeds on
+        // a count of two — so every mesh used to keep its VAO, VBO and EBO alive in the
+        // driver while the registry reported it gone. See `HandleRegistry::take`.
+        let Some(mesh) = self.meshes.take(handle) else {
             return false;
         };
 
-        // `Rc::try_unwrap` only succeeds when nothing else holds the mesh. A caller
-        // holding a clone would otherwise cause the GL objects to leak silently, so the
-        // failure is logged rather than swallowed.
+        // The unwrap can still fail when a caller holds a clone. That is now a real
+        // fault worth reporting: the entry is gone either way, so the objects leak unless
+        // the caller drops its clone first.
         match std::rc::Rc::try_unwrap(mesh) {
             Ok(mesh) => mesh.destroy(self.gl.glow()),
             Err(_) => {
@@ -328,7 +331,7 @@ impl RenderContext3D {
             }
         }
 
-        self.meshes.remove(handle)
+        true
     }
 
     /// Number of live meshes.
@@ -402,7 +405,9 @@ impl RenderContext3D {
 
     /// Releases a shader program. Returns `false` for `0` or an unknown handle.
     pub fn destroy_shader(&mut self, handle: ShaderHandle) -> bool {
-        let Some(program) = self.shaders.get(handle) else {
+        // `take`, not `get`: see `destroy_mesh` and `HandleRegistry::take`. Using `get`
+        // here meant the GL program was never deleted.
+        let Some(program) = self.shaders.take(handle) else {
             return false;
         };
 
@@ -413,7 +418,7 @@ impl RenderContext3D {
             }
         }
 
-        self.shaders.remove(handle)
+        true
     }
 
     /// Number of live shader programs.
@@ -572,5 +577,115 @@ mod tests {
         };
 
         assert_eq!(state.clear_color.to_array(), [1.0, 0.0, 0.5, 1.0]);
+    }
+
+    /// Returns a headless `RenderContext3D`, or `None` when this machine has no GL driver.
+    ///
+    /// A unit test rather than an integration test because proving the objects were
+    /// deleted needs `is_buffer`/`is_program` and the GL names, which are crate-internal.
+    ///
+    /// **One renderer per test binary, deliberately.** A second `Platform::new()` in the
+    /// same process returns an error, so two tests that each built one would leave the
+    /// second silently skipping — and a skipped test is reported as `ok`, which is a
+    /// false green. Everything that needs a context lives in the single test below.
+    fn headless_renderer() -> Option<RenderContext3D> {
+        use giochi_engine::platform::sdl::Platform;
+        use giochi_engine::platform::window::{Window, WindowConfig};
+
+        std::env::set_var("SDL_VIDEODRIVER", "offscreen");
+        let platform = Platform::new().ok()?;
+        crate::context::configure_attributes(&platform, crate::context::GlesVersion::Gles2).ok()?;
+        let window = Window::new_opengl(&platform, WindowConfig::new(64, 64), "test").ok()?;
+        let gl = crate::context::create(&window).ok()?;
+
+        // The window and the platform must outlive the context, and keeping them in the
+        // renderer would mean widening `RenderContext3D` for a test. A test binary that
+        // exits in milliseconds leaks nothing anyone can observe.
+        std::mem::forget(window);
+        std::mem::forget(platform);
+
+        Some(RenderContext3D::new(gl))
+    }
+
+    #[test]
+    fn destroying_a_resource_really_deletes_its_gl_objects() {
+        let Some(mut render) = headless_renderer() else {
+            eprintln!("skipped: no OpenGL ES driver available");
+            return;
+        };
+
+        // Everything is created and *then* destroyed, so that all the assertions below run
+        // against the same driver state. Asserting straight after each destroy would stop
+        // at the first failure and leave the other paths — `release_all` in particular —
+        // unverified.
+        let explicit_mesh = render.create_cube_mesh(1.0).expect("cube");
+        let explicit_shader = render
+            .create_builtin_shader(crate::shader::BuiltinShader::Flat)
+            .expect("flat");
+        let bulk_mesh = render.create_cube_mesh(2.0).expect("cube");
+        let bulk_shader = render
+            .create_builtin_shader(crate::shader::BuiltinShader::Phong)
+            .expect("phong");
+
+        // The test module lives inside this module, so it reads the registries directly;
+        // no test-only accessor on the public type is needed.
+        let (_, explicit_vbo, explicit_ebo) =
+            render.meshes.get(explicit_mesh).expect("mesh").gl_names();
+        let explicit_program = render
+            .shaders
+            .get(explicit_shader)
+            .expect("shader")
+            .gl_name();
+        let (_, bulk_vbo, _) = render.meshes.get(bulk_mesh).expect("mesh").gl_names();
+        let bulk_program = render.shaders.get(bulk_shader).expect("shader").gl_name();
+
+        // SAFETY: the context is current and every name was alive a moment ago.
+        unsafe {
+            assert!(
+                render.glow().is_buffer(explicit_vbo),
+                "VBO missing before destroy"
+            );
+            assert!(
+                render.glow().is_program(explicit_program),
+                "program missing before destroy"
+            );
+        }
+
+        // ---- explicit destroy, one resource at a time -------------------------
+        assert!(render.destroy_mesh(explicit_mesh));
+        assert!(render.destroy_shader(explicit_shader));
+
+        // ---- release_all, which goes through the same two calls ---------------
+        // It inherited the same leak, so both paths are asserted together and a future
+        // fix cannot repair one and leave the other.
+        assert!(render.release_all());
+        assert_eq!(render.mesh_count(), 0);
+        assert_eq!(render.shader_count(), 0);
+
+        // SAFETY: the context is current. `take` removed the registry's reference and the
+        // `Rc` was unwrapped, so the driver deleted the names; GLES answers `false` for a
+        // deleted name rather than raising an error.
+        unsafe {
+            assert!(
+                !render.glow().is_buffer(explicit_vbo),
+                "the VBO survived destroy_mesh: GL objects are leaking"
+            );
+            assert!(
+                !render.glow().is_buffer(explicit_ebo),
+                "the EBO survived destroy_mesh: GL objects are leaking"
+            );
+            assert!(
+                !render.glow().is_program(explicit_program),
+                "the program survived destroy_shader: GL objects are leaking"
+            );
+            assert!(
+                !render.glow().is_buffer(bulk_vbo),
+                "release_all leaked a VBO"
+            );
+            assert!(
+                !render.glow().is_program(bulk_program),
+                "release_all leaked a program"
+            );
+        }
     }
 }

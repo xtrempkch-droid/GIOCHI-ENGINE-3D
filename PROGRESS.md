@@ -53,6 +53,71 @@ Verificações manuais da fase:
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
 
+## Auditoria profunda do repositório — 4 defeitos reais
+Data: 2026-11-08
+
+Auditoria pedida pelo utilizador. Método: lints agressivos (`clippy::pedantic` e
+`nursery`), varrimento de `unsafe`/`unwrap`/`panic`/`TODO` fora de módulos de teste, e
+leitura dos caminhos críticos (registos de handles, mixer, loop de jogo, física, ABI).
+
+O que **não** havia, e vale registar: zero `unsafe` fora das chamadas GL obrigatórias,
+zero `unwrap`/`expect`/`panic!` em código de produção em todas as crates, zero
+`TODO`/`FIXME`, e uma única supressão de lint em todo o código (um `module_inception`
+cosmético).
+
+### 1. Todos os meshes e shaders 3D perdiam os objectos GL (o mais grave)
+
+`destroy_mesh` e `destroy_shader` liam o recurso com `HandleRegistry::get`, que
+**clona** o `Rc` — contagem 2 — e depois pediam `Rc::try_unwrap`, que exige contagem 1.
+Nunca podia ter sucesso. A entrada do registo desaparecia, mas o VAO, VBO, EBO e o
+programa ficavam vivos no driver. O único rasto era um `log::warn!` que nenhum exemplo
+mostra, porque nenhum inicializa logger.
+
+Pior: os exemplos imprimiam `released: 0 meshes and 0 shaders left`, que conta **entradas
+do registo**, não objectos GL. Lia-se como confirmação de uma limpeza que não acontecia.
+O `release_all` tinha o mesmo bug, por ser construído sobre as mesmas duas chamadas.
+
+Correcção: `HandleRegistry::take` remove e devolve a única referência. O `remove` foi
+**eliminado** — é a forma que convida ao erro. Teste:
+`destroying_a_resource_really_deletes_its_gl_objects` pergunta ao driver com
+`glIsBuffer`/`glIsProgram` antes e depois, e foi verificado a falhar contra o código antigo.
+
+### 2. `destroy_sound` libertava um `Mix_Chunk` que podia estar a tocar
+
+O SDL_mixer guarda o ponteiro do chunk enquanto um canal o reproduz; libertá-lo a meio é
+use-after-free na thread do mixer — áudio corrompido e depois crash. O `destroy_music`
+sempre fez `halt()` antes; o caminho dos sons foi esquecido. Corrigido, e o doc explica
+porque tem de ser todos os canais: a crate `sdl2` não permite perguntar *qual* chunk um
+canal tem (`Chunk::PartialEq` inclui a flag de posse e o ponteiro cru é privado).
+
+### 3. `fixed_step` a zero (ou negativo) pendurava o jogo para sempre
+
+Os campos de `BalanceConfig` são públicos e `BalanceGame::update` faz
+`while accumulator >= fixed_step` subtraindo o passo: zero nunca progride, negativo sobe o
+acumulador. O jogo congelava sem erro e sem frame. `BalanceConfig::sanitised` limita a
+1 ms e `BalanceGame::new` aplica-o. O teste afirma o valor **antes** do `update`, para uma
+regressão falhar em milissegundos em vez de consumir o timeout do CI.
+
+### 4. `draw_line` ignorava o guarda de coordenadas
+
+Convertia com `as i32` enquanto todos os outros caminhos do módulo passam por
+`to_sdl_coord`, que mapeia não-finitos para 0 e limita o resto. O `as` do Rust satura,
+portanto um extremo infinito virava `i32::MAX`/`i32::MIN` e era entregue ao clipping
+inteiro do SDL. (Para `NaN` os dois caminhos dão 0, e o comentário da correcção di-lo em
+vez de exagerar o caso.)
+
+### 5. Documentação que não correspondia ao código
+
+`destroy_music` afirmava parar a reprodução apenas quando o handle era a faixa a tocar.
+Para sempre, porque não há API para saber qual toca. O código estava certo e a frase não.
+
+### Um falso-verde apanhado durante a própria auditoria
+
+A primeira versão dos testes de GL criava dois `Platform` no mesmo processo; o segundo
+falha, o teste imprimia "skipped" e o resultado aparecia como **`ok`**. Um teste saltado
+reportado como verde é precisamente a classe de problema que esta auditoria procurava, e
+foi corrigido fundindo tudo num único teste com um só contexto.
+
 ## Segunda validação em hardware **diferente**: Powkiddy x55 (Mali-G52)
 Data: 2026-11-07
 

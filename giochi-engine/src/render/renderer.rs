@@ -281,9 +281,16 @@ impl RenderContext {
     /// once by the approximation).
     pub fn draw_line(&mut self, from: Vec2, to: Vec2, color: Color) {
         self.canvas.set_draw_color(to_sdl_color(color));
+        // `to_sdl_coord`, not `as i32`, so this path follows the same policy as every other
+        // draw in this module. Rust's `as` is saturating, so an infinite endpoint became
+        // `i32::MAX`/`i32::MIN` and was handed to SDL's integer line clipping, where
+        // extreme coordinates can overflow the C arithmetic; the guard maps a non-finite
+        // value to 0 and clamps the rest to the representable range. `NaN` happens to map
+        // to 0 either way, so this is about consistency and the infinite case, not about a
+        // NaN silently moving the line.
         if let Err(err) = self.canvas.draw_line(
-            (from.x.round() as i32, from.y.round() as i32),
-            (to.x.round() as i32, to.y.round() as i32),
+            (to_sdl_coord(from.x), to_sdl_coord(from.y)),
+            (to_sdl_coord(to.x), to_sdl_coord(to.y)),
         ) {
             log::error!("draw_line failed: {err}");
         }

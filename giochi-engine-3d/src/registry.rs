@@ -59,12 +59,21 @@ impl<T> HandleRegistry<T> {
         self.entries.borrow().get(&handle).cloned()
     }
 
-    /// Removes `handle`, returning whether it existed.
-    pub(crate) fn remove(&self, handle: Handle) -> bool {
+    /// Removes `handle` and hands back the registry's own reference.
+    ///
+    /// This is the only correct way to take ownership of a resource that needs an explicit
+    /// teardown, and the distinction from [`Self::get`] is load-bearing rather than
+    /// stylistic: `get` **clones** the `Rc`, so the count is two by the time the caller
+    /// sees it and `Rc::try_unwrap` can never succeed. Deleting a GL buffer needs exactly
+    /// that unwrap, so using `get` there silently leaked every mesh and shader — the
+    /// registry entry disappeared while the VAO, VBO, EBO and program stayed alive in the
+    /// driver. `take` returns the sole remaining strong reference (the temporary clones
+    /// `get` hands to a draw are dropped before the draw returns).
+    pub(crate) fn take(&self, handle: Handle) -> Option<Rc<T>> {
         if handle == NULL_HANDLE {
-            return false;
+            return None;
         }
-        self.entries.borrow_mut().remove(&handle).is_some()
+        self.entries.borrow_mut().remove(&handle)
     }
 
     /// Number of live entries.
@@ -104,14 +113,14 @@ mod tests {
         let registry: HandleRegistry<i32> = HandleRegistry::new();
 
         assert!(registry.get(NULL_HANDLE).is_none());
-        assert!(!registry.remove(NULL_HANDLE));
+        assert!(registry.take(NULL_HANDLE).is_none());
     }
 
     #[test]
     fn handles_are_never_reused_so_a_stale_one_cannot_alias_a_new_resource() {
         let registry = HandleRegistry::new();
         let first = registry.insert("a");
-        assert!(registry.remove(first));
+        assert!(registry.take(first).is_some());
         let second = registry.insert("b");
 
         assert_ne!(
@@ -127,8 +136,8 @@ mod tests {
         let registry = HandleRegistry::new();
         let handle = registry.insert(1);
 
-        assert!(registry.remove(handle));
-        assert!(!registry.remove(handle));
+        assert!(registry.take(handle).is_some());
+        assert!(registry.take(handle).is_none());
     }
 
     #[test]
@@ -140,10 +149,10 @@ mod tests {
         let b = registry.insert(2);
         assert_eq!(registry.len(), 2);
 
-        registry.remove(a);
+        drop(registry.take(a));
         assert_eq!(registry.len(), 1);
 
-        registry.remove(b);
+        drop(registry.take(b));
         assert!(registry.is_empty());
         assert!(registry.get(b).is_none());
     }

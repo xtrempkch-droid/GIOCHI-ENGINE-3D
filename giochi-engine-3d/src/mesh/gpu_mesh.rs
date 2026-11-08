@@ -206,6 +206,16 @@ impl Mesh {
         self.vao.is_some()
     }
 
+    /// The raw GL names this mesh owns, for tests that must prove they were deleted.
+    ///
+    /// Exists only for the regression test: the registry leak it catches was invisible
+    /// precisely because nothing could ask the driver "is this buffer still alive after
+    /// `destroy`".
+    #[cfg(test)]
+    pub(crate) fn gl_names(&self) -> (Option<glow::VertexArray>, glow::Buffer, glow::Buffer) {
+        (self.vao, self.vbo, self.ebo)
+    }
+
     /// Releases every GL object.
     ///
     /// Explicit for the same reason as [`Program::destroy`]: a `Drop` impl cannot see

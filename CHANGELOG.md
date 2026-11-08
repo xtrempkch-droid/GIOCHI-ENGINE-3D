@@ -6,7 +6,43 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Nothing yet.
+### Fixed — an audit found four real defects
+
+**Every 3D mesh and shader leaked its GL objects.** `destroy_mesh` and `destroy_shader`
+read the resource with `HandleRegistry::get`, which **clones** the `Rc`, and then asked
+`Rc::try_unwrap` for ownership — with a strong count of two that can never succeed. The
+registry entry disappeared, the VAO, VBO, EBO and program stayed alive in the driver, and
+the only trace was a `log::warn!` that no example initialises a logger to show. The
+examples printing `released: 0 meshes and 0 shaders left` were counting registry entries,
+so they read as confirmation of a cleanup that had not happened. `release_all` had the
+same bug, being built on the same two calls. A new `HandleRegistry::take` removes and
+returns the sole reference; `remove` is gone, because it is the shape that invites the
+mistake. Regression test: `destroying_a_resource_really_deletes_its_gl_objects` asks the
+driver with `glIsBuffer`/`glIsProgram` before and after, and was verified to fail against
+the old code.
+
+**`destroy_sound` freed a `Mix_Chunk` that could still be playing.** SDL_mixer keeps the
+chunk pointer for as long as a channel plays it, so dropping it mid-playback is a
+use-after-free in the mixer thread — garbage audio, then a crash. `destroy_music` had
+always halted first; the sound path had been missed. It now halts the effect channels
+first, and the doc explains why that has to be all of them: the `sdl2` crate cannot say
+*which* chunk a channel holds.
+
+**A `fixed_step` of zero or less hung the balance game forever.** `BalanceConfig`'s fields
+are public and `BalanceGame::update` loops `while accumulator >= fixed_step`, subtracting
+the step: zero never progresses and a negative one raises the accumulator, so the game
+froze with no error and no frame. `BalanceConfig::sanitised` clamps it to at least 1 ms and
+`BalanceGame::new` applies it.
+
+**`draw_line` bypassed the coordinate guard.** It converted endpoints with `as i32` while
+every other draw path in the module goes through `to_sdl_coord`, which maps a non-finite
+value to 0 and clamps the rest. Rust's `as` is saturating, so an infinite endpoint became
+`i32::MAX`/`i32::MIN` and was handed to SDL's integer line clipping. (`NaN` mapped to 0
+either way, so the comment in the fix says so rather than overstating the case.)
+
+Also corrected: `destroy_music`'s doc claimed playback stopped only for the track being
+destroyed. It always stops, because SDL_mixer exposes no way to ask which `Mix_Music` is
+playing; the code was right and the sentence was not.
 
 ## [0.2.0] - 2026-11-07
 

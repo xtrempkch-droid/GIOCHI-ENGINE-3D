@@ -212,6 +212,15 @@ impl Program {
         }
     }
 
+    /// The raw GL program name, for tests that must prove it was deleted.
+    ///
+    /// Exists only for the regression test: the registry leak it catches was invisible
+    /// because nothing could ask the driver "is this program still alive after `destroy`".
+    #[cfg(test)]
+    pub(crate) fn gl_name(&self) -> glow::Program {
+        self.handle
+    }
+
     /// The vertex source this program was built from, for diagnostics.
     pub fn vertex_source(&self) -> &str {
         &self.vertex_source
