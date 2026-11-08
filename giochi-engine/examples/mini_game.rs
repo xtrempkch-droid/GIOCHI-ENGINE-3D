@@ -62,7 +62,7 @@ fn asset(name: &str) -> String {
 }
 
 fn run() -> Result<(), String> {
-    let options = parse_args();
+    let options = parse_args().map_err(|error| format!("argumentos inválidos: {error}"))?;
     let frame_limit = options.frames;
 
     let mut engine = Engine::new(EngineConfig::new(WIDTH, HEIGHT, "giochi — mini_game"))
@@ -484,19 +484,39 @@ struct Options {
     auto_play: bool,
 }
 
-fn parse_args() -> Options {
+/// Parses the command line, rejecting anything it does not understand.
+///
+/// A typo such as `--frames=3oo` used to become `None` — "no frame limit" — which for an
+/// auto-playing reference game meant a run that never ends. See the same fix in the 3D
+/// examples for the full story.
+fn parse_args() -> Result<Options, String> {
     let mut options = Options::default();
     let mut args = std::env::args().skip(1);
 
     while let Some(arg) = args.next() {
         if let Some(value) = arg.strip_prefix("--frames=") {
-            options.frames = value.parse().ok();
+            options.frames = Some(
+                value
+                    .parse()
+                    .map_err(|_| format!("--frames expects a number, got '{value}'"))?,
+            );
         } else if arg == "--frames" {
-            options.frames = args.next().and_then(|value| value.parse().ok());
+            let value = args.next().ok_or_else(|| {
+                "--frames needs a value; accepted: --frames N, --auto".to_string()
+            })?;
+            options.frames = Some(
+                value
+                    .parse()
+                    .map_err(|_| format!("--frames expects a number, got '{value}'"))?,
+            );
         } else if arg == "--auto" {
             options.auto_play = true;
+        } else {
+            return Err(format!(
+                "unknown argument '{arg}'; accepted: --frames N, --auto"
+            ));
         }
     }
 
-    options
+    Ok(options)
 }

@@ -61,7 +61,8 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), String> {
-    let frame_limit = parse_frame_limit();
+    let frame_limit =
+        parse_frame_limit().map_err(|error| format!("argumentos inválidos: {error}"))?;
 
     let platform = Platform::new().map_err(|error| error.to_string())?;
     let window = platform
@@ -239,15 +240,29 @@ fn draw(
 }
 
 /// Reads `--frames N` from the command line; used by smoke tests.
-fn parse_frame_limit() -> Option<u64> {
+///
+/// A typo such as `--frames=3oo` is an error rather than "no limit": an example that runs
+/// with no frame limit never terminates, and a smoke test driven by a script would hang
+/// instead of reporting the typo.
+fn parse_frame_limit() -> Result<Option<u64>, String> {
     let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        if let Some(value) = arg.strip_prefix("--frames=") {
-            return value.parse().ok();
-        }
-        if arg == "--frames" {
-            return args.next().and_then(|value| value.parse().ok());
-        }
+    let Some(arg) = args.next() else {
+        return Ok(None);
+    };
+    if let Some(value) = arg.strip_prefix("--frames=") {
+        return value
+            .parse()
+            .map(Some)
+            .map_err(|_| format!("--frames expects a number, got '{value}'"));
     }
-    None
+    if arg == "--frames" {
+        let value = args
+            .next()
+            .ok_or_else(|| "--frames needs a value".to_string())?;
+        return value
+            .parse()
+            .map(Some)
+            .map_err(|_| format!("--frames expects a number, got '{value}'"));
+    }
+    Err(format!("unknown argument '{arg}'; accepted: --frames N"))
 }

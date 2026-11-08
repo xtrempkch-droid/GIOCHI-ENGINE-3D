@@ -30,7 +30,13 @@ const PLAYER_SPEED: f32 = 320.0;
 fn main() -> ExitCode {
     env_logger::init();
 
-    let options = Options::parse();
+    let options = match Options::parse() {
+        Ok(options) => options,
+        Err(message) => {
+            eprintln!("erro: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
     if let Some(arguments) = options.lua.clone() {
         return run_lua(&arguments);
     }
@@ -61,9 +67,22 @@ struct Options {
 }
 
 impl Options {
-    fn parse() -> Self {
+    /// Parses the command line, rejecting anything it does not understand.
+    ///
+    /// This used to ignore unknown flags and turn an unparseable number into `None`,
+    /// which for `--frames` means "no limit": a typo such as `--frames=3oo` produced an
+    /// unattended run that never terminates, and on a console that is a black screen
+    /// rather than a message. The 3D examples received this treatment in an earlier audit;
+    /// the shipped 2D binary had been left with the old parser.
+    fn parse() -> Result<Self, String> {
+        Self::parse_from(std::env::args().skip(1))
+    }
+
+    /// Parses a list of arguments, so the rules are testable without reading the real
+    /// process arguments.
+    fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Self, String> {
         let mut options = Self::default();
-        let mut args = std::env::args().skip(1);
+        let mut args = args.into_iter();
 
         while let Some(arg) = args.next() {
             if arg == "lua" {
@@ -71,20 +90,45 @@ impl Options {
                 options.lua = Some(args.collect());
                 break;
             } else if let Some(value) = arg.strip_prefix("--frames=") {
-                options.frames = value.parse().ok();
+                options.frames = Some(parse_number(value, "--frames")?);
             } else if arg == "--frames" {
-                options.frames = args.next().and_then(|value| value.parse().ok());
+                options.frames = Some(parse_number(
+                    next_value(&mut args, "--frames")?,
+                    "--frames",
+                )?);
             } else if arg == "--verify" {
                 options.verify = true;
             } else if arg == "--quadro" {
-                options.quadro = args.next();
+                options.quadro = Some(next_value(&mut args, "--quadro")?);
             } else if let Some(value) = arg.strip_prefix("--quadro=") {
                 options.quadro = Some(value.to_string());
+            } else {
+                return Err(format!(
+                    "unknown argument '{arg}'; accepted: --frames N, --verify, --quadro PATH, \
+                     lua <script.lua> [argumentos...]"
+                ));
             }
         }
 
-        options
+        Ok(options)
     }
+}
+
+/// Returns the value that follows a flag, or an error naming it.
+fn next_value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, String> {
+    args.next().ok_or_else(|| {
+        format!(
+            "{flag} needs a value; accepted: --frames N, --verify, --quadro PATH, lua <script.lua>"
+        )
+    })
+}
+
+/// Parses a flag's value, naming the flag when it is not a number.
+fn parse_number<T: std::str::FromStr>(value: impl AsRef<str>, flag: &str) -> Result<T, String> {
+    let value = value.as_ref();
+    value
+        .parse()
+        .map_err(|_| format!("{flag} expects a number, got '{value}'"))
 }
 
 /// Resolves an asset path.
@@ -490,12 +534,86 @@ fn write_beep_wav(path: &std::path::Path) -> Result<(), giochi_engine::GiochiErr
 mod tests {
     use super::*;
 
+    fn parse(args: &[&str]) -> Result<Options, String> {
+        Options::parse_from(args.iter().map(|arg| (*arg).to_string()))
+    }
+
     #[test]
     fn options_default_to_an_interactive_run() {
         let options = Options::default();
 
         assert_eq!(options.frames, None);
         assert!(!options.verify);
+    }
+
+    #[test]
+    fn a_frame_limit_is_parsed_in_both_spellings() {
+        assert_eq!(parse(&["--frames", "120"]).unwrap().frames, Some(120));
+        assert_eq!(parse(&["--frames=120"]).unwrap().frames, Some(120));
+    }
+
+    #[test]
+    fn a_mistyped_number_is_an_error_not_an_unlimited_run() {
+        // `--frames=3oo` used to parse as `None`, which for `--frames` means "no limit":
+        // an unattended run that never terminates. The message must name the flag and the
+        // value so the caller can see the typo.
+        let error = parse(&["--frames=3oo"]).expect_err("a typo must fail");
+
+        assert!(error.contains("--frames"), "{error}");
+        assert!(error.contains("3oo"), "{error}");
+    }
+
+    #[test]
+    fn a_missing_value_is_an_error() {
+        let error = parse(&["--frames"]).expect_err("a missing value must fail");
+
+        assert!(error.contains("--frames"), "{error}");
+        assert!(error.contains("needs a value"), "{error}");
+    }
+
+    #[test]
+    fn an_unknown_flag_is_an_error_that_lists_the_accepted_ones() {
+        let error = parse(&["--framse=10"]).expect_err("an unknown flag must fail");
+
+        assert!(error.contains("--framse=10"), "{error}");
+        assert!(error.contains("--frames N"), "{error}");
+        assert!(error.contains("--quadro"), "{error}");
+    }
+
+    #[test]
+    fn the_known_flags_still_work() {
+        let options = parse(&["--verify", "--quadro", "out.bmp", "--frames", "3"]).unwrap();
+
+        assert!(options.verify);
+        assert_eq!(options.quadro.as_deref(), Some("out.bmp"));
+        assert_eq!(options.frames, Some(3));
+        assert_eq!(
+            parse(&["--quadro=out.bmp"]).unwrap().quadro.as_deref(),
+            Some("out.bmp")
+        );
+    }
+
+    #[test]
+    fn everything_after_lua_belongs_to_the_script() {
+        // The script's own arguments must not be validated as engine flags: a script
+        // named `--frames` or a value of `3oo` is the script's business.
+        let options = parse(&["lua", "game.lua", "--frames", "3oo", "--auto"]).unwrap();
+
+        assert_eq!(
+            options.lua.as_deref(),
+            Some(
+                &[
+                    "game.lua".to_string(),
+                    "--frames".to_string(),
+                    "3oo".to_string(),
+                    "--auto".to_string()
+                ][..]
+            )
+        );
+        assert_eq!(
+            options.frames, None,
+            "the script's flags are not the engine's"
+        );
     }
 
     #[test]

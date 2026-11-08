@@ -44,7 +44,7 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), String> {
-    let options = parse_args();
+    let options = parse_args().map_err(|error| format!("argumentos inválidos: {error}"))?;
     let frame_limit = options.frames;
     let platform = Platform::new().map_err(|error| error.to_string())?;
 
@@ -229,19 +229,37 @@ struct Options {
     beep: bool,
 }
 
-fn parse_args() -> Options {
+/// Parses the command line, rejecting anything it does not understand, so a typo such as
+/// `--frames=3oo` is a message rather than an unlimited run (the same fix the 3D examples
+/// received in an earlier audit).
+fn parse_args() -> Result<Options, String> {
     let mut options = Options::default();
     let mut args = std::env::args().skip(1);
 
     while let Some(arg) = args.next() {
         if let Some(value) = arg.strip_prefix("--frames=") {
-            options.frames = value.parse().ok();
+            options.frames = Some(
+                value
+                    .parse()
+                    .map_err(|_| format!("--frames expects a number, got '{value}'"))?,
+            );
         } else if arg == "--frames" {
-            options.frames = args.next().and_then(|value| value.parse().ok());
+            let value = args.next().ok_or_else(|| {
+                "--frames needs a value; accepted: --frames N, --beep".to_string()
+            })?;
+            options.frames = Some(
+                value
+                    .parse()
+                    .map_err(|_| format!("--frames expects a number, got '{value}'"))?,
+            );
         } else if arg == "--beep" {
             options.beep = true;
+        } else {
+            return Err(format!(
+                "unknown argument '{arg}'; accepted: --frames N, --beep"
+            ));
         }
     }
 
-    options
+    Ok(options)
 }
