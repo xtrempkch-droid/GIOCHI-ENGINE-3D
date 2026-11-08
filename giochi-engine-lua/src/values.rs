@@ -129,6 +129,19 @@ fn number(table: &Table, index: i32, name: &str) -> mlua::Result<f32> {
 
 fn parse_hex_color(text: &str) -> mlua::Result<Color> {
     let digits = text.strip_prefix('#').unwrap_or(text);
+
+    // Hex is ASCII by definition, so anything else is rejected *before* the string is
+    // sliced. `&digits[0..2]` panics when the index is not a character boundary, and a
+    // 6-byte string of 2-byte characters — `"日日"` — is exactly that: it passes a byte
+    // length check and then splits a character in half. A script must get an error, never
+    // a panic: `mlua` catches the unwind and re-raises it as a Rust panic the host then
+    // has to survive.
+    if !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(mlua::Error::RuntimeError(format!(
+            "'{text}' is not a colour: the digits must be 0-9, a-f or A-F"
+        )));
+    }
+
     let expanded;
     let digits = match digits.len() {
         3 => {
@@ -167,6 +180,32 @@ mod tests {
         assert_eq!(parse_hex_color("#11223380").unwrap().a, 0x80);
         assert!(parse_hex_color("#12345").is_err());
         assert!(parse_hex_color("#zzzzzz").is_err());
+    }
+
+    #[test]
+    fn a_multi_byte_string_is_an_error_and_not_a_panic() {
+        // Every one of these has a byte length the old `match digits.len()` accepted
+        // (6 or 8), and none of them is ASCII: slicing at 0..2, 2..4 or 4..6 splits a
+        // character, which is a panic and not an `Err`. `"日日"` is 6 bytes, 2 chars.
+        for text in [
+            "日日",               // 6 bytes, 2 chars
+            "#日日",              // the same with the sigil
+            "aaaa日a",            // 8 bytes, mixes hex and not
+            "#ABCDEé",            // 8 bytes, one 2-byte char
+            "\u{1f600}\u{1f600}", // 8 bytes, two 4-byte chars
+        ] {
+            assert!(
+                parse_hex_color(text).is_err(),
+                "{text:?} ({} bytes) must be rejected, not panicked on",
+                text.len()
+            );
+        }
+    }
+
+    #[test]
+    fn hex_digits_are_case_insensitive() {
+        assert_eq!(parse_hex_color("#AABBCC").unwrap().r, 0xAA);
+        assert_eq!(parse_hex_color("#aAbBcC").unwrap().g, 0xBB);
     }
 
     #[test]

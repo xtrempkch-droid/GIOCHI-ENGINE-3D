@@ -145,15 +145,36 @@ fn lua_binding_end_to_end() {
             update = function() count = count + 1; if count >= 3 then giochi.quit() end end,
             render = function() end,
         }
-        -- The number of frames is not fixed: the first frame may run zero fixed
-        -- steps, so `count` can reach 3 on the fourth frame.
-        result = tostring(app:frames())
+        result = string.format("%d %d", app:frames(), count)
         "##,
     )
     .expect("quit must stop the loop");
-    let frames: u32 = quit.parse().expect("frames must be a number");
+    let mut parts = quit.split_whitespace();
+    let frames: u32 = parts
+        .next()
+        .and_then(|part| part.parse().ok())
+        .expect("frames must be a number");
+    let updates: u32 = parts
+        .next()
+        .and_then(|part| part.parse().ok())
+        .expect("updates must be a number");
+
+    // The contract is "quit() stops the loop early", so that is what is asserted: the
+    // condition really fired, and the run stopped far short of the 500-frame limit.
+    //
+    // How many *display* frames it takes is not a property of this code. `update` runs once
+    // per fixed step, and a frame absorbs every step its elapsed time covers — including the
+    // first frame's work, which on a slow software renderer can be several steps' worth. An
+    // earlier version of this test asserted `frames >= 3` and failed on exactly that: the
+    // run took 2 frames here because the first `present` cost ~120 ms. Asserting on `count`
+    // is both stricter about the thing that matters and free of that timing assumption.
     assert!(
-        (3..20).contains(&frames),
+        updates >= 3,
+        "the quit condition must have fired, so `update` must have run at least 3 times; \
+         it ran {updates}"
+    );
+    assert!(
+        (1..20).contains(&frames),
         "quit() must end the run long before the 500-frame limit, got {frames}"
     );
 
