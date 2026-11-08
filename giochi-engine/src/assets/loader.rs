@@ -63,6 +63,40 @@ pub fn read_asset(path: &str, buffer: &mut [u8]) -> Result<usize, GiochiError> {
     let bytes = fs::read(path)
         .map_err(|err| GiochiError::Asset(format!("failed to read asset '{path}': {err}")))?;
 
+    // `size` is a snapshot. A file that grows between the stat and the read would make
+    // `bytes` longer than both `size` and the caller's buffer, and the unconditional
+    // `buffer[..bytes.len()]` this function used to perform indexed straight past the
+    // end of a buffer the caller sized from `asset_size` — a panic reachable from C
+    // (`giochi_asset_read`) and from the Lua host. The mismatch is an error instead.
+    copy_verified_asset(path, size, buffer, bytes)
+}
+
+/// Copies `bytes` into `buffer` after verifying it still has the size the caller was told.
+///
+/// Split out of [`read_asset`] so the size-change race is testable without racing two
+/// syscalls against a writer.
+fn copy_verified_asset(
+    path: &str,
+    expected_size: usize,
+    buffer: &mut [u8],
+    bytes: Vec<u8>,
+) -> Result<usize, GiochiError> {
+    if bytes.len() != expected_size {
+        return Err(GiochiError::Asset(format!(
+            "asset '{path}' changed size between stat and read: expected {expected_size} \
+             bytes, read {}",
+            bytes.len()
+        )));
+    }
+    if bytes.len() > buffer.len() {
+        // Defensive: every caller pre-checks the buffer against the same `expected_size`,
+        // so this cannot fire through the public path; it keeps the invariant local.
+        return Err(GiochiError::Asset(format!(
+            "buffer of {} bytes is too small for asset '{path}' ({expected_size} bytes)",
+            buffer.len()
+        )));
+    }
+
     let read = bytes.len();
     buffer[..read].copy_from_slice(&bytes);
     Ok(read)
@@ -74,11 +108,22 @@ pub fn read_asset(path: &str, buffer: &mut [u8]) -> Result<usize, GiochiError> {
 /// this helper exists here and not as a `giochi_*` function.
 pub fn read_asset_vec(path: &str) -> Result<Vec<u8>, GiochiError> {
     let size = asset_size(path)?;
-    fs::read(path)
-        .map_err(|err| GiochiError::Asset(format!("failed to read asset '{path}': {err}")))
-        // The file could have been rewritten between the two syscalls; catch that in
-        // debug builds instead of handing back a length the caller was not told about.
-        .inspect(|bytes| debug_assert_eq!(bytes.len(), size))
+    let bytes = fs::read(path)
+        .map_err(|err| GiochiError::Asset(format!("failed to read asset '{path}': {err}")))?;
+
+    // Same race as `read_asset`: a file that grew after the stat would come back as a
+    // buffer longer than the size this function is documented to enforce, silently
+    // lifting the `MAX_ASSET_SIZE` cap. This used to be a `debug_assert`, which a
+    // release build — the one that ships — compiled out entirely.
+    if bytes.len() != size {
+        return Err(GiochiError::Asset(format!(
+            "asset '{path}' changed size between stat and read: expected {size} bytes, \
+             read {}",
+            bytes.len()
+        )));
+    }
+
+    Ok(bytes)
 }
 
 /// Returns the file name of `path` without its directory, for diagnostics.
@@ -167,6 +212,47 @@ mod tests {
         assert_eq!(
             read_asset_vec(path.to_str().unwrap()).expect("read"),
             b"giochi".to_vec()
+        );
+    }
+
+    #[test]
+    fn a_file_that_changed_size_between_stat_and_read_is_an_error_not_a_panic() {
+        // The race itself cannot be driven through the public function — the two syscalls
+        // are back to back — so the check is exercised the way a grown file would hit it:
+        // a `bytes` buffer longer than the size `asset_size` reported. The old code sliced
+        // `buffer[..bytes.len()]` unconditionally, so this exact condition indexed past the
+        // caller's buffer and panicked inside `giochi_asset_read` / the Lua host.
+        let path = temp_file("grown.bin", b"12345");
+        // Sized from the stat, exactly as a real caller does: `asset_size` said 3.
+        let mut buffer = [0u8; 3];
+
+        // Simulate the race: the stat saw 3 bytes and the read returned 5.
+        let expected = 3usize;
+        let bytes = b"12345".to_vec();
+        let error = copy_verified_asset(path.to_str().unwrap(), expected, &mut buffer, bytes)
+            .expect_err("a size mismatch must be an asset error");
+
+        assert_eq!(error.code(), crate::error::codes::ASSET);
+        assert!(
+            error.to_string().contains("changed size"),
+            "unexpected: {error}"
+        );
+        assert_eq!(buffer, [0u8; 3], "the buffer must be left untouched");
+    }
+
+    #[test]
+    fn a_read_shorter_than_the_stat_is_also_reported() {
+        // A file that shrank between the syscalls: the old code silently returned fewer
+        // bytes than `asset_size` promised, which a caller could misread as a read error.
+        let path = temp_file("shrunk.bin", b"12345");
+        let mut buffer = [0u8; 5];
+
+        let error = copy_verified_asset(path.to_str().unwrap(), 5, &mut buffer, b"12".to_vec())
+            .expect_err("a size mismatch must be an asset error");
+
+        assert!(
+            error.to_string().contains("changed size"),
+            "unexpected: {error}"
         );
     }
 
