@@ -99,6 +99,29 @@ de comprimento nulo (que normaliza para NaN).
 - Contra o header antigo o teste **não compila** — é essa a prova de regressão, verificada
   antes de a correcção ficar.
 
+### O que ficou por verificar, e porquê
+
+O `libgiochi.so` ARM64 compilado exporta **74** símbolos `giochi_*`, entre eles
+`giochi_renderer3d_set_light`, e os dois consumidores C (`c_smoke.c`, `c_smoke_3d.c`)
+compilam e ligam para aarch64 contra ele. **A execução no console não aconteceu:** a meio
+do deploy o aparelho desapareceu da rede — o adaptador USB-Ethernet `enx0247494f4348`
+deixou de existir no host, portanto foi o cabo ou a alimentação, não o SSH. O script foi
+interrompido.
+
+Consequência a ter em conta quando o aparelho voltar: o `hardware-check.sh` liberta o
+console fazendo `chmod 0644` no launcher, e essa alteração **persiste** se a energia cair
+antes do `restore_console`. Se o ecrã ficar preto no próximo arranque:
+
+```sh
+ssh root@10.55.0.2 'chmod 0755 /opt/giochi/apps/launcher/bin/giochi-launcher;
+                    rm -f /run/giochi/launcher-parado;
+                    for p in $(ps | grep "[g]iochi-init" | awk "{print \$1}"); do
+                        kill -TERM "$p"; done'
+```
+
+O resto da validação — os quatro consumidores em x86_64 (debug e release), os gates
+completos, o `check-aarch64.sh` e os dois jobs de CI — passou.
+
 ### O que a terceira passagem confirmou estar correcto
 
 Os tamanhos `28/32/88` batem entre Rust, contrato e C; o alinhamento é 4 em todos; o

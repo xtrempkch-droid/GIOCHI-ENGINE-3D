@@ -101,19 +101,39 @@ The script looks for the satellites under `$CROSS_SYSROOT/usr/lib/<triple>`,
 `$CROSS_SYSROOT/usr/lib/aarch64-linux-gnu`, `$CROSS_SYSROOT/lib/aarch64-linux-gnu`
 and `$CROSS_SYSROOT/usr/lib`, and adds a `-Lnative=` flag so `rustc` finds them.
 
-A sysroot must contain the full transitive closure of the satellites
-(`libpng16`, `libjpeg`, `libtiff`, `libwebp`, `libfreetype`, `libharfbuzz`,
-`libvorbisfile`, `libmodplug`, `libmpg123`, `libopusfile`, `libfluidsynth`, …).
-Copying only `libSDL2_mixer.so` and friends is not enough; the linker reports the
-missing symbols from the dependencies.
+A **minimal** sysroot is enough: the four SDL2 shared objects and their `lib*.so`
+symlinks, about 2 MB. Lifting the whole `usr/lib` over the console's USB-Ethernet link
+takes minutes and hundreds of megabytes, and it is not needed for either link:
+
+```bash
+mkdir -p /tmp/console-sysroot/usr/lib/aarch64-linux-gnu
+cd /tmp/console-sysroot/usr/lib/aarch64-linux-gnu
+for so in $(ssh root@console 'ls /usr/lib/libSDL2*.so.*'); do
+    scp -q root@console:"$so" .
+done
+# The unversioned names are what -lSDL2_image resolves against.
+ln -sf libSDL2-2.0.so.0       libSDL2.so
+ln -sf libSDL2_image-2.0.so.0 libSDL2_image.so
+ln -sf libSDL2_mixer-2.0.so.0 libSDL2_mixer.so
+ln -sf libSDL2_ttf-2.0.so.0   libSDL2_ttf.so
+```
+
+`libgiochi.so` is a shared object, so the ARM64 linker accepts unresolved references into
+its own dependencies and records them as `DT_NEEDED`; the device's loader resolves them at
+start-up, where they already exist. The transitive closure (`libpng16`, `libjpeg`,
+`libtiff`, `libwebp`, `libfreetype`, `libharfbuzz`, `libvorbisfile`, `libmodplug`,
+`libmpg123`, `libopusfile`, `libfluidsynth`, …) is only required if you link
+`libgiochi.a` **statically**, or if you want `ldd`-style verification on the build host.
+Verified by cross-building the workspace and both C consumers from a sysroot of exactly
+four files.
 
 **A sysroot without libc headers is still enough for the Rust build.** A vendor
 rootfs often ships only the shared objects. Cargo needs the ARM64 SDL2 `.so`s and the
 `.pc` files, nothing else, so the sysroot works as-is. Compiling a *C* consumer
-against it (`giochi-engine-capi/tests/c_smoke.c`) needs libc headers from the host's
+against it (`giochi-engine-capi/tests/c_smoke*.c`) needs libc headers from the host's
 cross toolchain (`/usr/aarch64-linux-gnu/include`) plus
-`-Wl,--allow-shlib-undefined -Wl,-rpath-link=$CROSS_SYSROOT/usr/lib`, because the
-sysroot's `.so`s reference libc, freetype and harfbuzz, which are not in it.
+`-Wl,--allow-shlib-undefined -Wl,-rpath-link=$CROSS_SYSROOT/usr/lib/aarch64-linux-gnu`,
+because the sysroot's `.so`s reference libc, freetype and harfbuzz, which are not in it.
 
 ## The linker
 
