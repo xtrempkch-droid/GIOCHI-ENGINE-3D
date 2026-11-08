@@ -59,20 +59,34 @@ impl BalanceConfig {
         self.platform_size * 0.5
     }
 
-    /// A copy with `fixed_step` in a range the sub-stepping loop can actually terminate on.
+    /// A copy in which every field is a number the simulation can actually run on.
     ///
-    /// The fields are public, so a caller can set any of them. `fixed_step` is the one that
-    /// matters for termination: [`BalanceGame::update`] loops `while accumulator >=
-    /// fixed_step` and subtracts the step each time, so a step of zero never makes progress
-    /// and a negative one moves the accumulator *up* — both hang the game loop with no
-    /// error and no frame. Clamping here is deliberate rather than returning an error:
-    /// a game that asked for an impossible step still wants to run, and the alternative is a
-    /// frozen console.
+    /// The fields are public, so a caller can set any of them, and several have a
+    /// "zero" that reads as reasonable but is not:
     ///
-    /// The floor is one millisecond, which is far finer than any display and bounded
-    /// enough that a `delta` clamped to 0.25 s needs at most 250 iterations.
+    /// * `fixed_step` is what the sub-stepping loop terminates on —
+    ///   [`BalanceGame::update`] loops `while accumulator >= fixed_step` and subtracts the
+    ///   step each time, so a step of zero never makes progress and a negative one moves the
+    ///   accumulator *up*. Both hang the loop with no error and no frame.
+    /// * `fall_duration` is the timer after which the ball respawns. Zero (the obvious
+    ///   spelling of "respawn immediately") or a negative or `NaN` value never satisfies the
+    ///   `fall_timer > 0.0` test that decrements it, so `respawn` is never reached: the ball
+    ///   stays off the board and `falls` climbs once per *frame*, forever.
+    /// * `ball_radius` divides the rolling angle in [`Ball::step`]. Zero or `NaN` makes the
+    ///   spin quaternion `NaN`, and a `NaN` model matrix draws an invisible ball.
+    /// * `platform_size` divides the edge proximity. Zero makes it `NaN`; a negative one
+    ///   makes the ball "fallen" while it is still at the centre, so the round never starts.
+    /// * `damping` is raised to `delta * 60`. A `NaN` turns the velocity `NaN` and then the
+    ///   position, which no longer compares as fallen either.
+    /// * `gravity`, `max_tilt` and `fall_margin` reach the integrator and the edge test
+    ///   directly; `NaN` in any of them propagates.
+    ///
+    /// Clamping is deliberate rather than returning an error: a game that asked for an
+    /// impossible value still wants to run, and the alternative on a console is a frozen or
+    /// blank screen with no way to say why. Each substitution is logged.
     pub fn sanitised(self) -> Self {
         const MIN_STEP: f32 = 1.0e-3;
+        const MIN_SIZE: f32 = 1.0e-3;
 
         let fixed_step = if self.fixed_step.is_finite() && self.fixed_step >= MIN_STEP {
             self.fixed_step
@@ -84,7 +98,69 @@ impl BalanceConfig {
             MIN_STEP
         };
 
-        Self { fixed_step, ..self }
+        let fall_duration = if self.fall_duration.is_finite() && self.fall_duration >= MIN_STEP {
+            self.fall_duration
+        } else {
+            log::warn!(
+                "fall_duration {:?} would never respawn the ball; using {MIN_STEP}",
+                self.fall_duration
+            );
+            MIN_STEP
+        };
+
+        let ball_radius = if self.ball_radius.is_finite() && self.ball_radius >= MIN_SIZE {
+            self.ball_radius
+        } else {
+            log::warn!(
+                "ball_radius {:?} makes the spin NaN; using {MIN_SIZE}",
+                self.ball_radius
+            );
+            MIN_SIZE
+        };
+
+        let platform_size = if self.platform_size.is_finite() && self.platform_size >= MIN_SIZE {
+            self.platform_size
+        } else {
+            log::warn!(
+                "platform_size {:?} has no usable interior; using {MIN_SIZE}",
+                self.platform_size
+            );
+            MIN_SIZE
+        };
+
+        let damping = if self.damping.is_finite() {
+            self.damping.clamp(0.0, 1.0)
+        } else {
+            log::warn!("damping {:?} is not a number; using 0.0", self.damping);
+            0.0
+        };
+
+        let gravity = finite_or(self.gravity, Self::default().gravity, "gravity");
+        let max_tilt = finite_or(self.max_tilt, Self::default().max_tilt, "max_tilt")
+            .clamp(0.0, std::f32::consts::FRAC_PI_2);
+        let fall_margin =
+            finite_or(self.fall_margin, Self::default().fall_margin, "fall_margin").max(0.0);
+
+        Self {
+            platform_size,
+            ball_radius,
+            max_tilt,
+            gravity,
+            fall_margin,
+            damping,
+            fall_duration,
+            fixed_step,
+        }
+    }
+}
+
+/// Returns `value` when it is a finite number, otherwise `fallback` and a warning.
+fn finite_or(value: f32, fallback: f32, field: &str) -> f32 {
+    if value.is_finite() {
+        value
+    } else {
+        log::warn!("{field} {value:?} is not a number; using {fallback}");
+        fallback
     }
 }
 
@@ -161,12 +237,21 @@ impl Ball {
     /// Whether the ball has rolled off the platform.
     pub fn has_fallen(&self, config: &BalanceConfig) -> bool {
         let limit = config.half_extent() + config.fall_margin;
-        self.x.abs() > limit || self.z.abs() > limit
+        // `NaN > limit` is false, so a `NaN` position would report "not fallen" forever.
+        // The distance is finite or the ball is not on the board at all.
+        !self.x.is_finite() || !self.z.is_finite() || self.x.abs() > limit || self.z.abs() > limit
     }
 
     /// `0.0` at the centre, `1.0` at the rim. Used to warn the player.
     pub fn edge_proximity(&self, config: &BalanceConfig) -> f32 {
-        (self.x.abs().max(self.z.abs()) / config.half_extent()).clamp(0.0, 1.0)
+        // Takes a `&BalanceConfig` from the caller, which need not have come through
+        // `BalanceConfig::sanitised`: a zero or negative `platform_size` here would divide
+        // by zero and hand a `NaN` to whatever colours the board.
+        let extent = config.half_extent();
+        if !extent.is_finite() || extent <= 0.0 {
+            return 0.0;
+        }
+        (self.x.abs().max(self.z.abs()) / extent).clamp(0.0, 1.0)
     }
 
     /// Centre of the ball in world space, resting on the tilted platform.
@@ -604,5 +689,180 @@ mod tests {
         .sanitised();
 
         assert_eq!(config.fixed_step, 1.0 / 240.0);
+    }
+
+    #[test]
+    fn a_zero_or_negative_fall_duration_still_respawns() {
+        // Zero is the obvious spelling of "respawn immediately", and it is the one value
+        // that breaks the respawn: `update` decrements `fall_timer` only while it is
+        // greater than zero, so a zero or negative duration never reaches `respawn`. The
+        // ball stays off the board and `falls` climbs once per frame for as long as the
+        // process lives.
+        for bad in [0.0_f32, -1.0, f32::NAN, f32::INFINITY] {
+            let config = BalanceConfig {
+                fall_duration: bad,
+                ..BalanceConfig::default()
+            };
+
+            let sanitised = config.sanitised();
+            assert!(
+                sanitised.fall_duration.is_finite() && sanitised.fall_duration > 0.0,
+                "fall_duration {bad} was not sanitised: {}",
+                sanitised.fall_duration
+            );
+
+            let mut game = BalanceGame::new(config);
+            // Shove the ball off the board, then let it settle with the stick centred.
+            run(&mut game, (1.0, 0.0), 2.0);
+            let falls_after_the_fall = game.falls();
+            run(&mut game, (0.0, 0.0), 1.0);
+
+            assert_eq!(
+                game.falls(),
+                falls_after_the_fall,
+                "with fall_duration {bad} the ball never respawned and `falls` kept \
+                 counting every frame"
+            );
+            assert!(
+                !game.ball().has_fallen(game.config()),
+                "with fall_duration {bad} the ball is still off the board"
+            );
+            assert!(
+                !game.ball().position().0.is_nan(),
+                "the respawned ball must be at a real position"
+            );
+        }
+    }
+
+    #[test]
+    fn a_zero_or_negative_ball_radius_cannot_produce_a_nan_spin() {
+        // `Ball::step` divides the rolling angle by the radius. Zero gives an infinite
+        // angle and `NaN` a `NaN` one; either way the spin quaternion is not a number and
+        // the model matrix built from it draws nothing.
+        for bad in [0.0_f32, -0.5, f32::NAN] {
+            let config = BalanceConfig {
+                ball_radius: bad,
+                ..BalanceConfig::default()
+            };
+
+            let mut game = BalanceGame::new(config);
+            run(&mut game, (0.6, 0.0), 0.5);
+
+            let spin = game.ball().spin();
+            assert!(
+                spin.x.is_finite()
+                    && spin.y.is_finite()
+                    && spin.z.is_finite()
+                    && spin.w.is_finite(),
+                "ball_radius {bad} produced a non-finite spin {spin:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_degenerate_platform_size_cannot_lie_about_the_edge() {
+        // Zero makes `edge_proximity` a division by zero; a negative size makes the ball
+        // "fallen" while it is still at the centre, so no round ever starts.
+        for bad in [0.0_f32, -4.0, f32::NAN] {
+            let config = BalanceConfig {
+                platform_size: bad,
+                ..BalanceConfig::default()
+            };
+
+            let sanitised = config.sanitised();
+            assert!(
+                sanitised.platform_size.is_finite() && sanitised.platform_size > 0.0,
+                "platform_size {bad} was not sanitised: {}",
+                sanitised.platform_size
+            );
+
+            let game = BalanceGame::new(config);
+            assert!(
+                !game.ball().has_fallen(game.config()),
+                "with platform_size {bad} the ball is fallen at the centre"
+            );
+            let proximity = game.ball().edge_proximity(game.config());
+            assert!(
+                proximity.is_finite() && (0.0..=1.0).contains(&proximity),
+                "with platform_size {bad} the edge proximity was {proximity}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_finite_damping_cannot_make_the_position_nan() {
+        // `damping` is raised to `delta * 60`; a `NaN` there poisons the velocity and then
+        // the position, and a `NaN` position compares as "not fallen", so the ball
+        // disappears instead of falling.
+        for bad in [f32::NAN, f32::INFINITY, -1.0, 2.0] {
+            let config = BalanceConfig {
+                damping: bad,
+                ..BalanceConfig::default()
+            };
+
+            let sanitised = config.sanitised();
+            assert!(
+                sanitised.damping.is_finite() && (0.0..=1.0).contains(&sanitised.damping),
+                "damping {bad} was not sanitised: {}",
+                sanitised.damping
+            );
+
+            let mut game = BalanceGame::new(config);
+            run(&mut game, (0.8, 0.3), 0.5);
+
+            let (x, z) = game.ball().position();
+            assert!(
+                x.is_finite() && z.is_finite(),
+                "damping {bad} produced the position ({x}, {z})"
+            );
+        }
+    }
+
+    #[test]
+    fn every_sanitised_field_is_finite() {
+        // The catch-all: whatever a caller writes into the eight public fields, the copy
+        // the simulation runs on contains eight real numbers in range.
+        let config = BalanceConfig {
+            platform_size: f32::NAN,
+            ball_radius: f32::INFINITY,
+            max_tilt: f32::NEG_INFINITY,
+            gravity: f32::NAN,
+            fall_margin: f32::NAN,
+            damping: f32::NAN,
+            fall_duration: f32::NAN,
+            fixed_step: f32::NAN,
+        }
+        .sanitised();
+
+        for (name, value) in [
+            ("platform_size", config.platform_size),
+            ("ball_radius", config.ball_radius),
+            ("max_tilt", config.max_tilt),
+            ("gravity", config.gravity),
+            ("fall_margin", config.fall_margin),
+            ("damping", config.damping),
+            ("fall_duration", config.fall_duration),
+            ("fixed_step", config.fixed_step),
+        ] {
+            assert!(value.is_finite(), "{name} is still {value}");
+        }
+
+        assert!(config.platform_size > 0.0);
+        assert!(config.ball_radius > 0.0);
+        assert!(config.fall_duration > 0.0);
+        assert!(config.fixed_step > 0.0);
+        assert!((0.0..=std::f32::consts::FRAC_PI_2).contains(&config.max_tilt));
+        assert!((0.0..=1.0).contains(&config.damping));
+        assert!(config.fall_margin >= 0.0);
+    }
+
+    #[test]
+    fn a_reasonable_config_is_left_alone() {
+        // The sanitising must not quietly change a config that a caller tuned on purpose:
+        // the default is what the console runs with, and every field must survive it.
+        let before = BalanceConfig::default();
+        let after = before.sanitised();
+
+        assert_eq!(after, before);
     }
 }
