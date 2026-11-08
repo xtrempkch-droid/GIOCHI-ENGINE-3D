@@ -29,7 +29,7 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 449 testes, 0 falhas
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 455 testes, 0 falhas
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
 - [x] `cargo doc --workspace --no-deps --document-private-items` (0 warnings)
 - [x] `scripts/gen-header.sh --check` — `giochi.h` em sincronia com o crate
@@ -52,6 +52,27 @@ Verificações manuais da fase:
   recolha pelo GC, `giochi.quit()`, propagação de erro, `app:step`, `arg`).
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
+
+## Sexta auditoria — os binários 2D tratavam um limite de frames mal escrito como "sem limite"
+Data: 2026-11-08
+
+Sexta passagem, sobre a superfície de linha de comando dos binários 2D publicados.
+
+A segunda auditoria tinha corrigido isto nos **três exemplos 3D**: flags desconhecidas
+eram ignoradas e um número inválido virava `None`, portanto `--frames=3oo` produzia uma
+execução automática que nunca termina — num CI um timeout, num console um ecrã preto sem
+mensagem. Os binários 2D tinham ficado com o parser antigo:
+
+* `giochi-demo` — o binário que a release publica e que o aparelho executa;
+* `mini_game` — o jogo de referência que todos os scripts de validação conduzem;
+* `audio_test`, `input_test`, `moving_sprite`, `hello_rect`.
+
+Os cinco passam a rejeitar flags desconhecidas, valor ausente e valor não numérico,
+nomeando o flag e o valor. `giochi-demo --frames=3oo` agora imprime
+`erro: --frames expects a number, got '3oo'` e sai com 1; antes arrancava um loop sem
+limite. O parser do demo foi separado num `parse_from` testável com sete testes,
+incluindo o caso `3oo` e a regra de que tudo depois de `lua` pertence ao script e nunca
+é validado como flags do engine.
 
 ## Quinta auditoria — dois estados que um panic deixava presos, e uma leitura que podia paniquear
 Data: 2026-11-08

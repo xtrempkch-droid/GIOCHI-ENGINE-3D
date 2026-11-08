@@ -6,6 +6,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-08
+
+### Fixed — a sixth audit found one more
+
+This pass covered the command-line surface of the shipped 2D binaries.
+
+**A mistyped frame limit still meant "run forever".** The second audit fixed this in
+the three 3D examples; the shipped 2D binaries had been left with the old parser, where
+`--frames=3oo` silently became "no limit" — an unattended run that never terminates, and
+on a console a black screen with no message. `giochi-demo` (the binary the release
+publishes and the device runs), `mini_game` (the reference game every validation script
+drives), and `audio_test`, `input_test`, `moving_sprite` and `hello_rect` now reject
+unknown flags, missing values and non-numeric values, naming the flag and the value.
+`giochi-demo --frames=3oo` now prints `erro: --frames expects a number, got '3oo'` and
+exits 1. The demo's parser carries seven tests, including the rule that everything after
+`lua` belongs to the script and is never validated as engine flags.
+
 ## [0.2.1] - 2026-11-08
 
 ### Fixed — a fifth audit found two more
