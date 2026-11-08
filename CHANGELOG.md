@@ -6,6 +6,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed — a CI failure that was a real bug, not a flake
+
+`unknown_handles_are_reported_not_crashing` started failing on CI and passing locally,
+which is the shape of a flake and was not one. `RUN_IN_PROGRESS` — the flag that refuses a
+re-entrant `giochi_engine_run` — was a **process-global** atomic while the engine itself is
+thread-local (ADR-012). Two consequences:
+
+* a run on thread A made thread B's `giochi_engine_run_scene` fail with "already running on
+  this thread" — false, and nothing the caller could act on;
+* the capi's own tests raced each other, because one test entering a run flipped the flag
+  while a parallel test asserted an unrelated error code. That is how it surfaced.
+
+The flag is now thread-local, and the set/reset pair became a scope guard: a panic inside
+the loop used to unwind past the reset and leave the thread permanently "running", after
+which every later run and step was refused as re-entrant with no way to recover. Two
+regression tests cover both — a run on another thread, and a panic inside one — and both
+were verified to fail against the old code.
+
 ### Fixed — a second audit found four more
 
 **A 2D engine and a 3D engine could not coexist, and said so in the wrong language.** Both

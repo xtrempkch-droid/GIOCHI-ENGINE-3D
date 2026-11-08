@@ -53,6 +53,30 @@ Verificações manuais da fase:
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
 
+## Uma falha de CI que era bug real, não flake
+Data: 2026-11-08
+
+`unknown_handles_are_reported_not_crashing` começou a falhar no CI e a passar localmente —
+a assinatura de um flake, e não era.
+
+`RUN_IN_PROGRESS`, a flag que recusa um `giochi_engine_run` reentrante, era um `AtomicBool`
+**global** enquanto o engine é thread-local (ADR-012). Duas consequências:
+
+1. Um run na thread A fazia o `giochi_engine_run_scene` da thread B falhar com "already
+   running **on this thread**" — falso, e sem nada que o chamador pudesse corrigir.
+2. Os próprios testes do capi corriam em corrida: um teste a entrar num run virava a flag
+   enquanto um teste paralelo verificava um código de erro não relacionado. O CI apanhou
+   `-7` (SCENE) onde esperava `-1` (INVALID_HANDLE).
+
+A flag passou a thread-local, e o par set/reset passou a ser um guarda com `Drop`: um panic
+dentro do loop desenrolava por cima do reset e deixava a thread permanentemente "a correr",
+depois do qual **todos** os runs e steps seguintes eram recusados como reentrantes, sem
+recuperação possível.
+
+Dois testes de regressão cobrem os dois casos — um run noutra thread, e um panic dentro de
+um — e **ambos foram verificados a falhar contra o código antigo** antes de a correcção
+ficar.
+
 ## Segunda auditoria — 4 defeitos adicionais
 Data: 2026-11-08
 

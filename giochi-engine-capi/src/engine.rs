@@ -96,7 +96,7 @@ pub extern "C" fn giochi_engine_shutdown() {
         scene::drain_pending_exits();
 
         state::uninstall();
-        state::set_run_in_progress(false);
+        state::clear_run_in_progress();
         state::clear_quit_request();
     })
 }
@@ -184,19 +184,19 @@ pub extern "C" fn giochi_engine_step(frame_time: f32) -> i32 {
             DEFAULT_STEP
         };
 
-        state::set_run_in_progress(true);
-        let result = state::with_engine_mut(
-            "giochi_engine_step cannot be called from a scene callback",
-            |engine| {
-                // Stepping means "advance one frame": a scene that quit must not
-                // silently keep the engine stopped.
-                if !engine.is_running() {
-                    engine.reset_quit();
-                }
-                engine.step(frame_time)
-            },
-        );
-        state::set_run_in_progress(false);
+        let result = state::with_run_in_progress(|| {
+            state::with_engine_mut(
+                "giochi_engine_step cannot be called from a scene callback",
+                |engine| {
+                    // Stepping means "advance one frame": a scene that quit must not
+                    // silently keep the engine stopped.
+                    if !engine.is_running() {
+                        engine.reset_quit();
+                    }
+                    engine.step(frame_time)
+                },
+            )
+        });
 
         let code = match result {
             Ok(Ok(())) => codes::OK,
@@ -364,19 +364,21 @@ pub extern "C" fn giochi_engine_video_driver() -> *const c_char {
 /// `on_exit` callbacks — with the engine borrow released in between, so a callback
 /// that destroys handles still works.
 fn run_loop(start: impl FnOnce(&mut Engine) -> Result<(), GiochiError>) -> i32 {
-    state::set_run_in_progress(true);
     state::clear_quit_request();
 
-    let result = state::with_engine_mut(
-        "the engine is busy; a run cannot start from inside a scene callback",
-        |engine| {
-            // Every run starts armed, so a previous quit does not silently skip it.
-            engine.reset_quit();
-            start(engine)
-        },
-    );
+    // The mark is released by the guard's `Drop`, so a panic inside the loop cannot leave
+    // this thread permanently "running" — which would refuse every later run and step.
+    let result = state::with_run_in_progress(|| {
+        state::with_engine_mut(
+            "the engine is busy; a run cannot start from inside a scene callback",
+            |engine| {
+                // Every run starts armed, so a previous quit does not silently skip it.
+                engine.reset_quit();
+                start(engine)
+            },
+        )
+    });
 
-    state::set_run_in_progress(false);
     state::clear_quit_request();
 
     // The stack is emptied while the engine is still alive so a scene's `on_exit`

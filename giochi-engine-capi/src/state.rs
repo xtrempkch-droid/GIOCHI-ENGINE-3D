@@ -54,13 +54,21 @@ thread_local! {
     /// `true` while a scene callback is on the stack, i.e. while re-entering the
     /// engine would deadlock or corrupt the scene stack.
     static IN_CALLBACK: Cell<bool> = const { Cell::new(false) };
+
+    /// `true` between the start and the end of a `giochi_engine_run*`/`step` call **on
+    /// this thread**.
+    ///
+    /// Thread-local, not a process-global atomic like `QUIT_REQUESTED`. The engine itself
+    /// is thread-local (ADR-012), so "a run is in progress" is a fact about one thread; a
+    /// global made a second thread's `giochi_engine_run_scene` fail with "already running on
+    /// this thread", which was both false and unfixable from the caller's side. It also made
+    /// the capi's own tests race against each other, which is how this was found: one test
+    /// entered a run while a parallel one asserted an unrelated error code.
+    static RUN_IN_PROGRESS: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Set by `giochi_engine_request_quit`, consumed by the running scene adapter.
 static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
-
-/// `true` between the start and the end of a `giochi_engine_run*`/`step` call.
-static RUN_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 // ---------------------------------------------------------------------------
 // Last error
@@ -335,14 +343,34 @@ pub(crate) fn clear_quit_request() {
     QUIT_REQUESTED.store(false, Ordering::SeqCst);
 }
 
-/// Marks a `run`/`step` call as in progress.
-pub(crate) fn set_run_in_progress(value: bool) {
-    RUN_IN_PROGRESS.store(value, Ordering::SeqCst);
-}
-
 /// Returns whether a `run`/`step` call is in progress on this thread.
 pub(crate) fn run_in_progress() -> bool {
-    RUN_IN_PROGRESS.load(Ordering::SeqCst)
+    RUN_IN_PROGRESS.with(Cell::get)
+}
+
+/// Runs `body` with this thread marked as "a run is in progress", clearing the mark
+/// afterwards **even if `body` panics**.
+///
+/// A plain set/reset pair around a call that can unwind leaves the flag stuck at `true`
+/// forever, and then every later `run`/`step` on this thread is refused as re-entrant. The
+/// panic still reaches `guard`'s `catch_unwind` at the boundary, so the caller sees
+/// `GIOCHI_ERROR_INTERNAL` and the engine is unusable from then on with no explanation.
+pub(crate) fn with_run_in_progress<R>(body: impl FnOnce() -> R) -> R {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            RUN_IN_PROGRESS.with(|cell| cell.set(false));
+        }
+    }
+
+    RUN_IN_PROGRESS.with(|cell| cell.set(true));
+    let _reset = Reset;
+    body()
+}
+
+/// Clears the in-progress mark unconditionally, for the paths that only tear down.
+pub(crate) fn clear_run_in_progress() {
+    RUN_IN_PROGRESS.with(|cell| cell.set(false));
 }
 
 // ---------------------------------------------------------------------------
@@ -362,4 +390,69 @@ pub(crate) fn cstr(pointer: *const c_char) -> Option<String> {
     // stays valid for the duration of the call.
     let text = unsafe { CStr::from_ptr(pointer) };
     text.to_str().ok().map(str::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    #[test]
+    fn a_run_on_another_thread_does_not_mark_this_one() {
+        // The mark used to be a process-global `AtomicBool` while the engine is
+        // thread-local (ADR-012), so a run on thread A made thread B's
+        // `giochi_engine_run_scene` fail with "already running on this thread" — false, and
+        // nothing the caller could act on. It also made this crate's own tests race: one
+        // test entered a run while a parallel one asserted an unrelated error code, which
+        // is how it was found on CI.
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+
+        let worker = std::thread::spawn(move || {
+            with_run_in_progress(|| {
+                started_tx.send(()).expect("signal");
+                release_rx.recv().expect("wait for release");
+            });
+        });
+
+        started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the worker should have entered the run");
+
+        assert!(
+            !run_in_progress(),
+            "another thread's run must not mark this thread"
+        );
+
+        release_tx.send(()).expect("release");
+        worker.join().expect("worker");
+
+        // And this thread can still take the mark itself afterwards.
+        assert!(!run_in_progress());
+        with_run_in_progress(|| assert!(run_in_progress()));
+        assert!(!run_in_progress());
+    }
+
+    #[test]
+    fn a_panic_inside_a_run_still_clears_the_mark() {
+        // Without the `Drop` guard, a panic in a scene callback unwound past the reset and
+        // left the flag at `true` forever: `guard`'s `catch_unwind` reported
+        // `GIOCHI_ERROR_INTERNAL` to the caller, and every later run on that thread was
+        // then refused as re-entrant, with no way to recover.
+        let hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+
+        let outcome = std::panic::catch_unwind(|| {
+            with_run_in_progress(|| panic!("boom"));
+        });
+
+        std::panic::set_hook(hook);
+
+        assert!(outcome.is_err(), "the panic should have propagated");
+        assert!(
+            !run_in_progress(),
+            "the mark must be cleared even when the body unwinds"
+        );
+    }
 }
