@@ -29,7 +29,7 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 431 testes, 0 falhas
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 445 testes, 0 falhas
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
 - [x] `cargo doc --workspace --no-deps --document-private-items` (0 warnings)
 - [x] `scripts/gen-header.sh --check` — `giochi.h` em sincronia com o crate
@@ -52,6 +52,101 @@ Verificações manuais da fase:
   recolha pelo GC, `giochi.quit()`, propagação de erro, `app:step`, `arg`).
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
+
+## Quarta auditoria — seis defeitos de código e um teste frágil
+Data: 2026-11-08
+
+Quarta passagem. As três anteriores leram o ciclo de vida dos recursos, a validação da
+fronteira C e a concordância contrato/header. Esta abriu o que nunca tinha sido aberto: as
+conversões de valor do binding Lua, o snapshot de input 2D, o relógio do loop principal e o
+caminho de afinação do jogo de balanço. Começou por um teste que estava **a falhar nesta
+árvore**, e foi ele que levou ao primeiro item.
+
+### 1. Todos os jogos começavam por simular um quarto de segundo que não existiu
+
+`run_current` não reiniciava o `FrameClock`, cujo `last` é fixado em `Engine::new`. O
+primeiro `tick()` de um run reportava tudo o que aconteceu entre a construção e o loop —
+criação de janela, renderer e mixer, mais todos os assets que o chamador carregou antes de
+arrancar — e isso era integrado como se fosse um frame. Medido: um run de 3 frames depois de
+100 ms de preparação reportou **13** passos fixos e 0,131 s de jogo. Num console é a bola já
+a rolar, o jogador já caído, e um primeiro `fps()` que é ficção.
+
+O caminho de mudança de cena **já** reiniciava o relógio exactamente por esta razão; o
+início do run é o mesmo acontecimento e tinha sido esquecido. Correcção de uma linha em
+`run_current`, com teste que dorme 200 ms antes do loop e afirma **0 passos** no primeiro
+frame — contra o código antigo dá 12.
+
+**Como apareceu:** o `lua_smoke` falhava com «quit() ... got 2» tanto nesta árvore como em
+`HEAD`. Investigar a causa revelou o relógio; a asserção do teste, porém, era ela própria
+frágil (ver o item 6).
+
+### 2. Um script Lua derrubava o processo com uma côr
+
+`parse_hex_color` comparava `digits.len()` — **bytes** — e depois fatiava com intervalos de
+bytes. `"日日"` tem 6 bytes e 2 caracteres, portanto passava o ramo `6 | 8` e o corte em
+`0..2` partia um caractere ao meio: `byte index 2 is not a char boundary`, um panic Rust
+levantado de dentro de um callback. O próprio `lib.rs` do binding diz que um script recebe
+erros e não crashes. A string passou a ser validada como hexadecimal ASCII antes de ser
+fatia­da, que é o que uma côr hexadecimal é por definição.
+
+### 3. Um quit numa thread parava o engine de outra
+
+`QUIT_REQUESTED` era um `AtomicBool` **global** enquanto o engine é thread-local (ADR-012):
+duas threads com um engine cada partilhavam a flag, portanto `giochi_engine_request_quit`
+na thread A terminava o loop da thread B, e dentro de um callback
+`giochi_engine_is_running` respondia a partir do estado da outra thread. É o **mesmo**
+defeito que o `RUN_IN_PROGRESS` tinha, encontrado da mesma maneira — e o comentário ao lado
+do `RUN_IN_PROGRESS` apontava para ele desde a correcção anterior.
+
+### 4. Teclas e botões ficavam presos ao perder o foco
+
+O SDL não entrega `KeyUp` para uma tecla que estava premida quando o foco é tirado, e o
+`apply_event` da segunda auditoria já tinha passado pelo `catch-all` sem notar que
+`WindowEvent::FocusLost` caía lá dentro. Quem fazia alt-tab a meio de um passo continuava a
+andar até o processo terminar, e um botão do rato premido continuava a ler-se como arrasto.
+O `FocusLost` passou a limpar o estado retido dos dois snapshots e **deliberadamente** não
+sintetiza arestas de release: um jogo ligado a «soltar para saltar» dispararia no alt-tab, e
+o engine não distingue os dois casos.
+
+### 5. `BalanceConfig::sanitised` guardava um campo em oito, e o próprio doc estava errado
+
+Dizia que `fixed_step` «é o que importa»; um teste desmentiu-o.
+
+| Campo | Valor «razoável» | O que acontecia |
+|---|---|---|
+| `fall_duration` | `0.0` («renascer já») | nunca satisfaz `fall_timer > 0.0` ⇒ nunca renasce; a bola fica fora do tabuleiro e `falls` sobe **por frame** (77 e a contar após 1 s) |
+| `ball_radius` | `0.0` | ângulo de rolamento ÷ 0 ⇒ quaternion de spin `NaN` ⇒ bola invisível |
+| `platform_size` | `0.0` / `-4.0` | `edge_proximity` = `0/0`; tamanho negativo ⇒ bola «caída» no centro, a ronda nunca começa |
+| `damping` | `NaN` | `powf` propaga ⇒ velocidade e posição `NaN`, que já não compara como caída |
+
+Todos os campos passam a ser trazidos para um intervalo executável, com aviso por
+substituição, e `Ball::has_fallen`/`edge_proximity` deixaram de confiar num config que não
+veio de `sanitised`.
+
+### 6. A luz deixava passar um `ambient` `NaN`
+
+`DirectionalLight::sanitised` usava `ambient.clamp(0.0, 1.0)`, e `f32::clamp` devolve `self`
+para `NaN` — ao contrário de `f32::max`, que é por isso que `specular` e `shininess` já
+estavam seguros. O `NaN` chegava a `u_ambient_strength`, o `gl_FragColor` ficava `NaN` em
+todos os fragmentos e o frame ficava preto: exactamente a falha que a função documenta
+prevenir. É alcançável a partir de C, onde `GiochiDirectionalLight` não tem construtor e um
+campo esquecido é o que estava na pilha. Os três escalares passam a ser finitos, com tecto
+finito no `specular` e no expoente.
+
+### 7. Um teste afirmava uma propriedade temporal que o código não tem
+
+O `lua_smoke` exigia que `quit()` parasse o run em **pelo menos 3 frames de display**, mas
+`update` corre por passo fixo e um frame absorve todos os passos que o seu tempo cobre —
+incluindo o trabalho do primeiro frame. Nesta máquina o primeiro `present` custou ~120 ms e
+o run fechou em 2 frames. Passou a afirmar o que o contrato diz: a condição de quit disparou
+(`update` correu ≥ 3 vezes) e o run parou muito antes do limite de 500 frames.
+
+### Método
+
+Cada correcção foi provada ao contrário: o teste novo foi executado **contra o código
+antigo** e confirmado a falhar, antes de ficar. Os seis casos têm teste de regressão — um
+deles no consumidor C (`c_smoke_3d.c` passa uma luz com `NAN`/`INFINITY` em todos os
+campos), porque é aí que o defeito é alcançável.
 
 ## Terceira auditoria — a luz estava no contrato e não no header
 Data: 2026-11-08
@@ -430,7 +525,7 @@ consumidores que não são Rust.
 
 ### O que existe
 
-- `giochi-engine-capi/src/lib3d.rs` — 16 funções e o tipo opaco `GiochiEngine3D`.
+- `giochi-engine-capi/src/lib3d.rs` — 17 funções e o tipo opaco `GiochiEngine3D`.
 - `giochi.h` (1331 linhas) com `#define GIOCHI_ABI_VERSION 2`, a declaração opaca
   `typedef struct GiochiEngine3D GiochiEngine3D;`, e os tipos de valor 3D
   (`GiochiVec3` 28 B, `GiochiQuat` 32 B, `GiochiColor3D` 32 B, `GiochiTransform3D`

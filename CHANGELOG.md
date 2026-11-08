@@ -6,6 +6,74 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed — a fourth audit found six more
+
+This pass read the parts the first three never opened: the Lua value conversions, the 2D
+input snapshot, the core frame loop's clock, and the tuning path of the balance game. It
+also started from a test that was failing in this tree, which is how the first one below
+surfaced.
+
+**Every run began by simulating up to a quarter-second that never happened.** `run_current`
+did not restart `FrameClock`, whose `last` is set in `Engine::new`. So the first `tick()` of
+a run reported everything between construction and the loop — window and renderer creation,
+opening the mixer, and every asset the caller loaded before starting — and that was
+integrated as if it had been a frame. A 3-frame run after 100 ms of set-up reported **13**
+fixed steps and 0.131 s of gameplay. On a console that is the ball already rolling, the
+player already fallen, and a first `fps()` figure that is fiction. The scene-transition path
+already reset the clock for exactly this reason; the start of the run is the same event and
+had been missed.
+
+**A Lua script could crash the host with a colour string.** `parse_hex_color` matched on
+`digits.len()` — a **byte** count — and then sliced with byte ranges. `"日日"` is 6 bytes
+and 2 characters, so it passed the `6 | 8` arm and the slice at `0..2` split a character:
+`byte index 2 is not a char boundary`, a Rust panic raised from inside a callback. The
+binding's own design note says a script gets errors, not crashes. The string is now checked
+to be ASCII hexadecimal before it is sliced, which is what a hex colour is by definition.
+
+**A quit on one thread stopped another thread's engine.** `QUIT_REQUESTED` was a
+process-global `AtomicBool` while the engine is thread-local (ADR-012), so two threads each
+owning an engine shared one quit flag: `giochi_engine_request_quit` on thread A ended
+thread B's loop, and inside a callback `giochi_engine_is_running` answered from the other
+thread's state. This is the identical defect `RUN_IN_PROGRESS` had, found the identical way
+(a test asserting another thread cannot see this thread's flag) — and the comment beside
+`RUN_IN_PROGRESS` had been pointing at it since that fix.
+
+**Held keys and buttons never came back after the window lost focus.** SDL delivers no
+`KeyUp` for a key held when focus is taken away, and the second audit had already changed
+`apply_event`'s catch-all without noticing that `WindowEvent::FocusLost` fell into it. A
+player who alt-tabbed mid-stride kept walking for the rest of the process's life, and a
+held mouse button kept reading as a drag. `FocusLost` now clears both snapshot's held state
+and deliberately does **not** synthesise release edges: a game bound to "release to jump"
+would fire it on an alt-tab, and the engine cannot tell the two apart.
+
+**`BalanceConfig::sanitised` guarded one field of eight, and its own doc was wrong.** It
+claimed `fixed_step` "is the one that matters", which a test disproved. `fall_duration: 0.0`
+— the obvious spelling of "respawn immediately" — never satisfies the `fall_timer > 0.0`
+that decrements it, so the ball never respawned, stayed off the board, and `falls` climbed
+**once per frame** (77 and counting after one idle second). `ball_radius: 0.0` divided the
+rolling angle to infinity and made the spin quaternion `NaN`, which draws an invisible
+ball. `platform_size: -4.0` made the ball "fallen" while still at the centre — no round
+ever started — and `0.0` made `edge_proximity` a `0/0`. A `NaN` `damping` poisoned the
+velocity and then the position. Every field is now brought into a runnable range, with a
+warning per substitution, and `Ball::has_fallen`/`edge_proximity` no longer trust a config
+that did not come through `sanitised`.
+
+**The light let a `NaN` ambient through.** `DirectionalLight::sanitised` used
+`ambient.clamp(0.0, 1.0)`, and `f32::clamp` returns `self` for `NaN` — unlike `f32::max`,
+which is why `specular` and `shininess` were already safe. The `NaN` reached
+`u_ambient_strength`, `gl_FragColor` became `NaN` for every fragment, and the frame went
+black: exactly the failure the function documents itself as preventing. It is reachable from
+C, where `GiochiDirectionalLight` has no constructor and a forgotten field is whatever the
+stack held. All three scalars are now made finite, with a finite ceiling on `specular` and
+on the exponent.
+
+Also repaired: `giochi-engine-lua/tests/lua_smoke.rs` asserted that `quit()` stops the run
+in **at least 3 display frames**, which is not a property of the code — `update` runs per
+fixed step and a frame absorbs every step its elapsed time covers, including the first
+frame's work. It failed on this machine at 2 frames, where the first `present` cost ~120 ms.
+It now asserts what the contract says: the quit condition fired (`update` ran at least 3
+times) and the run stopped far short of the 500-frame limit.
+
 ### Added — `giochi_renderer3d_set_light`
 
 Phase 13 introduced `BuiltinShader::Phong`, whose one input is a light. Part II shipped

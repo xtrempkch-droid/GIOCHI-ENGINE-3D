@@ -236,6 +236,12 @@ A colour is a table `{ r, g, b [, a] }`, a positional `{ 230, 70, 70 }`, or a he
 string `"#e64646"` / `"#fff"` / `"#11223380"`. A rectangle is `{ x, y, w, h }` or
 `{ x =, y =, w =, h = }`.
 
+The digits of a hex colour must be ASCII hexadecimal (`0-9`, `a-f`, `A-F`); anything else
+is a Lua error naming the three accepted lengths. That check is not cosmetic: the digits
+are sliced in pairs, and a 6-byte string of non-ASCII characters would be split through the
+middle of one, which is a panic rather than an error. A script must never be able to take
+the host down by passing a strange string.
+
 Inside `render` the app is busy, so `gfx:texture(path)` is the way to load lazily. It
 does **not** use the cache — every `Texture` owns exactly one handle — so keep the
 result in a variable rather than loading the same file every frame.
