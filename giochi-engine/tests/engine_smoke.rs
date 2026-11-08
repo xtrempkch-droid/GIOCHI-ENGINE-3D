@@ -95,7 +95,12 @@ impl Scene for Probe {
 
 fn engine_with_dummy_driver() -> Engine {
     std::env::set_var("SDL_VIDEODRIVER", "dummy");
-    Engine::new(EngineConfig::new(160, 120, "giochi-engine-test")).expect("engine must start")
+    let mut engine =
+        Engine::new(EngineConfig::new(160, 120, "giochi-engine-test")).expect("engine must start");
+    // With `profiling`, the overlay owns one panel texture; the leak assertion at the
+    // end counts engine textures and must not include a debug aid.
+    engine.set_overlay_visible(false);
+    engine
 }
 
 #[test]

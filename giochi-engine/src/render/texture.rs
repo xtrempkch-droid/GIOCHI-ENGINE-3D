@@ -198,6 +198,48 @@ impl TextureRegistry {
         Some((query.width, query.height))
     }
 
+    /// Replaces the pixels of an existing RGBA texture without reallocating it.
+    ///
+    /// `width` and `height` must match the size the texture was created with, and
+    /// `pixels` must be exactly `width * height * 4` bytes. The debug overlay uses this
+    /// to refresh its panel at 1 Hz: creating and destroying a texture on every refresh
+    /// was measured at ~10 % of the frame on a Mali-G31, which is more than the profiler
+    /// is allowed to cost (ADR-042).
+    ///
+    /// Returns [`GiochiError::InvalidHandle`] when the texture is unknown or currently
+    /// shared with a renderer, so the caller can fall back to creating a new one.
+    pub(crate) fn update_texture_rgba(
+        &self,
+        handle: TextureHandle,
+        width: u32,
+        height: u32,
+        pixels: &[u8],
+    ) -> Result<(), GiochiError> {
+        if width == 0 || height == 0 {
+            return Err(GiochiError::InvalidArgument(
+                "texture width and height must be non-zero",
+            ));
+        }
+        let expected = width as usize * height as usize * 4;
+        if pixels.len() != expected {
+            return Err(GiochiError::InvalidArgument(
+                "pixel buffer must be exactly width * height * 4 bytes",
+            ));
+        }
+        if self.dimensions(handle) != Some((width, height)) {
+            return Err(GiochiError::InvalidArgument(
+                "pixel buffer does not match the texture dimensions",
+            ));
+        }
+
+        self.registry
+            .with_mut(handle, |texture| {
+                texture.update(None, pixels, width as usize * 4)
+            })
+            .ok_or(GiochiError::InvalidHandle(handle))?
+            .map_err(|err| GiochiError::Render(format!("failed to update texture: {err}")))
+    }
+
     /// Returns the pixel size behind `handle` in C-shaped form.
     pub fn size(&self, handle: TextureHandle) -> Option<TextureSize> {
         self.dimensions(handle)

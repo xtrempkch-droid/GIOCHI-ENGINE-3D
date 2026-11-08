@@ -44,3 +44,6 @@ sdl2-bundled = ["sdl2/bundled"]
 # já traz o SDL2 com KMSDRM — e é o que permite cross-compilar para aarch64 sem
 # compilar uma segunda cópia da biblioteca.
 sdl2-system = ["sdl2/use-pkgconfig"]
+# Fase 15: contadores de draw calls/vértices no renderer 3D. Encaminha para a
+# feature homónima do core, que também liga o profiler e o overlay.
+profiling = ["giochi-engine/profiling"]

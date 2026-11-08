@@ -64,6 +64,9 @@ fn api_guide_examples_compile_and_behave() {
     // --- §5, §7, §8 with a real (headless) engine ---------------------------
     std::env::set_var("SDL_VIDEODRIVER", "dummy");
     let mut engine = Engine::new(config).expect("engine must start with the dummy driver");
+    // The profiler's overlay owns one panel texture when the feature is enabled; the
+    // leak assertion at the end counts engine textures, so keep the debug aid out of it.
+    engine.set_overlay_visible(false);
     engine.set_frame_limit(3);
 
     // §5 textures: cached vs primitive.

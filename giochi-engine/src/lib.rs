@@ -20,6 +20,11 @@
 //! There are no `todo!()` stubs left in this crate, and `tests/c_shape.rs` enforces the
 //! C-shaped rules over the whole source tree.
 //!
+//! Phase 15 adds the opt-in [`perf`] module: a frame profiler, a 60-frame time window
+//! and a debug overlay (toggled with `F1`). It is compiled behind the `profiling`
+//! feature; without it every entry point is a no-op and the renderer does not count
+//! draw calls. See ADR-042 and `docs/PERF_LOG.md` at the repository root.
+//!
 //! # Layering rules
 //!
 //! * [`core`] never imports `sdl2` directly — it goes through [`platform`].
@@ -41,6 +46,7 @@ pub mod core;
 pub mod error;
 pub mod input;
 pub mod math;
+pub mod perf;
 pub mod platform;
 pub mod render;
 pub mod scene;
@@ -75,6 +81,7 @@ pub use crate::core::time::{FrameClock, Time};
 pub use crate::error::{codes, GiochiError, GiochiResult};
 pub use crate::input::{Input, KeyboardState, MouseState};
 pub use crate::math::{Color, Rect, Vec2};
+pub use crate::perf::{DebugOverlay, FrameCounters, FrameStats, FrameTimeSummary, Profiler};
 pub use crate::platform::sdl::{quit_signal, sdl_version, Platform, QuitSignal, VideoDriverChoice};
 pub use crate::platform::window::{Window, WindowConfig};
 pub use crate::render::{

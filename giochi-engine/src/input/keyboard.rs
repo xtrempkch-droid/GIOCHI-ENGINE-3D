@@ -27,6 +27,8 @@ pub const KEY_Q: KeyCode = 113;
 pub const KEY_S: KeyCode = 115;
 /// `W`.
 pub const KEY_W: KeyCode = 119;
+/// `F1`. Toggles the debug overlay when the `profiling` feature is enabled.
+pub const KEY_F1: KeyCode = 1_073_741_882;
 /// Left shift. SDL reports the modifier as a keycode as well as a modifier.
 pub const KEY_LEFT_SHIFT: KeyCode = 1_073_741_825;
 /// Left arrow.
@@ -132,6 +134,11 @@ impl KeyboardState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn f1_matches_the_sdl_keycode() {
+        assert_eq!(KEY_F1, sdl2::keyboard::Keycode::F1.into_i32() as u32);
+    }
 
     #[test]
     fn a_fresh_state_has_everything_released() {

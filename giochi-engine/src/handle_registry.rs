@@ -67,6 +67,21 @@ impl<T> HandleRegistry<T> {
         handle != NULL_HANDLE && self.entries.borrow().contains_key(&handle)
     }
 
+    /// Runs `f` on the value behind `handle` with exclusive access.
+    ///
+    /// Returns [`None`] when the handle is invalid **or** when another `Rc` clone of
+    /// the value is still alive: sharing is what `Rc` is for, and callers that need
+    /// mutation must be able to fall back to replacing the resource. The engine's
+    /// texture updater uses this and recreates when an external clone exists.
+    pub(crate) fn with_mut<R>(&self, handle: Handle, f: impl FnOnce(&mut T) -> R) -> Option<R> {
+        if handle == NULL_HANDLE {
+            return None;
+        }
+        let mut entries = self.entries.borrow_mut();
+        let value = entries.get_mut(&handle)?;
+        Rc::get_mut(value).map(f)
+    }
+
     /// Drops the entry behind `handle`. Returns `false` if it was not registered.
     pub(crate) fn remove(&self, handle: Handle) -> bool {
         if handle == NULL_HANDLE {

@@ -9,6 +9,7 @@ use sdl2::video::WindowContext;
 use crate::assets::ResourceManager;
 use crate::error::GiochiError;
 use crate::math::{Color, Rect, Vec2};
+use crate::perf::FrameCounters;
 use crate::platform::sdl::SdlContext;
 use crate::platform::window::Window;
 use crate::render::camera::Camera;
@@ -41,6 +42,7 @@ pub struct RenderContext {
     textures: Rc<TextureRegistry>,
     resources: ResourceManager,
     camera: Camera,
+    counters: FrameCounters,
     _context: Rc<SdlContext>,
     _reserved: [u32; 4],
 }
@@ -74,6 +76,7 @@ impl RenderContext {
             textures: Rc::new(textures),
             resources: ResourceManager::new(),
             camera: Camera::new(Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32)),
+            counters: FrameCounters::new(),
             _context: context,
             _reserved: [0; 4],
         })
@@ -156,6 +159,19 @@ impl RenderContext {
             .create_texture_from_rgba(width, height, pixels)
     }
 
+    /// Replaces the pixels of an RGBA texture in place.
+    /// See [`TextureRegistry::update_texture_rgba`].
+    pub(crate) fn update_texture_rgba(
+        &self,
+        texture: TextureHandle,
+        width: u32,
+        height: u32,
+        pixels: &[u8],
+    ) -> Result<(), GiochiError> {
+        self.textures
+            .update_texture_rgba(texture, width, height, pixels)
+    }
+
     /// Releases a texture. Returns `false` for an invalid or already-freed handle.
     pub fn destroy_texture(&self, texture: TextureHandle) -> bool {
         self.textures.destroy_texture(texture)
@@ -217,6 +233,23 @@ impl RenderContext {
         self.camera
     }
 
+    /// Clears the per-frame draw counters.
+    ///
+    /// The engine calls this once per frame, before the scene renders. Calling it is
+    /// harmless without the `profiling` feature: the counters stay zero and the
+    /// renderer's draw paths do not touch them.
+    pub fn begin_frame_stats(&mut self) {
+        #[cfg(feature = "profiling")]
+        self.counters.reset();
+    }
+
+    /// Snapshot of the draw counters since [`RenderContext::begin_frame_stats`].
+    ///
+    /// Without the `profiling` feature every field is zero.
+    pub fn frame_counters(&self) -> FrameCounters {
+        self.counters
+    }
+
     /// Fits the current camera's viewport to the window, keeping its position and
     /// zoom. Called at construction and available for resize handling.
     pub fn fit_camera_to_window(&mut self) {
@@ -241,6 +274,8 @@ impl RenderContext {
         if let Err(err) = self.canvas.fill_rect(dst) {
             log::error!("draw_rect failed: {err}");
         }
+        #[cfg(feature = "profiling")]
+        self.counters.record_draw_call();
     }
 
     /// Draws the outline of `rect`, one pixel thick.
@@ -255,6 +290,8 @@ impl RenderContext {
         if let Err(err) = self.canvas.draw_rect(dst) {
             log::error!("stroke_rect failed: {err}");
         }
+        #[cfg(feature = "profiling")]
+        self.counters.record_draw_call();
     }
 
     /// Fills many rectangles with one colour in a single backend call.
@@ -272,6 +309,8 @@ impl RenderContext {
         if let Err(err) = self.canvas.fill_rects(&converted) {
             log::error!("fill_rects failed: {err}");
         }
+        #[cfg(feature = "profiling")]
+        self.counters.record_draw_call();
     }
 
     /// Draws a one-pixel line between two points.
@@ -294,6 +333,8 @@ impl RenderContext {
         ) {
             log::error!("draw_line failed: {err}");
         }
+        #[cfg(feature = "profiling")]
+        self.counters.record_draw_call();
     }
 
     /// Copies `src` of `texture` into `dst` (both screen space).
@@ -318,7 +359,10 @@ impl RenderContext {
 
         self.canvas
             .copy(&texture, src, dst)
-            .map_err(|err| GiochiError::Render(format!("draw_texture failed: {err}")))
+            .map_err(|err| GiochiError::Render(format!("draw_texture failed: {err}")))?;
+        #[cfg(feature = "profiling")]
+        self.counters.record_sprite();
+        Ok(())
     }
 
     /// Copies `src` into `dst` with rotation and optional mirroring.
@@ -357,7 +401,10 @@ impl RenderContext {
                 flip_horizontal,
                 flip_vertical,
             )
-            .map_err(|err| GiochiError::Render(format!("draw_texture_ex failed: {err}")))
+            .map_err(|err| GiochiError::Render(format!("draw_texture_ex failed: {err}")))?;
+        #[cfg(feature = "profiling")]
+        self.counters.record_sprite();
+        Ok(())
     }
 
     /// Draws `sprite`, converting its world-space rectangle through the camera.

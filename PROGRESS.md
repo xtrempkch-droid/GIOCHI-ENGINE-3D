@@ -1,12 +1,12 @@
 # Estado — GIOCHI-ENGINE
 
-## Última entrega: fase 14 — C ABI 3D (parte II, `GIOCHI_ABI_VERSION 2`)
-Data: 2026-11-07
+## Última entrega: fase 15 — Profiler + Debug Overlay (extensão de performance)
+Data: 2026-11-08
 
-## Última fase concluída: 14 — C ABI 3D (v2)
-Fase anterior: 13 — Iluminação Phong
+## Última fase concluída: 15 — Profiler + Debug Overlay
+Fase anterior: 14 — C ABI 3D (v2)
 
-**TODAS as fases concluídas: 0–8 (2D) e 9–14 (extensão 3D). Versão 0.2.0.**
+**Fases concluídas: 0–8 (2D), 9–14 (extensão 3D) e 15 (performance). Versão 0.2.2.**
 
 ## Status 2D (Fases 0–8)
 
@@ -22,6 +22,22 @@ extensão v2.1). Gates 2D revalidados a cada fase 3D.
 - [x] Fase 13 — Iluminação Phong
 - [x] Fase 14 — C ABI 3D (v2)
 
+## Status Performance (Fases 15–18)
+
+- [x] Fase 15 — Profiler + Overlay (baseline x86_64: **645.5 FPS @ 1000 sprites**,
+      1000 draw calls; ARM64 PX30: **59.9 FPS** limitado pelo painel, **1.761 ms** de
+      `render2d` a 1000 sprites; custo do profiler ≤ **1.1 %** x86_64 e **1.94 %** no
+      PX30 com a overlay visível, dentro do orçamento de 2 %)
+- [ ] Fase 16 — Batching 2D + Atlas
+- [ ] Fase 17 — Instancing 3D + Upscaling
+- [ ] Fase 18 — Flags ARM64 + CI de performance + C ABI v3
+
+**Próxima fase: 16 — Batching 2D + Atlas.** Só começa depois de a baseline da fase 15
+estar medida. As baselines x86_64 e ARM64 estão em `docs/PERF_LOG.md`; no PX30 o
+critério de FPS da fase 16 tem de usar os 20000 sprites (ou `render2d_avg`), porque o
+KMSDRM limita tudo abaixo de ~10000 sprites a 60 FPS.
+
+
 ## Gates validados
 
 Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
@@ -29,15 +45,16 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 455 testes, 0 falhas
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 477 testes, 0 falhas
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
-- [x] `cargo doc --workspace --no-deps --document-private-items` (0 warnings)
+- [x] `cargo doc --workspace --no-deps --document-private-items` (um warning pré-existente em `balance.rs`)
 - [x] `scripts/gen-header.sh --check` — `giochi.h` em sincronia com o crate
 - [x] `scripts/ffi-smoke.sh` — **quatro** consumidores reais: `c_smoke.c`, `python_smoke.py`,
       `c_smoke_3d.c` e `python_smoke_3d.py`, todos verdes contra o `libgiochi.so` e o
       `giochi.h` gerados (`abi 2, engine 0.2.0`)
 - [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --test context_smoke`
-      — 3 testes contra GLES real (Mesa/EGL), incluindo leitura de pixel
+      — 3 testes contra GLES real (Mesa/EGL), incluindo leitura de pixel; 4 com
+      `--features profiling` (contadores de mesh)
 - [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --test lighting`
       — 7 testes que leem o framebuffer e verificam a **sombra**, não a chamada
 
@@ -52,6 +69,120 @@ Verificações manuais da fase:
   recolha pelo GC, `giochi.quit()`, propagação de erro, `app:step`, `arg`).
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
+
+## Fase 15 — Profiler + Debug Overlay
+Data: 2026-11-08
+
+**Escopo:** medir antes de otimizar. Nenhuma otimização foi feita nesta fase; o
+renderer 2D continua a emitir um draw call por sprite. O que fica é o instrumento, a
+overlay e a baseline que a fase 16 tem de bater.
+
+### Entregue
+
+- `giochi-engine/src/perf/`:
+  - `frame_stats.rs` — `FrameStats` (tempos em `u64` ns, pronto para a ABI v3),
+    `FrameTimeSummary` (min/max/avg/p50/p99) e `FrameCounters` (draw calls, sprites,
+    meshes, vértices, bytes), todos `#[repr(C)]` com `_reserved`.
+  - `profiler.rs` — `Profiler` com `begin_frame`, `begin_scope("update" | "render2d" |
+    "render3d" | "audio")`, `end_scope`, `add_audio_time`, `end_frame`, `snapshot` e
+    `summary`; janela de 60 amostras em `Mutex<Vec<FrameStats>>`.
+  - `text.rs` — fonte bitmap 5x7 escrita no repo; sem ficheiro TTF e sem dependência.
+  - `overlay.rs` — `DebugOverlay` desenhado com `sdl2::render`: uma textura
+    persistente atualizada no lugar a 1 Hz (1x em painéis < 800 px), `F1` alterna,
+    mostra FPS, frame, p99, CPU, draw calls, sprites, meshes, vértices, tempos por
+    sistema e RSS de `/proc/self/status`.
+- Feature `profiling` no core (e encaminhada em `giochi-engine-3d` e `giochi-demo`).
+  Sem a feature, todos os métodos do profiler são corpos vazios inlined, os renderers
+  não incrementam contadores e a overlay retorna imediatamente.
+- Integração no `Engine`: scopes `update` e `render2d`, contadores antes da overlay,
+  painel desenhado depois de `end_frame` (para não se contar a si próprio), `F1`,
+  `frame_stats()`, `frame_time_summary()` e `is/set/toggle_overlay_visible()`.
+- Contadores no `RenderContext` (2D: draw calls e sprites, incluindo `draw_rect`,
+  `fill_rects`, linhas e texturas) e no `RenderContext3D` (draw calls, meshes,
+  vértices e bytes), com reset em `begin_frame`/`begin_frame_stats`.
+- Tempo de áudio medido pelo próprio `AudioSystem` num `Cell<u64>` (o mixer é
+  emprestado diretamente à cena, não há wrapper onde cronometrar).
+- `giochi-demo/examples/profiler_demo.rs` — cena de N sprites com uma textura,
+  `--sprites`, `--frames`, `--width`, `--height`, `--no-overlay`, parser que rejeita
+  `--frames=3oo`,
+  modo interativo com `F1` e modo benchmark com uma linha legível por máquina.
+  Fica em `giochi-demo` porque o comando de aceitação é
+  `cargo run -p giochi-demo --example profiler_demo --features profiling` (a
+  estrutura da extensão listava-o em `giochi-engine/examples`).
+- `docs/PERF_LOG.md` com hardware, método, baseline e o teste de overhead.
+- ADR-042 em `docs/DECISIONS.md` — overlay manual com fonte bitmap em vez de
+  egui/puffin, e tempos em nanossegundos em vez de `Duration`.
+
+### Baseline x86_64 (release, vsync off, 1280x720, mediana de 5×600 frames)
+
+| Sprites (1 textura) | FPS | Frame avg | Frame p99 | CPU avg | Render2D avg | Draw calls |
+|---|---:|---:|---:|---:|---:|---:|
+| 200 | 1889.6 | 0.526 ms | 0.636 ms | 0.039 ms | 0.027 ms | 200 |
+| 500 | 1073.4 | 0.925 ms | 1.079 ms | 0.078 ms | 0.065 ms | 500 |
+| 1000 | 645.5 | 1.546 ms | 1.686 ms | 0.142 ms | 0.128 ms | 1000 |
+
+Custo da feature `profiling` ligada: **≤1.1 %** (649.9 → 642.8 FPS a 1000 sprites com
+a overlay escondida; 645.5 com a overlay visível, dentro do ruído). O orçamento da
+extensão é 2 %.
+
+### Baseline ARM64 (PX30, KMSDRM a 640x480, mediana de 3×600 frames)
+
+| Sprites (1 textura) | FPS | CPU avg | Render2D avg | Draw calls |
+|---|---:|---:|---:|---:|
+| 200 | 60.0 | 0.762 ms | 0.547 ms | 200 |
+| 500 | 60.0 | 1.203 ms | 1.004 ms | 500 |
+| 1000 | 59.9 | 1.964 ms | 1.761 ms | 1000 |
+| 5000 | 59.8 | 6.267 ms | 5.909 ms | 5000 |
+| 10000 | 59.6 | 8.712 ms | 8.178 ms | 10000 |
+| 20000 | 35.7 | 18.243 ms | 16.610 ms | 20000 |
+
+O painel KMSDRM limita a ~60 FPS até ~10000 sprites; a fase 16 tem de mostrar o ganho
+em `render2d_avg` (1000 sprites) e/ou no cenário de 20000 sprites. Overhead no PX30 a
+1000 sprites: **0.56 %** do tempo de parede com a overlay escondida e **1.94 %** com a
+overlay visível, medido por CPU do processo (`/usr/bin/time`), dentro dos 2 %.
+
+### Gates da fase
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo clippy -p giochi-engine -p giochi-engine-3d -p giochi-demo --all-targets --features profiling -- -D warnings`
+- [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
+- [x] `cargo build --release -p giochi-demo --example profiler_demo --features profiling`
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 477 testes, 0 falhas
+- [x] `cargo test -p giochi-engine --features profiling` — 190 unit + integração, 0 falhas
+- [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --features profiling`
+      — 173 unit + integração, incluindo o contador de meshes, 0 falhas
+- [x] `CROSS_SYSROOT=/tmp/r35s-sysroot scripts/build-aarch64.sh --release -p giochi-demo --example profiler_demo --features profiling`
+      — binário AArch64 confirmado; corrido no PX30 (ver `docs/PERF_LOG.md`)
+- [x] `cargo doc --workspace --no-deps --document-private-items` — sem warnings do
+      código da fase; permanece um warning pré-existente em
+      `giochi-engine-3d/src/game/balance.rs` (link para `Ball::step`, privado)
+- [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
+- [x] `scripts/gen-header.sh --check` — `giochi.h` inalterado; a ABI v3 só chega na fase 18c
+- [x] `scripts/check-version.sh`
+- [x] Smoke do demo: `profiler_demo --sprites 200 --frames 120` imprime
+      `draw_calls=200` e `frame_p99` não nulo.
+- [x] Dois pressupostos de teste pré-existentes corrigidos, porque os gates os
+      expuseram: `mesh_pipeline::release_all_leaves_nothing_behind` ainda esperava dois
+      built-in shaders depois de a fase 13 acrescentar `Phong` (passa a usar
+      `BuiltinShader::ALL.len()`); e `api_guide`/`engine_smoke` contavam a textura
+      persistente da overlay como fuga quando a feature `profiling` está ligada (os
+      testes desligam a overlay antes de contar).
+
+### Pendências
+
+- **ARM64 medido no PX30** (ver `docs/PERF_LOG.md`). O aparelho estava acessível por
+  SSH; o launcher foi desativado e restaurado com o procedimento do
+  `scripts/hardware-check.sh`, e o binário correu de `/tmp` (RAM), sem escrever no
+  rootfs. Fica registado que o KMSDRM limita a ~60 FPS até ~10000 sprites: o critério
+  de FPS da fase 16 no aparelho tem de usar 20000 sprites ou `render2d_avg`.
+- **Overhead no cenário de stress.** Com 20000 sprites, os contadores por draw call
+  custam ~5 % de CPU e a overlay visível baixa o frame rate de 39.8 para 35.7 FPS. É
+  o cenário que a fase 16 elimina ao agrupar os draws; o orçamento de 2 % é medido na
+  baseline de 1000 sprites.
+- A overlay não aparece em `mini_fps` (o renderer 3D não tem caminho 2D para desenhar
+  texto). Os contadores 3D estão medidos e expostos; a overlay 3D fica para quando
+  houver um caminho de UI GLES.
 
 ## Sexta auditoria — os binários 2D tratavam um limite de frames mal escrito como "sem limite"
 Data: 2026-11-08
@@ -1276,7 +1407,11 @@ As oito fases do prompt mestre estão completas. Trabalho futuro, por ordem de v
 
 ## Bloqueios / pendências
 
-- **Nenhuma fase por fazer. O plano do prompt mestre está completo (0 → 14).**
+- **Fases 0–15 concluídas.** O plano mestre (0–14) está completo; a extensão de
+  performance já entregou a fase 15 e tem as fases 16–18 por fazer.
+- **Fase 15 validada no PX30 (2026-11-08).** O aparelho respondeu por SSH; a baseline
+  2D a 640x480, os contadores 3D e o `mini_fps` foram medidos com o launcher
+  desativado/restaurado e o binário em `/tmp`. Ver `docs/PERF_LOG.md`.
 - **O aparelho em `10.55.0.2` lê bateria a 0 % / 0,018 V**, mas está a correr do
   carregador (`online=1`). A campanha de testes completa correu nesse estado a pedido do
   utilizador, sem incidente: os três binários 3D e os dois consumidores C terminaram com

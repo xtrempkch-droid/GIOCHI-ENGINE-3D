@@ -240,7 +240,7 @@ fn release_all_leaves_nothing_behind() {
     }
 
     assert_eq!(render.mesh_count(), 3);
-    assert_eq!(render.shader_count(), 2);
+    assert_eq!(render.shader_count(), BuiltinShader::ALL.len());
     assert!(render.release_all(), "everything should have been released");
     assert_eq!(render.mesh_count(), 0);
     assert_eq!(render.shader_count(), 0);

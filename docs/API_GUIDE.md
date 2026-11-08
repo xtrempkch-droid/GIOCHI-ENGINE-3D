@@ -130,6 +130,9 @@ in tests.
 | `reset_quit()` | re-arm the loop after a quit, keeping the timestep |
 | `request_quit()` / `is_running()` | cooperative shutdown |
 | `run_stats()` | `RunStats { frames, steps, elapsed }` with `fps()`, `step_rate()`, `frame_time_ms()` |
+| `frame_stats()` | the last measured frame (`profiling` feature; zeroed otherwise) |
+| `frame_time_summary()` | min/max/avg/p50/p99 over the last 60 frames |
+| `is_overlay_visible()` / `set_overlay_visible()` / `toggle_overlay()` | the debug panel; `F1` toggles it |
 | `time()` | the simulation clock |
 | `fixed_timestep()` | the step in seconds |
 | `set_clear_color(color)` | background drawn before each frame |
@@ -140,6 +143,30 @@ engine.run_current()?;
 let stats = engine.run_stats();
 println!("{} frames, {} steps, {:.1} fps", stats.frames, stats.steps, stats.fps());
 ```
+
+### Profiling (feature `profiling`)
+
+`frame_stats()` and `frame_time_summary()` are populated only when the crate is built
+with `--features profiling`; without it the methods still exist and return zeroed
+values, and the renderer pays nothing. The same feature enables the overlay (`F1`).
+
+```bash
+cargo run -p giochi-demo --example profiler_demo --features profiling
+cargo run --release -p giochi-demo --example profiler_demo --features profiling -- \
+    --sprites 1000 --frames 600
+```
+
+```rust
+let stats = engine.frame_stats();
+let summary = engine.frame_time_summary();
+println!(
+    "{:.1} fps, frame {:.2} ms, p99 {:.2} ms, {} draw calls",
+    summary.fps, stats.frame_time_ms(), summary.p99_ms(), stats.draw_calls
+);
+```
+
+The baseline and the method behind it live in [`PERF_LOG.md`](PERF_LOG.md); the design
+choice (bitmap overlay instead of egui/puffin) is ADR-042.
 
 ---
 

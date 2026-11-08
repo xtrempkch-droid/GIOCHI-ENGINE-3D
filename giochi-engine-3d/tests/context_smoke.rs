@@ -15,6 +15,10 @@ use giochi_engine::platform::sdl::Platform;
 use giochi_engine::platform::window::{Window, WindowConfig};
 use giochi_engine_3d::context::{self, GlesVersion};
 use giochi_engine_3d::math3d::Color3D;
+#[cfg(feature = "profiling")]
+use giochi_engine_3d::math3d::{Camera3D, Transform3D, Vec3};
+#[cfg(feature = "profiling")]
+use giochi_engine_3d::shader::BuiltinShader;
 use giochi_engine_3d::RenderContext3D;
 
 /// Returns a headless GL context, or `None` when this machine has no GL driver.
@@ -97,4 +101,57 @@ fn the_clear_color_is_actually_written_to_the_surface() {
             "channel {channel}: got {got}, expected {expected}"
         );
     }
+}
+
+#[cfg(feature = "profiling")]
+#[test]
+fn the_renderer_counts_meshes_vertices_and_resets_per_frame() {
+    let Some((_platform, window)) = headless_context() else {
+        eprintln!("skipped: no OpenGL ES driver available");
+        return;
+    };
+
+    let mut render = RenderContext3D::new(context::create(&window).expect("context"));
+    let mesh = render.create_cube_mesh(1.0).expect("cube mesh");
+    let shader = render
+        .create_builtin_shader(BuiltinShader::Flat)
+        .expect("flat shader");
+    let camera = Camera3D::new()
+        .with_aspect(1.0)
+        .with_clip_planes(0.1, 100.0);
+    let model = Transform3D::from_translation(Vec3::new(0.0, 0.0, -5.0));
+
+    render.begin_frame(&window);
+    assert_eq!(
+        render.frame_counters().draw_calls,
+        0,
+        "a frame starts at zero"
+    );
+
+    assert!(render
+        .draw_mesh_colored(mesh, shader, &model, &camera, Color3D::WHITE)
+        .expect("draw"));
+
+    let counters = render.frame_counters();
+    assert_eq!(counters.draw_calls, 1);
+    assert_eq!(counters.meshes_drawn, 1);
+    assert!(
+        counters.vertices_uploaded > 0,
+        "a cube must report its vertices"
+    );
+    assert!(
+        counters.bytes_uploaded >= counters.vertices_uploaded,
+        "each vertex is at least one byte"
+    );
+
+    render.end_frame(&window);
+    render.begin_frame(&window);
+    assert_eq!(
+        render.frame_counters().draw_calls,
+        0,
+        "begin_frame must reset the counters"
+    );
+
+    assert!(render.destroy_mesh(mesh));
+    assert!(render.destroy_shader(shader));
 }

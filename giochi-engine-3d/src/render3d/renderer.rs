@@ -4,6 +4,7 @@
 //! type exists now so the frame skeleton (state → clear → swap) is fixed before
 //! anything is added to it.
 
+use giochi_engine::perf::FrameCounters;
 use giochi_engine::platform::window::Window;
 
 use glow::HasContext;
@@ -43,6 +44,8 @@ pub struct RenderContext3D {
     light: DirectionalLight,
     meshes: HandleRegistry<Mesh>,
     shaders: HandleRegistry<Program>,
+    #[cfg(feature = "profiling")]
+    counters: FrameCounters,
 }
 
 impl std::fmt::Debug for RenderContext3D {
@@ -74,6 +77,8 @@ impl RenderContext3D {
             light: DirectionalLight::sun(),
             meshes: HandleRegistry::new(),
             shaders: HandleRegistry::new(),
+            #[cfg(feature = "profiling")]
+            counters: FrameCounters::new(),
         }
     }
 
@@ -128,6 +133,23 @@ impl RenderContext3D {
 
         self.state.apply(self.gl.glow());
         self.state.clear(self.gl.glow());
+
+        #[cfg(feature = "profiling")]
+        self.counters.reset();
+    }
+
+    /// Snapshot of the draw counters recorded since [`RenderContext3D::begin_frame`].
+    ///
+    /// Without the `profiling` feature every field is zero.
+    pub fn frame_counters(&self) -> FrameCounters {
+        #[cfg(feature = "profiling")]
+        {
+            self.counters
+        }
+        #[cfg(not(feature = "profiling"))]
+        {
+            FrameCounters::new()
+        }
     }
 
     /// Switches polygon rasterisation between filled and wireframe.
@@ -542,6 +564,12 @@ impl RenderContext3D {
 
         mesh.draw(gl, &program);
 
+        #[cfg(feature = "profiling")]
+        self.counters.record_mesh(
+            u64::from(mesh.vertex_count()),
+            u64::from(mesh.vertex_count()) * std::mem::size_of::<Vertex>() as u64,
+        );
+
         Ok(true)
     }
 
@@ -565,6 +593,12 @@ impl RenderContext3D {
         program.set_color(self.gl.glow(), "u_color", colour.clamped());
 
         mesh.draw(self.gl.glow(), &program);
+
+        #[cfg(feature = "profiling")]
+        self.counters.record_mesh(
+            u64::from(mesh.vertex_count()),
+            u64::from(mesh.vertex_count()) * std::mem::size_of::<Vertex>() as u64,
+        );
 
         Ok(true)
     }

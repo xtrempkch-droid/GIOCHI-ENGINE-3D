@@ -6,6 +6,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — phase 15: profiler and debug overlay
+
+**The engine can now be measured before it is optimized.** A new `profiling` feature
+adds `perf::{Profiler, FrameStats, FrameTimeSummary, FrameCounters}` and a `DebugOverlay`
+toggled with `F1`. The overlay shows FPS, frame time and p99 over the last 60 frames,
+CPU time, draw calls, sprites, meshes, vertices, per-system times (`update`, `render2d`,
+`render3d`, `audio`) and RSS from `/proc/self/status`. It is drawn with `sdl2::render`
+from an authored 5x7 bitmap font — no egui, no TTF file, one persistent texture
+updated at 1 Hz — so it works on the KMSDRM path.
+
+Without the feature the profiler compiles to no-ops and the renderers do not touch their
+counters. On the 1000-sprite baseline the feature costs ≤1.1 % on x86_64 and 1.94 % on
+the PX30 console (measured; budget 2 %).
+`giochi-demo/examples/profiler_demo.rs` is the N-sprite baseline for phase 16, and
+`docs/PERF_LOG.md` records the numbers, the method and the pending ARM64 validation.
+See ADR-042.
+
 ## [0.2.2] - 2026-11-08
 
 ### Fixed — a sixth audit found one more

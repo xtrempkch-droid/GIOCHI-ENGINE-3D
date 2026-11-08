@@ -23,12 +23,16 @@ use crate::audio::AudioSystem;
 use crate::core::game_loop::{GameLoop, MAX_FRAME_TIME};
 use crate::core::time::{FrameClock, Time};
 use crate::error::GiochiError;
+use crate::input::keyboard::KEY_F1;
 use crate::input::Input;
 use crate::math::Color;
+use crate::perf::{DebugOverlay, FrameStats, FrameTimeSummary, Profiler};
 use crate::platform::window::WindowConfig;
 use crate::platform::{quit_signal, Platform};
 use crate::render::RenderContext;
 use crate::scene::{Scene, SceneManager, SceneTransition};
+
+use std::time::Duration;
 
 /// Capacity of [`EngineConfig::title`], in bytes, including the trailing NUL.
 pub const ENGINE_TITLE_CAPACITY: usize = 64;
@@ -218,6 +222,8 @@ pub struct Engine {
     clear_color: Color,
     stats: RunStats,
     frame_limit: Option<u64>,
+    profiler: Profiler,
+    overlay: DebugOverlay,
     _reserved: [u32; 4],
 }
 
@@ -307,6 +313,8 @@ impl Engine {
             clear_color: DEFAULT_CLEAR_COLOR,
             stats: RunStats::default(),
             frame_limit: None,
+            profiler: Profiler::new(),
+            overlay: DebugOverlay::new(),
             _reserved: [0; 4],
         })
     }
@@ -369,6 +377,9 @@ impl Engine {
     /// which is what a "loading" state needs.
     pub fn run_current(&mut self) -> Result<(), GiochiError> {
         self.stats = RunStats::default();
+        // A new run starts with a new measurement window: the previous run's frames
+        // must not appear in this run's p99 (or in the overlay's first second).
+        self.profiler = Profiler::new();
         let started = std::time::Instant::now();
         let mut transitions = 0u32;
 
@@ -429,12 +440,21 @@ impl Engine {
     /// Shared by [`Engine::run_current`] and [`Engine::step`] so the two can never
     /// disagree about the order of a frame.
     fn run_frame(&mut self, frame_time: f32) -> Result<FrameOutcome, GiochiError> {
+        self.profiler.begin_frame();
+        // Discard anything the mixer timed before the frame started (a scene's
+        // `on_enter`, for example), so the sample covers this frame only.
+        let _ = self.audio.take_profile_time_ns();
+
         let events = self.platform.poll_events();
         self.input.update(&events);
+        if self.input.key_pressed(KEY_F1) {
+            self.overlay.toggle();
+        }
         for event in &events {
             self.game_loop.handle_quit_signal(quit_signal(event));
         }
 
+        self.profiler.begin_scope("update");
         let steps = self.game_loop.advance(frame_time);
         for _ in 0..steps {
             self.time.advance(self.game_loop.fixed_timestep());
@@ -444,11 +464,31 @@ impl Engine {
             }
             self.stats.steps += 1;
         }
+        self.profiler.end_scope();
 
+        self.render.begin_frame_stats();
         self.render.clear(self.clear_color);
+        self.profiler.begin_scope("render2d");
         if let Some(scene) = self.scenes.current_mut() {
             scene.render(&mut self.render);
         }
+        self.profiler.end_scope();
+
+        let audio_ns = self.audio.take_profile_time_ns();
+        self.profiler.add_audio_time(audio_ns);
+        let frame_time = if frame_time.is_finite() && frame_time > 0.0 {
+            frame_time
+        } else {
+            0.0
+        };
+        self.profiler.end_frame(
+            Duration::from_secs_f32(frame_time),
+            self.render.frame_counters(),
+        );
+        // After `end_frame`, so the panel's own texture copy is excluded from the
+        // numbers it shows; the next frame resets the counters before the scene draws.
+        self.overlay.draw(&mut self.render, &self.profiler);
+
         self.render.present();
         self.stats.frames += 1;
 
@@ -545,6 +585,35 @@ impl Engine {
     /// Statistics for the last (or current) run.
     pub fn run_stats(&self) -> RunStats {
         self.stats
+    }
+
+    /// Statistics for the most recently completed frame.
+    ///
+    /// Every field is zero unless the `profiling` feature was enabled at build time.
+    pub fn frame_stats(&self) -> FrameStats {
+        self.profiler.snapshot()
+    }
+
+    /// Min/max/avg/p50/p99 over the last [`crate::perf::FRAME_WINDOW`] frames.
+    ///
+    /// Zeroed unless the `profiling` feature was enabled at build time.
+    pub fn frame_time_summary(&self) -> FrameTimeSummary {
+        self.profiler.summary()
+    }
+
+    /// Whether the debug overlay is currently shown.
+    pub fn is_overlay_visible(&self) -> bool {
+        self.overlay.is_visible()
+    }
+
+    /// Shows or hides the debug overlay. `F1` does the same during a run.
+    pub fn set_overlay_visible(&mut self, visible: bool) {
+        self.overlay.set_visible(visible);
+    }
+
+    /// Flips the debug overlay's visibility.
+    pub fn toggle_overlay(&mut self) {
+        self.overlay.toggle();
     }
 
     /// Stops the loop automatically after `frames` rendered frames.

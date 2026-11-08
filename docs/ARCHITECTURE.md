@@ -49,7 +49,13 @@ binding therefore never changes the engine.
    math::{Vec2, Rect, Color}   depends on nothing
    handle_registry              pub(crate), used by render/audio/scene
    assets::{loader, ResourceManager}
+   perf::{Profiler, DebugOverlay}  observes the frame; `profiling` feature
 ```
+
+`perf` observes the frame instead of owning part of it: `core::engine` opens and closes
+the scopes around the scene callbacks, the renderers record their own counters, and the
+overlay draws through `RenderContext`. It never imports `sdl2` directly, and without
+the `profiling` feature every call is an inlined no-op.
 
 ### Dependency rules
 

@@ -21,3 +21,7 @@ sdl2-bundled = ["sdl2/bundled"]
 # já traz o SDL2 com KMSDRM — e é o que permite cross-compilar para aarch64 sem
 # compilar uma segunda cópia da biblioteca.
 sdl2-system = ["sdl2/use-pkgconfig"]
+# Fase 15: coleta de tempos/contadores por frame e overlay de debug (F1).
+# Desligada por omissão: sem esta feature o profiler compila como no-op e o
+# renderer não incrementa contadores (ADR-042).
+profiling = []

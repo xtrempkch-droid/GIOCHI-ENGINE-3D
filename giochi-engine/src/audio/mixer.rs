@@ -33,6 +33,8 @@ pub struct AudioSystem {
     music: HandleRegistry<Music<'static>>,
     audio: Option<MixerAudio>,
     volume: Cell<i32>,
+    #[cfg(feature = "profiling")]
+    profile_ns: Cell<u64>,
     _reserved: [u32; 4],
 }
 
@@ -54,6 +56,24 @@ impl std::fmt::Debug for AudioSystem {
 struct MixerAudio {
     _audio: sdl2::AudioSubsystem,
     _mixer: MixerContext,
+}
+
+/// Accumulates the duration of an audio API call into the system's profile counter.
+///
+/// The guard borrows only the `Cell`, not the whole system, so the instrumented methods
+/// can still use their other fields while it is alive.
+#[cfg(feature = "profiling")]
+struct AudioTimer<'a> {
+    started: std::time::Instant,
+    total: &'a Cell<u64>,
+}
+
+#[cfg(feature = "profiling")]
+impl Drop for AudioTimer<'_> {
+    fn drop(&mut self) {
+        let elapsed = self.started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
+        self.total.set(self.total.get().saturating_add(elapsed));
+    }
 }
 
 impl std::fmt::Debug for MixerAudio {
@@ -90,6 +110,8 @@ impl AudioSystem {
             music: HandleRegistry::new(),
             audio,
             volume: Cell::new(crate::audio::MAX_VOLUME),
+            #[cfg(feature = "profiling")]
+            profile_ns: Cell::new(0),
             _reserved: [0; 4],
         };
         system.apply_volume();
@@ -106,6 +128,8 @@ impl AudioSystem {
             music: HandleRegistry::new(),
             audio: None,
             volume: Cell::new(crate::audio::MAX_VOLUME),
+            #[cfg(feature = "profiling")]
+            profile_ns: Cell::new(0),
             _reserved: [0; 4],
         }
     }
@@ -113,6 +137,34 @@ impl AudioSystem {
     /// Returns `true` when a real audio device is open.
     pub fn is_available(&self) -> bool {
         self.audio.is_some()
+    }
+
+    /// Returns and clears the nanoseconds spent inside audio API calls since the last
+    /// call.
+    ///
+    /// This is what the frame profiler folds into
+    /// [`FrameStats::audio_ns`](crate::perf::FrameStats::audio_ns). Without the
+    /// `profiling` feature it always returns `0`.
+    pub fn take_profile_time_ns(&self) -> u64 {
+        #[cfg(feature = "profiling")]
+        {
+            let elapsed = self.profile_ns.get();
+            self.profile_ns.set(0);
+            elapsed
+        }
+        #[cfg(not(feature = "profiling"))]
+        {
+            0
+        }
+    }
+
+    /// Starts a scope timer for an audio API call.
+    #[cfg(feature = "profiling")]
+    fn timer(&self) -> AudioTimer<'_> {
+        AudioTimer {
+            started: std::time::Instant::now(),
+            total: &self.profile_ns,
+        }
     }
 
     /// Loads a WAV/OGG/MP3 effect and returns its handle.
@@ -161,6 +213,8 @@ impl AudioSystem {
     /// [`crate::audio::LOOPS_INFINITE`] loops forever. Negative values other than
     /// `-1` are clamped to `0`.
     pub fn play_sound(&mut self, sound: SoundHandle, loops: i32) -> Result<(), GiochiError> {
+        #[cfg(feature = "profiling")]
+        let _timer = self.timer();
         self.require_device()?;
         let chunk = self
             .sounds
@@ -175,6 +229,8 @@ impl AudioSystem {
 
     /// Stops every sound effect channel.
     pub fn stop_all_sounds(&mut self) {
+        #[cfg(feature = "profiling")]
+        let _timer = self.timer();
         if self.audio.is_some() {
             Channel::all().halt();
         }
@@ -214,6 +270,8 @@ impl AudioSystem {
     ///
     /// `loops` follows the same convention as [`AudioSystem::play_sound`].
     pub fn play_music(&mut self, music: MusicHandle, loops: i32) -> Result<(), GiochiError> {
+        #[cfg(feature = "profiling")]
+        let _timer = self.timer();
         self.require_device()?;
         let track = self
             .music
@@ -227,6 +285,8 @@ impl AudioSystem {
 
     /// Pauses the current music stream. Resuming continues from the same position.
     pub fn pause_music(&mut self) {
+        #[cfg(feature = "profiling")]
+        let _timer = self.timer();
         if self.audio.is_some() {
             Music::pause();
         }
@@ -234,6 +294,8 @@ impl AudioSystem {
 
     /// Resumes the current music stream.
     pub fn resume_music(&mut self) {
+        #[cfg(feature = "profiling")]
+        let _timer = self.timer();
         if self.audio.is_some() {
             Music::resume();
         }
@@ -241,6 +303,8 @@ impl AudioSystem {
 
     /// Stops the current music stream and rewinds it to the start.
     pub fn stop_music(&mut self) {
+        #[cfg(feature = "profiling")]
+        let _timer = self.timer();
         if self.audio.is_some() {
             Music::halt();
         }
@@ -248,6 +312,8 @@ impl AudioSystem {
 
     /// Sets the master volume, clamped to `0..=MAX_VOLUME`.
     pub fn set_volume(&mut self, volume: i32) {
+        #[cfg(feature = "profiling")]
+        let _timer = self.timer();
         self.volume.set(clamp_volume(volume));
         self.apply_volume();
     }

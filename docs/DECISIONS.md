@@ -1105,3 +1105,69 @@ is a legitimate pattern and the thread-local makes it work without any locking. 
 functions that *do* take an engine pointer (`begin_frame`, `end_frame`, `clear`,
 `draw_mesh`, `destroy`) still validate nothing about the pointer's provenance beyond
 non-NULL: an opaque handle in C is only ever as good as its owner's bookkeeping.
+
+---
+
+## ADR-042 — Phase 15 profiles with a feature-gated hand-rolled overlay, not egui/puffin
+
+**Context.** The performance extension suggests `puffin` plus `egui`/`egui-sdl2` for
+the phase-15 profiler, and explicitly allows a manual SDL overlay if the GUI crates
+do not work on ARM64. Two facts of this codebase push that decision earlier than a
+portability failure would:
+
+1. The 2D renderer is the SDL `render` API, chosen so the KMSDRM path needs no
+   OpenGL (ADR-037). `egui-sdl2` integrates through an OpenGL context; adopting it
+   would make the 2D path depend on GL and on EGL/GBM behaviour on the console.
+2. The production image is a minimal Buildroot rootfs. A GUI crate tree and a font
+   asset are both real costs on that image, and the overlay is a developer aid, not a
+   game feature.
+
+`puffin` alone would give scopes, but not the frame-window aggregation, the C-ready
+`FrameStats` shape that phase 18c needs, or the overlay. The project already has a
+rule for this: measure with the simplest instrument that can produce a number.
+
+**Decision.**
+
+- Profiling is the `profiling` Cargo feature, with **no new dependency**. With the
+  feature off, every `Profiler` method is an empty inlined body, the renderers do not
+  increment counters, and the overlay returns immediately.
+- `Profiler` measures scopes with `std::time::Instant` and keeps the last
+  `FRAME_WINDOW` (60) samples in `Mutex<Vec<FrameStats>>`. The mutex is required by
+  the extension and is uncontended; it is locked once per frame, never while drawing.
+- `FrameStats` stores time as `u64` nanoseconds, not `Duration`. `Duration` has no
+  guaranteed C layout; `GiochiFrameStats` in phase 18c is specified with
+  `frame_time_ns: u64`. The Rust type therefore uses the ABI-ready representation and
+  offers `frame_time()`/`frame_time_ms()` accessors for ergonomics.
+- The overlay is drawn with `sdl2::render` from a 5x7 bitmap font authored in
+  `src/perf/text.rs`, rasterised into **one persistent** RGBA texture that is updated
+  in place. It refreshes at 1 Hz (the FPS number is already a 60-frame average) and
+  toggles with `F1`; `Engine` starts it visible when the feature is compiled in. The
+  sample and the summary are read only on a refresh, not on every frame. Panels
+  narrower than 800 px use the 1x font, which is four times less pixels to upload.
+- Audio call time is accumulated by the mixer itself in a `Cell<u64>` (the scene
+  receives `&mut AudioSystem` directly, so there is no wrapper to time); the 3D
+  renderer counts draws, meshes and vertices under its own forwarding `profiling`
+  feature.
+
+**Why the four named scopes and not an arbitrary tree.** The overlay has to answer
+"where did the frame go" for the systems this engine actually has: update, 2D render,
+3D render and audio. Unknown scope names are still accepted and accumulated in
+`other_ns`, so a host is not blocked; a call-tree UI is not worth a dependency for
+four rows.
+
+**Consequences.** There is no flamegraph, no per-scope nesting display and no GPU
+timer (GLES 2.0 and `sdl2::render` expose none). `gpu_time_hint_ns` stays zero. The
+overhead at the 1000-sprite baseline is **≤1.1 %** on x86_64 and, on the PX30,
+**0.56 %** of wall time with the panel hidden and **1.94 %** with it visible; that is
+inside the extension's 2 % budget. The measurements also found the limit of the
+approach: at 20000 sprites the per-draw counter increments cost ~5 % of CPU and the
+panel pushes a 39.8 FPS run to 35.7 FPS. That stress point is exactly what phase 16's
+batching removes; the budget is specified for a normal frame, and this is recorded in
+`docs/PERF_LOG.md` rather than hidden. Because Cargo cannot say "on in debug, off in
+release" as a default feature, `profiling` is explicitly opt-in in every build, which
+is also what the phase-15 acceptance command uses.
+
+**Verified by.** `perf/frame_stats.rs` and `perf/profiler.rs` unit tests, the
+`profiler_smoke` integration test (counts, percentiles, overlay pixels, no texture
+leak), the `context_smoke` 3D counter test, and the off/on comparison on x86_64 and on
+the PX30 in `docs/PERF_LOG.md`.

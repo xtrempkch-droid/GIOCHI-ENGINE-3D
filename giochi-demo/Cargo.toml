@@ -13,3 +13,11 @@ giochi-engine = { path = "../giochi-engine", version = "0.2.2" }
 giochi-engine-lua = { path = "../giochi-engine-lua", version = "0.2.2" }
 env_logger = { workspace = true }
 log = { workspace = true }
+
+[features]
+# Encaminha a feature de profiling do core para que o exemplo possa usá-la.
+profiling = ["giochi-engine/profiling"]
+
+[[example]]
+name = "profiler_demo"
+path = "examples/profiler_demo.rs"

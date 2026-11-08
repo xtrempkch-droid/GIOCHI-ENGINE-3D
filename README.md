@@ -106,6 +106,22 @@ cargo run -p giochi-engine --example mini_game       # complete space shooter
 All examples accept `--frames N` to run for a fixed number of frames, which is how
 the smoke tests exercise them without a display.
 
+### Profiling
+
+Phase 15 adds an in-game overlay and a 60-frame frame-time window behind the
+`profiling` feature. `F1` toggles the panel; without the feature everything compiles to
+a no-op.
+
+```bash
+cargo run -p giochi-demo --example profiler_demo --features profiling
+cargo run --release -p giochi-demo --example profiler_demo --features profiling -- \
+    --sprites 1000 --frames 600
+```
+
+The N-sprite demo is the phase-16 baseline; `docs/PERF_LOG.md` records the measured
+numbers and the overhead (≤1.1 % on x86_64, 1.94 % on the PX30 at 1000 sprites). See
+ADR-042 for why the overlay is a bitmap font on `sdl2::render` rather than egui/puffin.
+
 ### Cross build for ARM64
 
 ```bash
