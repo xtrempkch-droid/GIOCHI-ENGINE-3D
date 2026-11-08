@@ -372,6 +372,19 @@ impl Engine {
         let started = std::time::Instant::now();
         let mut transitions = 0u32;
 
+        // Start the frame budget here, not where the engine was built. `clock.last` is set
+        // in `FrameClock::new`, so without this the first `tick()` below reports everything
+        // that happened between `Engine::new` and this call — window and renderer creation,
+        // opening the mixer, and any asset the caller loaded before starting the loop. That
+        // time is integrated as if it had been a frame, so every run began by simulating up
+        // to `MAX_FRAME_TIME` (15 steps at 60 Hz) of a frame that never happened: the ball
+        // had already rolled, the player had already fallen, and `RunStats::elapsed` and
+        // `fps()` counted the set-up as gameplay.
+        //
+        // The scene-change path below resets the clock for exactly this reason on every
+        // transition; the start of the run is the same event and had been missed.
+        self.clock.reset();
+
         while self.game_loop.is_running() {
             let frame_started = std::time::Instant::now();
             let frame_time = self.clock.tick();

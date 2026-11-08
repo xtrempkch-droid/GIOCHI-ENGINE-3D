@@ -134,6 +134,32 @@ fn engine_and_scene_stack_without_a_display() {
 
     // --- the real loop: fixed steps, rendering, frame limit ----------------
     log.0.borrow_mut().clear();
+
+    // Time the "caller" spends between building the engine and starting the loop — asset
+    // loading, a title screen, a debug breakpoint. It must not be integrated as if it had
+    // been a frame. `FrameClock` starts at `Engine::new`, so `run_current` has to restart
+    // it: without that the first `tick()` returned this sleep plus the whole construction
+    // cost, and the run began by simulating up to `MAX_FRAME_TIME` (15 steps at 60 Hz) of a
+    // frame that never happened. It also made `elapsed` and `fps()` count set-up as play.
+    //
+    // One frame is run so the assertion is about the first frame alone: a longer run would
+    // charge the first frame's *work* to the second one, which is what a frame loop is
+    // supposed to do.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    engine.set_frame_limit(1);
+    engine.run_current().expect("loop must run");
+
+    let startup = engine.run_stats();
+    assert_eq!(startup.frames, 1);
+    assert_eq!(
+        startup.steps, 0,
+        "the first frame integrated {} fixed steps: the 200 ms spent before the loop was \
+         charged to it",
+        startup.steps
+    );
+
+    log.0.borrow_mut().clear();
     engine.set_frame_limit(40);
     engine.run_current().expect("loop must run");
 
