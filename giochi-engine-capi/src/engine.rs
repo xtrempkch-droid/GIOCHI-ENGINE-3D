@@ -147,6 +147,10 @@ pub extern "C" fn giochi_engine_run_scene(scene_handle: giochi_engine::SceneHand
         if scene::set_running(&entry, true) {
             return state::unavailable("this scene is already running on this thread");
         }
+        // Cleared on every exit path, panic included: without the guard, a panicking
+        // callback unwound past the reset below and the handle refused `destroy` and any
+        // second run forever, because no function resets the registry.
+        let _running = scene::RunningGuard::new(entry.clone());
 
         // `on_enter` runs here, outside any engine borrow, so the callback can use
         // the renderer, the mixer and the texture registry.
@@ -363,20 +367,27 @@ pub extern "C" fn giochi_engine_video_driver() -> *const c_char {
 /// Arms the loop, runs it, then empties the stack and delivers the deferred
 /// `on_exit` callbacks — with the engine borrow released in between, so a callback
 /// that destroys handles still works.
+///
+/// The cleanup runs on the panic path too. A panicking scene callback unwinds through
+/// here, and the `Drop`-guarded run mark is released on the way; but the stack was still
+/// holding the adapter with `on_stack == 1`, and the deferred `on_exit` was never
+/// delivered. The error is recorded *after* the cleanup rather than by `guard`, because
+/// the user's `on_exit` is allowed to call `giochi_*` functions and every one of those
+/// clears the error on entry.
 fn run_loop(start: impl FnOnce(&mut Engine) -> Result<(), GiochiError>) -> i32 {
     state::clear_quit_request();
 
-    // The mark is released by the guard's `Drop`, so a panic inside the loop cannot leave
-    // this thread permanently "running" — which would refuse every later run and step.
-    let result = state::with_run_in_progress(|| {
-        state::with_engine_mut(
-            "the engine is busy; a run cannot start from inside a scene callback",
-            |engine| {
-                // Every run starts armed, so a previous quit does not silently skip it.
-                engine.reset_quit();
-                start(engine)
-            },
-        )
+    let outcome = state::catch_panic(|| {
+        state::with_run_in_progress(|| {
+            state::with_engine_mut(
+                "the engine is busy; a run cannot start from inside a scene callback",
+                |engine| {
+                    // Every run starts armed, so a previous quit does not silently skip it.
+                    engine.reset_quit();
+                    start(engine)
+                },
+            )
+        })
     });
 
     state::clear_quit_request();
@@ -386,9 +397,100 @@ fn run_loop(start: impl FnOnce(&mut Engine) -> Result<(), GiochiError>) -> i32 {
     let _ = state::with_engine_mut("the engine is busy", |engine| engine.scenes_mut().clear());
     scene::drain_pending_exits();
 
-    match result {
-        Ok(Ok(())) => codes::OK,
-        Ok(Err(err)) => state::fail(&err),
-        Err(code) => code,
+    match outcome {
+        Ok(Ok(Ok(()))) => codes::OK,
+        Ok(Ok(Err(err))) => state::fail(&err),
+        Ok(Err(code)) => code,
+        Err(payload) => {
+            state::set_last_error(&format!(
+                "caught a panic at the C boundary: {}",
+                state::describe_panic(&payload)
+            ));
+            codes::INTERNAL
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::abi_types::GiochiSceneCallbacks;
+    use std::os::raw::c_void;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Counts the `on_exit` deliveries from the test below.
+    static EXITS: AtomicUsize = AtomicUsize::new(0);
+
+    extern "C" fn counting_on_exit(_user_data: *mut c_void) {
+        EXITS.fetch_add(1, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn a_panic_inside_the_loop_still_empties_the_stack_and_clears_the_scene() {
+        // `run_loop` used to empty the stack and deliver the deferred `on_exit` in plain
+        // lines after the run. A panic inside the run — an engine-internal bug, which is
+        // exactly what `state::guard` exists to contain — unwound past them: the adapter
+        // stayed on the stack with `on_stack == 1`, the scene's `running` mark stayed set,
+        // and the handle refused `destroy` and every further run, with no reset anywhere.
+        std::env::set_var("SDL_VIDEODRIVER", "dummy");
+        let engine = Engine::new(EngineConfig::new(64, 64, "run-loop-panic")).expect("engine");
+        state::install(engine);
+
+        let callbacks = GiochiSceneCallbacks {
+            user_data: std::ptr::null_mut::<c_void>(),
+            on_enter: None,
+            on_exit: Some(counting_on_exit),
+            update: None,
+            render: None,
+            _reserved: [0; 4],
+        };
+        let handle = scene::create(callbacks);
+        let entry = scene::lookup(handle).expect("just created");
+        scene::set_running(&entry, true);
+        let _running = scene::RunningGuard::new(entry.clone());
+
+        let pushed = state::with_engine_mut("test", |engine| {
+            engine.push_scene(scene::adapter(&entry));
+        });
+        assert!(pushed.is_ok(), "the engine must be installed");
+        assert_eq!(
+            state::with_engine("test", |engine| engine.scenes().depth()),
+            Ok(1),
+            "the adapter must be on the stack"
+        );
+
+        let hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let code = run_loop(|_engine| panic!("boom inside the loop"));
+        std::panic::set_hook(hook);
+
+        assert_eq!(code, codes::INTERNAL);
+        assert!(
+            state::last_error_text().contains("caught a panic"),
+            "the error must say a panic was caught: {}",
+            state::last_error_text()
+        );
+
+        // The stack was emptied and the exit was delivered despite the panic.
+        assert_eq!(
+            state::with_engine("test", |engine| engine.scenes().depth()),
+            Ok(0),
+            "the stack must be empty after a panic"
+        );
+        assert_eq!(EXITS.swap(0, Ordering::SeqCst), 1, "on_exit must run once");
+
+        // The guard drops when `run_scene` returns; in the real call that is before the
+        // caller can do anything else.
+        drop(_running);
+
+        // And the handle is not wedged: destroying it succeeds.
+        assert_eq!(
+            scene::destroy(handle),
+            codes::OK,
+            "{}",
+            state::last_error_text()
+        );
+
+        state::uninstall();
     }
 }

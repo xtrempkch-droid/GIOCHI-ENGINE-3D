@@ -173,6 +173,30 @@ pub(crate) fn set_running(entry: &Rc<RefCell<SceneEntry>>, running: bool) -> boo
     previous
 }
 
+/// Clears the `running` mark when the run ends — including when it ends in a panic.
+///
+/// Before this guard existed, a panicking callback made `giochi_engine_run_scene` return
+/// `GIOCHI_ERROR_INTERNAL` without ever reaching the line that clears the mark. The handle
+/// then refused `giochi_scene_destroy` (`GIOCHI_ERROR_SCENE`) and every further run
+/// (`GIOCHI_ERROR_UNAVAILABLE`-shaped "already running") — forever, because no function
+/// resets the registry. It is the same class of bug as the run-in-progress mark, which
+/// received a `Drop` guard for exactly this reason.
+pub(crate) struct RunningGuard {
+    entry: Rc<RefCell<SceneEntry>>,
+}
+
+impl RunningGuard {
+    pub(crate) fn new(entry: Rc<RefCell<SceneEntry>>) -> Self {
+        Self { entry }
+    }
+}
+
+impl Drop for RunningGuard {
+    fn drop(&mut self) {
+        set_running(&self.entry, false);
+    }
+}
+
 /// Returns whether the scene is currently being driven by `giochi_engine_run_scene`.
 pub(crate) fn is_running(entry: &Rc<RefCell<SceneEntry>>) -> bool {
     entry.borrow().running
@@ -321,4 +345,46 @@ pub extern "C" fn giochi_engine_scene_depth() -> u32 {
             .map(|depth| depth as u32)
             .unwrap_or(0)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::raw::c_void;
+    use std::rc::Rc;
+
+    fn entry() -> Rc<RefCell<SceneEntry>> {
+        Rc::new(RefCell::new(SceneEntry {
+            callbacks: GiochiSceneCallbacks {
+                user_data: std::ptr::null_mut::<c_void>(),
+                on_enter: None,
+                on_exit: None,
+                update: None,
+                render: None,
+                _reserved: [0; 4],
+            },
+            on_stack: 0,
+            running: false,
+            exit_pending: false,
+        }))
+    }
+
+    #[test]
+    fn the_running_mark_is_cleared_when_the_guard_drops() {
+        // `giochi_engine_run_scene` sets the mark, and before this guard existed the
+        // only thing that cleared it was a line reached on the non-panic path. An
+        // engine-internal panic — the thing `state::guard` exists to contain — unwound
+        // past it and the handle refused `destroy` and any second run forever, because
+        // nothing resets the registry.
+        let entry = entry();
+        assert!(!set_running(&entry, true), "the previous state was false");
+        assert!(is_running(&entry));
+
+        {
+            let _running = RunningGuard::new(Rc::clone(&entry));
+            assert!(is_running(&entry));
+        }
+
+        assert!(!is_running(&entry), "the guard's Drop must clear the mark");
+    }
 }

@@ -186,6 +186,21 @@ fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
+/// Runs `body`, catching a panic and returning the payload instead of unwinding.
+///
+/// Like [`guard`], but without deciding the fallback: the caller still has cleanup to do
+/// (emptying the scene stack, delivering exits) *before* the error is recorded, because
+/// that cleanup runs user callbacks and a user callback clears the error on entry. The
+/// payload is returned so the message can be written afterwards.
+pub(crate) fn catch_panic<R>(body: impl FnOnce() -> R) -> Result<R, Box<dyn std::any::Any + Send>> {
+    catch_unwind(AssertUnwindSafe(body))
+}
+
+/// The human-readable text of a caught panic payload, for `catch_panic` callers.
+pub(crate) fn describe_panic(payload: &Box<dyn std::any::Any + Send>) -> String {
+    panic_message(payload)
+}
+
 // ---------------------------------------------------------------------------
 // Engine access
 // ---------------------------------------------------------------------------
