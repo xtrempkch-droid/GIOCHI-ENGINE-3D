@@ -24,6 +24,7 @@
  *   - the light is accepted, moved, and refuses a NULL struct;
  *   - the struct sizes in the contract are the ones a C compiler produces.
  */
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -228,6 +229,28 @@ int main(void)
     }
 
     /* ---- the error paths a caller will actually hit ----------------------- */
+    /* Uninitialised fields: `GiochiDirectionalLight` has no constructor in C, so a caller
+     * that forgets one gets whatever was on the stack. A NaN `ambient` used to reach
+     * `u_ambient_strength` and make every fragment NaN — a black frame — because
+     * `f32::clamp` passes NaN through while `f32::max` does not. The renderer must hand
+     * the shader finite numbers whatever it is given. */
+    {
+        GiochiDirectionalLight garbage;
+        memset(&garbage, 0, sizeof garbage);
+        garbage.direction = vec3(0.0f, 0.0f, 0.0f);
+        garbage.color = color3d(NAN, INFINITY, -INFINITY, NAN);
+        garbage.ambient = NAN;
+        garbage.specular = NAN;
+        garbage.shininess = NAN;
+        CHECK_OK(giochi_renderer3d_set_light(engine, &garbage));
+
+        CHECK_OK(giochi_engine3d_begin_frame(engine));
+        CHECK_OK(giochi_renderer3d_clear(engine, background));
+        CHECK_OK(giochi_renderer3d_draw_mesh(engine, cube, shader, &model, &camera,
+                                             cube_color));
+        CHECK_OK(giochi_engine3d_end_frame(engine));
+    }
+
     /* Every field at zero: the worst a caller can do with memset-and-forget. The renderer
      * normalises the direction and floors the exponent, so the next frame has to draw
      * rather than go black or hand the driver a NaN. */

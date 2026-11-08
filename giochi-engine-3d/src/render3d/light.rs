@@ -102,11 +102,20 @@ impl DirectionalLight {
         self
     }
 
-    /// A copy with every field in the range the shader expects.
+    /// A copy with every field a finite number in the range the shader expects.
     ///
     /// The renderer calls this before uploading, so a caller cannot produce a black
-    /// frame by forgetting that `shininess` is an exponent or that a zero-length
-    /// direction normalises to NaN.
+    /// frame by forgetting that `shininess` is an exponent, that a zero-length direction
+    /// normalises to NaN, or by handing over a field it never initialised — which is easy
+    /// to do from C, where `GiochiDirectionalLight` has no constructor and an uninitialised
+    /// `float` is whatever the stack held.
+    ///
+    /// The three scalars need different handling because the standard library's methods
+    /// differ on NaN: `f32::max` returns the *other* operand, `f32::clamp` returns `self`.
+    /// So `specular.max(0.0)` and `shininess.max(1.0)` already swallow a NaN, while
+    /// `ambient.clamp(0.0, 1.0)` passes it through — and `NaN` in `u_ambient_strength`
+    /// makes every fragment `NaN`, which is the black frame this function exists to
+    /// prevent.
     pub fn sanitised(self) -> Self {
         // A zero-length direction would normalise to NaN in the shader and every
         // fragment would come out NaN, which most drivers render as black. Falling back
@@ -124,13 +133,49 @@ impl DirectionalLight {
         Self {
             direction,
             color: self.color.clamped(),
-            ambient: self.ambient.clamp(0.0, 1.0),
-            specular: self.specular.max(0.0),
+            // Zero is the honest answer for an ambient the caller did not mean: it makes
+            // unlit faces black but leaves the lit ones correct, which is readable. A
+            // `NaN` would take the whole frame with it, and an infinity is already handled
+            // by the `clamp`.
+            ambient: if self.ambient.is_nan() {
+                log::warn!("the light's ambient is NaN; using 0.0");
+                0.0
+            } else {
+                self.ambient.clamp(0.0, 1.0)
+            },
+            // An infinite specular is not a number the shader can use: it becomes an
+            // infinite highlight, which saturates the whole surface to white. Clamping to a
+            // finite ceiling keeps the reflection but stops it eating the frame.
+            specular: finite_or(self.specular, 0.0, "specular").clamp(0.0, MAX_SPECULAR),
             // `pow(x, 0)` is 1 everywhere, so a zero exponent paints a constant
-            // highlight over the whole lit hemisphere instead of a glint.
-            shininess: self.shininess.max(1.0),
+            // highlight over the whole lit hemisphere instead of a glint. An infinite one
+            // underflows to 0 everywhere except the exact eye direction.
+            shininess: finite_or(self.shininess, 1.0, "shininess")
+                .clamp(MIN_SHININESS, MAX_SHININESS),
             _reserved: [0; 4],
         }
+    }
+}
+
+/// Ceiling for the specular strength. The default sun uses 0.25; a caller reaching this is
+/// asking for a mirror, which is as far as a single Blinn-Phong term goes before the
+/// highlight covers the whole surface.
+const MAX_SPECULAR: f32 = 8.0;
+
+/// The smallest usable specular exponent, and the largest.
+///
+/// Below 1 the `pow` term is 1 almost everywhere; above a few thousand the highlight is
+/// smaller than a fragment at any sane resolution.
+const MIN_SHININESS: f32 = 1.0;
+const MAX_SHININESS: f32 = 4096.0;
+
+/// Returns `value` when it is finite, otherwise `fallback` and a warning.
+fn finite_or(value: f32, fallback: f32, field: &str) -> f32 {
+    if value.is_finite() {
+        value
+    } else {
+        log::warn!("the light's {field} is {value}; using {fallback}");
+        fallback
     }
 }
 
@@ -220,6 +265,78 @@ mod tests {
         // highlight instead of a glint.
         assert_eq!(light.shininess, 1.0);
         assert_eq!(light.color.to_array(), [1.0, 0.0, 0.5, 1.0]);
+    }
+
+    #[test]
+    fn a_nan_ambient_does_not_survive() {
+        // `f32::clamp` returns `self` when it is NaN, unlike `f32::max`, which returns the
+        // other operand. `ambient` was the one field that used `clamp` directly, so a NaN
+        // went through and `gl_FragColor = ambient + direct + highlight` became NaN for
+        // every fragment — a black frame, produced by the function whose documented job is
+        // to prevent one. Reachable from C: `GiochiDirectionalLight` has no constructor, so
+        // an uninitialised `ambient` is whatever was on the stack.
+        let mut light = DirectionalLight::sun();
+        light.ambient = f32::NAN;
+
+        assert_eq!(light.sanitised().ambient, 0.0);
+    }
+
+    #[test]
+    fn every_sanitised_light_field_is_finite() {
+        // The catch-all: whatever a caller writes into the struct, the values uploaded as
+        // uniforms are real numbers in range.
+        let mut light = DirectionalLight::sun();
+        light.direction = Vec3::new(f32::NAN, f32::INFINITY, f32::NEG_INFINITY);
+        light.color = Color3D::new(f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::NAN);
+        light.ambient = f32::NAN;
+        light.specular = f32::NAN;
+        light.shininess = f32::NAN;
+
+        let light = light.sanitised();
+
+        assert!(light.direction.is_finite());
+        let channels = light.color.to_array();
+        assert!(channels.iter().all(|c| c.is_finite()), "{channels:?}");
+        assert!(light.ambient.is_finite());
+        assert!(light.specular.is_finite());
+        assert!(light.shininess.is_finite());
+        assert!((0.0..=1.0).contains(&light.ambient));
+        assert!(light.specular >= 0.0);
+        assert!(light.shininess >= 1.0);
+
+        // And the infinity variants of the scalar fields, which `clamp` already handled
+        // for `ambient` but not for the other two.
+        for field in 0..3 {
+            let mut light = DirectionalLight::sun();
+            match field {
+                0 => light.ambient = f32::INFINITY,
+                1 => light.specular = f32::INFINITY,
+                _ => light.shininess = f32::INFINITY,
+            }
+            let light = light.sanitised();
+            assert!(light.ambient.is_finite() && (0.0..=1.0).contains(&light.ambient));
+            assert!(light.specular.is_finite());
+            assert!(light.shininess.is_finite());
+        }
+    }
+
+    #[test]
+    fn sanitising_is_idempotent() {
+        // `sun()` stores a direction it has not normalised, so the first pass does change
+        // it; what must hold is that a second pass changes nothing, because the renderer
+        // sanitises on every `set_light` and a caller may pass back what it reads.
+        let once = DirectionalLight::sun().sanitised();
+        let twice = once.sanitised();
+
+        assert_eq!(twice, once);
+
+        // The same for a light that needed repair.
+        let mut broken = DirectionalLight::sun();
+        broken.ambient = f32::NAN;
+        broken.specular = f32::INFINITY;
+        broken.direction = Vec3::ZERO;
+        let repaired = broken.sanitised();
+        assert_eq!(repaired.sanitised(), repaired);
     }
 
     #[test]
