@@ -29,7 +29,7 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 445 testes, 0 falhas
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 449 testes, 0 falhas
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
 - [x] `cargo doc --workspace --no-deps --document-private-items` (0 warnings)
 - [x] `scripts/gen-header.sh --check` — `giochi.h` em sincronia com o crate
@@ -52,6 +52,60 @@ Verificações manuais da fase:
   recolha pelo GC, `giochi.quit()`, propagação de erro, `app:step`, `arg`).
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
+
+## Quinta auditoria — dois estados que um panic deixava presos, e uma leitura que podia paniquear
+Data: 2026-11-08
+
+Quinta passagem, desta vez sobre o ciclo de vida dos scenes na fronteira C e sobre o
+carregador de assets. Cada correcção foi provada ao contrário, como nas passagens
+anteriores.
+
+### 1. Um panic dentro de `giochi_engine_run_scene` deixava o handle preso para sempre
+
+O `guard` da fronteira converte um panic em `GIOCHI_ERROR_INTERNAL` — correcto. O que
+estava errado era **tudo depois**:
+
+* a marca `running` do scene era limpa por uma linha que só se alcançava no caminho sem
+  panic. O unwind saltava por cima dela, e o handle passava a recusar
+  `giochi_scene_destroy` («cannot destroy a scene while run_scene is running it») e
+  qualquer segundo run («already running») — **para sempre**, porque nenhuma função
+  reinicia o registo;
+* `run_loop` esvaziava a pilha e entregava os `on_exit` adiados em linhas *depois* do
+  run. O unwind saltava por cima delas também: o adaptador ficava na pilha com
+  `on_stack == 1` e o `on_exit` nunca era entregue.
+
+É a mesma classe de bug do `RUN_IN_PROGRESS` da segunda auditoria, corrigido com um
+guard `Drop` pela mesma razão. Correcção: uma `RunningGuard` que limpa a marca em
+qualquer caminho de saída, e um `catch_panic` interno ao `run_loop` que esvazia a pilha
+e entrega os exits **antes** de gravar a mensagem de erro — a mensagem fica para depois
+porque o `on_exit` do utilizador pode chamar funções `giochi_*`, e cada uma limpa o erro
+à entrada.
+
+Dois testes: um prova que o `Drop` limpa a marca; o outro constrói um engine, empilha um
+adaptador, panica dentro do `run_loop` e afirma `INTERNAL`, pilha vazia, `on_exit`
+entregue uma vez e o handle destrutível. Contra o código antigo o teste do `run_loop`
+falha (o panic escapa).
+
+Nota sobre o que **não** é alcançável: um panic *dentro de um callback C* não chega ao
+`guard` — desde Rust 1.81 um panic num `extern "C" fn` é um abort do processo, por
+definição da linguagem. A protecção cobre panics internos do engine, que é exactamente
+o que o `guard` existe para conter.
+
+### 2. Um asset que mudasse de tamanho entre o `stat` e o `read` fazia panic
+
+`read_asset` fazia `fs::read` depois de `asset_size` e copiava com
+`buffer[..bytes.len()]` sem verificar. Um ficheiro que **crescesse** entre as duas
+syscalls — o buffer do chamador foi dimensionado pelo `stat` obsoleto — produzia
+`range end index N out of range for slice of length M`, um panic em código seguro,
+alcançável de C (`giochi_asset_read`) e do host Lua.
+
+O próprio módulo reconhecia a corrida no `read_asset_vec` — mas com um `debug_assert`
+que a release, a build que é publicada, compila fora.
+
+Correcção: a cópia passou a um helper que verifica o tamanho lido contra o tamanho
+estatado e devolve `GIOCHI_ERROR_ASSET` («changed size between stat and read») em vez de
+panicar; o `read_asset_vec` ganhou o mesmo erro real. O panic antigo foi demonstrado com
+as linhas exactas do código antigo antes de ficar.
 
 ## Quarta auditoria — seis defeitos de código e um teste frágil
 Data: 2026-11-08

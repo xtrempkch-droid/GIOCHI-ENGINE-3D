@@ -10,7 +10,7 @@ language through a C ABI. **2D** through `sdl2::render`, and **3D** through Open
 over EGL in a separate crate. Primary target: `aarch64-unknown-linux-gnu` (Linux consoles
 with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 
-> **Status: 0.2.0 — every phase (0 to 14) complete.** The workspace, the SDL2 platform
+> **Status: 0.2.1 — every phase (0 to 14) complete.** The workspace, the SDL2 platform
 > layer, the fixed-timestep loop, the 2D renderer with opaque texture handles,
 > keyboard/mouse/gamepad input, the asset cache, the audio mixer, the scene stack, the
 > `Engine` facade, the **C ABI** (`libgiochi.so` / `libgiochi.a` + generated `giochi.h`,

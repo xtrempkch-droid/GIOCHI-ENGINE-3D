@@ -6,6 +6,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-08
+
+### Fixed — a fifth audit found two more
+
+This pass read the scene lifecycle at the C boundary and the asset loader.
+
+**A panic inside `giochi_engine_run_scene` wedged the scene handle forever.** `guard`
+turns a panic into `GIOCHI_ERROR_INTERNAL`, which is right — what was wrong is everything
+after it. The unwind skipped the line that clears the scene's `running` mark, so the handle
+refused `giochi_scene_destroy` and every further run, with no reset anywhere; and it skipped
+`run_loop`'s stack cleanup, so the adapter stayed on the stack with `on_stack == 1` and the
+deferred `on_exit` was never delivered. A `Drop` guard now clears the mark on every exit
+path, and `run_loop` catches the panic internally, empties the stack and delivers the exits
+**before** recording the error — the message comes last because the user's `on_exit` may
+call `giochi_*` functions, and every one of those clears the error on entry. This is the
+same class of bug as the run-in-progress mark, fixed the same way.
+
+**An asset that changed size between `stat` and `read` panicked.** `read_asset` copied with
+`buffer[..bytes.len()]` after sizing the buffer from a stale `asset_size`, so a file that
+*grew* between the two syscalls produced `range end index out of range` — a panic in safe
+code, reachable from C (`giochi_asset_read`) and from the Lua host. `read_asset_vec` had the
+same race acknowledged only by a `debug_assert`, which the shipped release build compiles
+out. Both now verify the read length against the statted size and return `GIOCHI_ERROR_ASSET`
+("changed size between stat and read") instead.
+
 ### Fixed — a fourth audit found six more
 
 This pass read the parts the first three never opened: the Lua value conversions, the 2D

@@ -66,6 +66,10 @@ mod tests {
 
     #[test]
     fn version_matches_the_workspace() {
-        assert_eq!(VERSION, "0.2.0");
+        // Compared against the 2D crate rather than a literal: a bump in the workspace
+        // manifest reaches both through `version.workspace = true`, and a hardcoded
+        // `"0.2.0"` here is exactly the line a release forgets to touch — it did, on the
+        // 0.2.1 bump.
+        assert_eq!(VERSION, giochi_engine::VERSION);
     }
 }
