@@ -193,6 +193,24 @@ impl Input {
             Event::ControllerDeviceRemoved { which, .. } => {
                 self.gamepad.close_if_instance(*which);
             }
+            // A window that loses focus never receives the `KeyUp`/`MouseButtonUp` for
+            // whatever was held at that moment: the OS takes the keyboard and the mouse
+            // away, and SDL has nothing to report. Without this the held set keeps the
+            // keys it had when focus was lost, so a player who alt-tabs while walking
+            // keeps walking — for the rest of the process's life.
+            //
+            // The `reset` deliberately does **not** synthesise "released" edges. A game
+            // that binds "release to jump" would fire it on an alt-tab, and the engine
+            // cannot tell the two apart. Dropping the state silently is the honest
+            // option: the key is simply no longer held.
+            Event::Window {
+                win_event: sdl2::event::WindowEvent::FocusLost,
+                ..
+            } => {
+                log::debug!("window lost focus: releasing every held key and button");
+                self.keyboard.reset();
+                self.mouse.reset();
+            }
             _ => {}
         }
     }
@@ -308,6 +326,14 @@ mod tests {
             clicks: 1,
             x,
             y,
+        }
+    }
+
+    fn focus_lost() -> Event {
+        Event::Window {
+            timestamp: 0,
+            window_id: 0,
+            win_event: sdl2::event::WindowEvent::FocusLost,
         }
     }
 
@@ -465,5 +491,56 @@ mod tests {
 
         assert!(!input.keyboard().any_down());
         assert!(!input.gamepad().is_connected());
+    }
+
+    #[test]
+    fn losing_focus_releases_every_held_key_and_button() {
+        // SDL delivers no `KeyUp` for a key held at the moment the window loses focus:
+        // the OS has taken the keyboard. Without the `FocusLost` arm the held set kept
+        // those keys forever, so a player who alt-tabbed mid-stride kept walking with
+        // nothing pressed. The same applied to a held mouse button, which a drag-based
+        // input path would keep reading as "still dragging".
+        let mut input = Input::without_gamepad();
+        input.update(&[
+            key_down(Keycode::W, false),
+            key_down(Keycode::LCtrl, false),
+            button_down(SdlMouseButton::Left, 10, 10),
+        ]);
+        assert!(input.key_down(KEY_W));
+        assert!(input.mouse_down(MOUSE_LEFT));
+
+        input.update(&[focus_lost()]);
+
+        assert!(
+            !input.keyboard().any_down(),
+            "no key may stay held after focus is lost"
+        );
+        assert!(
+            !input.mouse().is_down(MOUSE_LEFT),
+            "no button may stay held after focus is lost"
+        );
+        assert_eq!(input.mouse().delta(), Vec2::ZERO);
+
+        // A phantom "released" edge would fire a game's release binding on an alt-tab,
+        // and the engine cannot tell an alt-tab from a real release.
+        assert!(
+            !input.key_released(KEY_W),
+            "focus loss must not synthesise a release edge"
+        );
+        assert!(!input.mouse().is_released_this_frame(MOUSE_LEFT));
+    }
+
+    #[test]
+    fn focus_loss_leaves_the_rest_of_the_frame_working() {
+        // The reset must not deafen the input for the frame: a key pressed in the same
+        // batch, after the focus event, is still reported.
+        let mut input = Input::without_gamepad();
+        input.update(&[key_down(Keycode::A, false)]);
+
+        input.update(&[focus_lost(), key_down(Keycode::D, false)]);
+
+        assert!(!input.key_down(KEY_A), "the pre-focus key is gone");
+        assert!(input.key_down(KEY_D), "the post-focus key is live");
+        assert!(input.key_pressed(KEY_D));
     }
 }
