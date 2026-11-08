@@ -29,7 +29,7 @@ Comando único: `scripts/gates.sh` (`SKIP_ARM64=1` pula o cross-check).
 - [x] `cargo fmt --all --check`
 - [x] `cargo clippy --workspace --all-targets -- -D warnings`
 - [x] `cargo build --workspace --target x86_64-unknown-linux-gnu`
-- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 424 testes, 0 falhas
+- [x] `cargo test --workspace --target x86_64-unknown-linux-gnu` — 431 testes, 0 falhas
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
 - [x] `cargo doc --workspace --no-deps --document-private-items` (0 warnings)
 - [x] `scripts/gen-header.sh --check` — `giochi.h` em sincronia com o crate
@@ -52,6 +52,59 @@ Verificações manuais da fase:
   recolha pelo GC, `giochi.quit()`, propagação de erro, `app:step`, `arg`).
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
+
+## Terceira auditoria — a luz estava no contrato e não no header
+Data: 2026-11-08
+
+Terceira passagem, agora a comparar **três** descrições da mesma fronteira entre si: o
+contrato (`docs/C_ABI_CONTRACT.md`), o header gerado (`giochi.h`) e os símbolos exportados
+pelo `libgiochi.so`. Uma delas tinha de estar errada, e duas estavam.
+
+### 1. `GiochiDirectionalLight` não existia no header
+
+A §9.4a do contrato define a struct desde a fase 13, com tamanho e alinhamento escritos, e
+o `giochi.h` afirma ser essa mesma especificação. Mas o `cbindgen.toml` listava apenas
+`giochi-engine` em `include` — a crate `giochi-engine-3d` não estava lá, portanto o tipo
+nunca era emitido. Um consumidor C que lesse o contrato encontrava uma struct que o
+compilador dizia não existir.
+
+### 2. `giochi_renderer3d_set_light` estava documentada e não implementada
+
+A §9.4a descrevia o comportamento da função e a §10.6 remetia para ela; a função não estava
+em lado nenhum do crate. O efeito prático: `GIOCHI_SHADER_PHONG` era anunciado como um dos
+três shaders que o engine traz, e o seu único input era inalcançável a partir de C. O
+consumidor ficava com o sol por omissão e sem forma de o mover.
+
+Isto é o inverso do `draw_mesh`, que tinha o problema oposto na fase 14 (a assinatura não
+tinha o parâmetro que a função precisava, e o contrato foi corrigido). Aqui o contrato já
+estava certo; faltava o código que lhe correspondia.
+
+Correcção: a função passa a existir, com `validate_engine` igual à das outras (NULL →
+`INVALID_ARGUMENT`, ponteiro que não é o engine vivo → `INVALID_HANDLE`) e a mesma
+sanitização do `RenderContext3D::set_light`, para que um chamador não consiga produzir um
+frame preto por deixar `shininess` a zero (`pow(x, 0)` é 1 em todo o lado) ou uma direcção
+de comprimento nulo (que normaliza para NaN).
+
+### Como foi verificado
+
+- `c_smoke_3d.c` passou a **afirmar os tamanhos do contrato em tempo de compilação**:
+  `_Static_assert(sizeof(GiochiDirectionalLight) == 88)`, e 28/32 para `GiochiVec3` e
+  `GiochiColor3D`. Assim é o compilador C — o lado que realmente faz o layout — que detecta
+  um desvio, e não um teste Rust que concorda com o layout Rust.
+- O mesmo teste exercita a função: luz válida aceite, `NULL` recusado com mensagem,
+  engine destruído devolve `INVALID_HANDLE` em vez de *use-after-free*, e uma luz toda a
+  zeros não impede o frame seguinte de desenhar.
+- `python_smoke_3d.py` passa uma luz pela fronteira a partir de uma **segunda**
+  implementação de FFI, que é onde um erro de layout por ponteiro apareceria.
+- Contra o header antigo o teste **não compila** — é essa a prova de regressão, verificada
+  antes de a correcção ficar.
+
+### O que a terceira passagem confirmou estar correcto
+
+Os tamanhos `28/32/88` batem entre Rust, contrato e C; o alinhamento é 4 em todos; o
+`_reserved` continua obrigatório e ignorado; e as quatro funções que tomaram
+`validate_engine` na segunda passagem usam-no pela mesma ordem (engine primeiro, argumento
+depois), que é a ordem que o `draw_mesh` já tinha.
 
 ## Uma falha de CI que era bug real, não flake
 Data: 2026-11-08

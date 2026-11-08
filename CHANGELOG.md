@@ -6,6 +6,34 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — `giochi_renderer3d_set_light`
+
+Phase 13 introduced `BuiltinShader::Phong`, whose one input is a light. Part II shipped
+without a function to set that light, so a C consumer got the engine's default sun and had
+no way to move it: the shader was advertised, the struct was in `giochi.h` and the contract,
+and the function that connects them did not exist. `docs/C_ABI_CONTRACT.md` had already
+fixed the C form in §9.4a, so this is the implementation of something already specified
+rather than a signature invented now.
+
+```c
+int32_t giochi_renderer3d_set_light(GiochiEngine3D* engine,
+                                    const GiochiDirectionalLight* light);
+```
+
+The light is engine state, not a per-draw argument, for the same reason `draw_mesh` keeps
+`GiochiColor3D` by value: GLES 2.0 uniform limits make it cheaper to upload once per change.
+Sanitising happens on entry exactly as the Rust `RenderContext3D::set_light` does, so a
+caller cannot produce a black frame by leaving `shininess` at zero (`pow(x, 0)` is 1
+everywhere) or by passing a zero-length direction (which normalises to NaN).
+
+`GiochiDirectionalLight` was **also missing from the generated header** even though it was
+in the contract and `giochi.h` claimed to be the contract. `cbindgen.toml` did not list
+`giochi-engine-3d` in `include`, so the type was never emitted. Both are covered now:
+`c_smoke_3d.c` static-asserts `sizeof(GiochiDirectionalLight) == 88` (and 28/32 for
+`GiochiVec3`/`GiochiColor3D`), so the *C compiler* is what checks the layout in §9, and
+`python_smoke_3d.py` passes one across the boundary from a second FFI implementation.
+Verified to fail against the old header: it does not compile.
+
 ### Fixed — a CI failure that was a real bug, not a flake
 
 `unknown_handles_are_reported_not_crashing` started failing on CI and passing locally,
