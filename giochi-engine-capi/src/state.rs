@@ -24,7 +24,6 @@ use std::cell::{Cell, RefCell};
 use std::ffi::CString;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use giochi_engine::error::codes;
 use giochi_engine::{AudioSystem, Engine, GiochiError, Input, RenderContext, TextureRegistry};
@@ -58,17 +57,23 @@ thread_local! {
     /// `true` between the start and the end of a `giochi_engine_run*`/`step` call **on
     /// this thread**.
     ///
-    /// Thread-local, not a process-global atomic like `QUIT_REQUESTED`. The engine itself
-    /// is thread-local (ADR-012), so "a run is in progress" is a fact about one thread; a
-    /// global made a second thread's `giochi_engine_run_scene` fail with "already running on
-    /// this thread", which was both false and unfixable from the caller's side. It also made
+    /// Thread-local, like every other flag here. The engine itself is thread-local
+    /// (ADR-012), so "a run is in progress" is a fact about one thread; a global made a
+    /// second thread's `giochi_engine_run_scene` fail with "already running on this
+    /// thread", which was both false and unfixable from the caller's side. It also made
     /// the capi's own tests race against each other, which is how this was found: one test
     /// entered a run while a parallel one asserted an unrelated error code.
     static RUN_IN_PROGRESS: Cell<bool> = const { Cell::new(false) };
-}
 
-/// Set by `giochi_engine_request_quit`, consumed by the running scene adapter.
-static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
+    /// Set by `giochi_engine_request_quit`, consumed by the running scene adapter.
+    ///
+    /// Thread-local for the same reason as [`RUN_IN_PROGRESS`]: two threads may each own
+    /// their own engine (there is one engine *per thread*, not per process), and a
+    /// process-global flag let a quit requested on one thread stop the other thread's
+    /// loop. It also made `giochi_engine_is_running` answer from another thread's state,
+    /// because inside a callback it reads this flag rather than the borrowed engine.
+    static QUIT_REQUESTED: Cell<bool> = const { Cell::new(false) };
+}
 
 // ---------------------------------------------------------------------------
 // Last error
@@ -325,22 +330,22 @@ pub(crate) fn in_callback() -> bool {
 
 /// Records a quit request, to be consumed by the running scene.
 pub(crate) fn request_quit() {
-    QUIT_REQUESTED.store(true, Ordering::SeqCst);
+    QUIT_REQUESTED.with(|flag| flag.set(true));
 }
 
 /// Returns and clears the pending quit request.
 pub(crate) fn take_quit_request() -> bool {
-    QUIT_REQUESTED.swap(false, Ordering::SeqCst)
+    QUIT_REQUESTED.with(|flag| flag.replace(false))
 }
 
 /// Returns whether a quit has been requested but not consumed yet.
 pub(crate) fn quit_requested() -> bool {
-    QUIT_REQUESTED.load(Ordering::SeqCst)
+    QUIT_REQUESTED.with(Cell::get)
 }
 
 /// Discards a pending quit request.
 pub(crate) fn clear_quit_request() {
-    QUIT_REQUESTED.store(false, Ordering::SeqCst);
+    QUIT_REQUESTED.with(|flag| flag.set(false));
 }
 
 /// Returns whether a `run`/`step` call is in progress on this thread.
@@ -454,5 +459,39 @@ mod tests {
             !run_in_progress(),
             "the mark must be cleared even when the body unwinds"
         );
+    }
+
+    #[test]
+    fn a_quit_requested_on_another_thread_does_not_stop_this_one() {
+        // The engine is thread-local, so two threads may each own one. `QUIT_REQUESTED`
+        // was a process-global `AtomicBool`, which meant a quit on thread A stopped
+        // thread B's loop and made B's `giochi_engine_is_running` report 0 from inside a
+        // callback — the same defect `RUN_IN_PROGRESS` had, fixed the same way.
+        let (started_tx, started_rx) = mpsc::channel();
+
+        let worker = std::thread::spawn(move || {
+            request_quit();
+            started_tx.send(()).expect("signal");
+        });
+
+        started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the worker should have set its own flag");
+        worker.join().expect("worker");
+
+        assert!(
+            !quit_requested(),
+            "another thread's quit must not stop this thread's loop"
+        );
+        assert!(
+            !take_quit_request(),
+            "and there must be nothing for this thread to consume"
+        );
+
+        // The flag still works per thread.
+        request_quit();
+        assert!(quit_requested());
+        assert!(take_quit_request(), "the request is consumable once");
+        assert!(!quit_requested());
     }
 }
