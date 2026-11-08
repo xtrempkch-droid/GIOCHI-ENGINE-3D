@@ -126,6 +126,23 @@ int main(void)
     CHECK(giochi_engine3d_create(&window_config) == NULL);
     CHECK(strstr(giochi_get_last_error(), "already exists") != NULL);
 
+    /* The reverse direction of the ADR-037 rule: with a 3D engine alive, the 2D engine
+     * must refuse with a message that names the rule rather than SDL's internal types. */
+    {
+        GiochiEngineConfig engine_config = {
+            .width = 320,
+            .height = 240,
+            .target_fps = 60,
+            .vsync = 0,
+            .title = "c_smoke_3d",
+            ._reserved = {0, 0, 0, 0, 0, 0, 0, 0},
+        };
+        CHECK_CODE(giochi_engine_init(&engine_config), GIOCHI_ERROR_INVALID_ARGUMENT);
+        CHECK(strstr(giochi_get_last_error(), "2D and 3D renderers") != NULL);
+        /* And it must not have installed a half-built engine. */
+        CHECK_CODE(giochi_engine_run(), GIOCHI_ERROR_NOT_INITIALIZED);
+    }
+
     /* ---- meshes and shaders ----------------------------------------------- */
     uint64_t cube = 0;
     uint64_t shader = 0;

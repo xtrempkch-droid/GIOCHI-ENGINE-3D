@@ -53,6 +53,58 @@ Verificações manuais da fase:
 - `tests/mini_game_script.rs`: o jogo de referência pontua, termina em game over e não
   deixa texturas vivas.
 
+## Segunda auditoria — 4 defeitos adicionais
+Data: 2026-11-08
+
+Segunda passagem, focada nas áreas que a primeira não cobriu: fronteira C, ciclo de vida de
+recursos 2D, binding Lua e parsing de argumentos.
+
+### 1. 2D e 3D não podiam coexistir, e diziam-no na língua errada
+
+Ambos os caminhos de criação pedem inicialização de vídeo ao SDL, e o SDL permite **um
+`EventPump` por processo**. O segundo a arrancar falhava com
+`an `EventPump` instance is already alive` — um tipo interno que o chamador nunca usou, e
+sem dizer a regra que se aplica (ADR-037: escolhe-se um renderer, não se misturam). Agora
+cada lado recusa com uma mensagem que nomeia a regra e a chamada que resolve, verificado a
+partir de C nas **duas** direcções.
+
+**Como apareceu:** foi o meu próprio teste unitário de GL a falhar ao criar um segundo
+`Platform`, e o texto do erro era sobre um `EventPump`. Sem isso, um consumidor C veria
+isto e não teria por onde começar.
+
+### 2. A C ABI 3D desreferenciava qualquer ponteiro não nulo
+
+`giochi_engine3d_begin_frame`, `_end_frame`, `giochi_renderer3d_clear` e `_draw_mesh`
+testavam apenas NULL — sob um comentário `SAFETY` que afirmava que o ponteiro era
+"asserted to be the thread's current engine by the same rule the other functions use".
+**Essa verificação não existia.** Como `create` recusa um segundo engine por thread, há
+exactamente um ponteiro válido em cada momento, portanto a comparação é possível e barata:
+um ponteiro obsoleto ou de outra thread passa a devolver `GIOCHI_ERROR_INVALID_HANDLE` em
+vez de ser desreferenciado.
+
+### 3. `release_all` declarava sucesso quando algo tinha ficado por libertar
+
+Respondia "os registos estão vazios?", que é pergunta diferente de "os objectos GL foram
+apagados?": quem tivesse um clone do `Rc` fazia o `destroy_*` registar um leak enquanto a
+entrada desaparecia de qualquer maneira. Passou a contar as referências primeiro e devolve
+`false` quando alguma vai ficar por libertar — o comportamento que a **sua própria
+documentação já prometia**.
+
+### 4. Um erro de escrita num argumento significava "sem limite de frames"
+
+Flags desconhecidas eram ignoradas e um número inválido virava `None`, portanto
+`--frames=3oo` produzia uma execução automática que nunca termina: num CI isso é um
+timeout, não uma mensagem. `--frames`, `--trace`, `--obj` e `--quadro` passam a rejeitar
+valor ausente ou malformado, flags desconhecidas são erro, e a mensagem lista os flags
+realmente aceites em vez de sugerir um `--help` que não existe.
+
+### O que a segunda passagem confirmou estar correcto
+
+`Quat::normalized` devolve a identidade para um quat nulo; `Transform3D::matrix` normaliza
+antes de compor; o `Drop` do `AudioSystem` chama `clear`, que pára música e sons antes de
+libertar; o parsing de argumentos não indexa vectores; e os scripts não repetem o bug de
+parsing que a bateria tinha.
+
 ## Auditoria profunda do repositório — 4 defeitos reais
 Data: 2026-11-08
 

@@ -44,6 +44,15 @@ pub extern "C" fn giochi_engine_init(config: *const GiochiEngineConfig) -> i32 {
         if state::is_installed() {
             return state::invalid_argument("the engine is already initialised");
         }
+        // The reverse of the check in `giochi_engine3d_create`: SDL allows one `EventPump`
+        // per process, so the two renderers cannot coexist (ADR-037) and the caller needs to
+        // be told that rather than handed an internal SDL type name.
+        if crate::lib3d::engine_is_live() {
+            return state::invalid_argument(
+                "a 3D engine is already alive in this process; the 2D and 3D renderers \
+                 cannot share one (ADR-037) -- call giochi_engine3d_destroy first",
+            );
+        }
 
         let engine_config = if config.is_null() {
             EngineConfig::default()

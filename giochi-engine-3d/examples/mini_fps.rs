@@ -60,32 +60,64 @@ struct Options {
 }
 
 impl Options {
-    fn parse() -> Self {
+    /// Parses the command line, rejecting anything it does not understand.
+    ///
+    /// It used to ignore unknown flags and turn an unparseable number into `None`, which
+    /// for `--frames` means "no limit": a typo such as `--frames=3oo` produced an
+    /// unattended run that never terminates, and in CI that is a job timeout rather than
+    /// a message. Every uncertainty is an error now.
+    fn parse() -> Result<Self, String> {
         let mut options = Self::default();
         let mut args = std::env::args().skip(1);
 
         while let Some(arg) = args.next() {
             if let Some(value) = arg.strip_prefix("--frames=") {
-                options.frames = value.parse().ok();
+                options.frames = Some(parse_number(value, "--frames")?);
             } else if arg == "--frames" {
-                options.frames = args.next().and_then(|value| value.parse().ok());
+                options.frames = Some(parse_number(
+                    next_value(&mut args, "--frames")?,
+                    "--frames",
+                )?);
             } else if arg == "--auto" {
                 options.auto = true;
             } else if arg == "--quadro" {
-                options.quadro = args.next();
+                options.quadro = Some(next_value(&mut args, "--quadro")?.to_string());
             } else if let Some(value) = arg.strip_prefix("--quadro=") {
                 options.quadro = Some(value.to_string());
+            } else {
+                return Err(format!(
+                    "unknown argument '{arg}'; accepted: --frames N, --auto, --quadro PATH"
+                ));
             }
         }
 
-        options
+        Ok(options)
     }
+}
+
+/// Returns the value that follows a flag, or an error naming it.
+fn next_value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, String> {
+    args.next()
+        .ok_or_else(|| format!("{flag} needs a value; accepted: --frames N, --auto, --quadro PATH"))
+}
+
+/// Parses a flag's value, naming the flag when it is not a number.
+fn parse_number<T: std::str::FromStr>(value: impl AsRef<str>, flag: &str) -> Result<T, String> {
+    let value = value.as_ref();
+    value
+        .parse()
+        .map_err(|_| format!("{flag} expects a number, got '{value}'"))
 }
 
 fn main() -> ExitCode {
     env_logger::init();
 
-    match run(Options::parse()) {
+    // Both steps produce the same kind of message, and a bad argument is reported the same
+    // way a failed run is: one line on stderr and a non-zero exit.
+    match Options::parse()
+        .map_err(Box::<dyn std::error::Error>::from)
+        .and_then(run)
+    {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("erro: {error}");

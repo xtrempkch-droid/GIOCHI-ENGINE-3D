@@ -432,14 +432,29 @@ impl RenderContext3D {
     /// destroying its resources a game should see `true` here. Anything still held
     /// elsewhere (an `Rc` clone) leaks, and that is worth surfacing rather than hiding.
     pub fn release_all(&mut self) -> bool {
+        // A registry that empties is not the same claim as "the GL objects are gone": if a
+        // caller still holds a clone, `destroy_*` logs the leak and the entry disappears
+        // anyway. Counting the references first is what lets this answer the second
+        // question, which is the one every caller of this function actually asks.
+        let mut leaked = 0;
         for handle in self.meshes.handles() {
+            if self.meshes.strong_count(handle) > Some(1) {
+                leaked += 1;
+            }
             self.destroy_mesh(handle);
         }
         for handle in self.shaders.handles() {
+            if self.shaders.strong_count(handle) > Some(1) {
+                leaked += 1;
+            }
             self.destroy_shader(handle);
         }
 
-        self.meshes.is_empty() && self.shaders.is_empty()
+        if leaked > 0 {
+            log::warn!("{leaked} resource(s) were still referenced elsewhere and leaked");
+        }
+
+        self.meshes.is_empty() && self.shaders.is_empty() && leaked == 0
     }
 
     // ---- drawing ---------------------------------------------------------
@@ -579,6 +594,11 @@ mod tests {
         assert_eq!(state.clear_color.to_array(), [1.0, 0.0, 0.5, 1.0]);
     }
 
+    thread_local! {
+        /// Whether a GL context has already been created in this test binary.
+        static CREATED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
     /// Returns a headless `RenderContext3D`, or `None` when this machine has no GL driver.
     ///
     /// A unit test rather than an integration test because proving the objects were
@@ -590,6 +610,19 @@ mod tests {
     /// false green. Everything that needs a context lives in the single test below.
     fn headless_renderer() -> Option<RenderContext3D> {
         use giochi_engine::platform::sdl::Platform;
+
+        // A second `Platform::new()` in one process fails, so a *second* test calling this
+        // would print "skipped" and be recorded as `ok` — a false green, which is the exact
+        // class of bug this file exists to catch. Failing loudly forces every new GL
+        // assertion into the single test below.
+        CREATED.with(|cell| {
+            assert!(
+                !cell.replace(true),
+                "only one GL context per test binary: add your assertion to \
+                 `destroying_a_resource_really_deletes_its_gl_objects` instead of starting \
+                 a second context, which would silently skip"
+            );
+        });
         use giochi_engine::platform::window::{Window, WindowConfig};
 
         std::env::set_var("SDL_VIDEODRIVER", "offscreen");
@@ -687,5 +720,26 @@ mod tests {
                 "release_all leaked a program"
             );
         }
+
+        // ---- release_all must not claim success while something is referenced --------
+        // It used to answer "are the registries empty", a different question: a caller
+        // holding a clone made `destroy_*` log a leak while the registry emptied, so the
+        // function returned `true` about a cleanup that had not happened.
+        let held = render.create_cube_mesh(3.0).expect("cube");
+        let clone = render.meshes.get(held).expect("mesh");
+        assert_eq!(std::rc::Rc::strong_count(&clone), 2);
+
+        assert!(
+            !render.release_all(),
+            "release_all must not report success while an object is still referenced"
+        );
+        assert_eq!(
+            render.mesh_count(),
+            0,
+            "the registry entry is gone even though the object leaked"
+        );
+
+        // Dropping the clone is what lets the objects go; the leak was real until here.
+        drop(clone);
     }
 }

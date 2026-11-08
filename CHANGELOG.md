@@ -6,6 +6,36 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed — a second audit found four more
+
+**A 2D engine and a 3D engine could not coexist, and said so in the wrong language.** Both
+create paths ask SDL for video initialisation, and SDL allows one `EventPump` per process,
+so whichever came second failed with `an `EventPump` instance is already alive` — an
+internal type the caller has never used, and no statement of the rule that applies
+(ADR-037: a renderer is picked, not mixed). Each side now refuses with a message naming the
+rule and the call that would fix it. Asserted from C in both directions.
+
+**The 3D C ABI dereferenced any non-NULL pointer.** `giochi_engine3d_begin_frame`,
+`_end_frame`, `giochi_renderer3d_clear` and `_draw_mesh` checked only for NULL, under a
+`SAFETY` comment claiming the pointer was "asserted to be the thread's current engine by the
+same rule the other functions use" — a check that did not exist. Because `create` refuses a
+second engine per thread there is exactly one valid pointer at any moment, so it can be
+compared: a stale or foreign pointer now yields `GIOCHI_ERROR_INVALID_HANDLE` instead of a
+use-after-free.
+
+**`release_all` reported success when a resource had leaked.** It answered "are the
+registries empty", which is a different question from "were the GL objects deleted": a
+caller holding an `Rc` clone made `destroy_*` log a leak while the entry disappeared
+anyway. It now counts the references first and returns `false` when any will leak — the
+behaviour its own documentation already promised.
+
+**A mistyped argument in the 3D examples meant "no frame limit".** Unknown flags were
+ignored and an unparseable number became `None`, so `--frames=3oo` produced an unattended
+run that never terminates — a CI job timeout rather than a message. `--frames`,
+`--trace`, `--obj` and `--quadro` now reject a missing or malformed value, unknown flags
+are an error, and the message lists the flags actually accepted instead of pointing at a
+`--help` that does not exist.
+
 ### Fixed — an audit found four real defects
 
 **Every 3D mesh and shader leaked its GL objects.** `destroy_mesh` and `destroy_shader`

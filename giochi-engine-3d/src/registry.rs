@@ -76,6 +76,21 @@ impl<T> HandleRegistry<T> {
         self.entries.borrow_mut().remove(&handle)
     }
 
+    /// How many strong references exist to `handle`, or `None` when it is unknown.
+    ///
+    /// `1` means [`Self::take`] followed by `Rc::try_unwrap` will succeed. Anything higher
+    /// means a caller is holding a clone and the resource's explicit teardown will leak —
+    /// which `release_all` needs to know in order to answer honestly.
+    pub(crate) fn strong_count(&self, handle: Handle) -> Option<usize> {
+        if handle == NULL_HANDLE {
+            return None;
+        }
+        self.entries
+            .borrow()
+            .get(&handle)
+            .map(std::rc::Rc::strong_count)
+    }
+
     /// Number of live entries.
     pub(crate) fn len(&self) -> usize {
         self.entries.borrow().len()

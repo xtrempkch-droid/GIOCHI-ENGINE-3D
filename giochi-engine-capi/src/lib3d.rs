@@ -128,6 +128,43 @@ fn with_current<R>(body: impl FnOnce(&mut GiochiEngine3D) -> R) -> Result<R, i32
     Ok(body(unsafe { &mut *pointer }))
 }
 
+/// Checks that `engine` is the live engine for this thread, or reports why not.
+///
+/// An opaque pointer in C is only as good as its owner's bookkeeping, but "the caller got
+/// it right" is not the same as "nothing can be checked": `giochi_engine3d_create` refuses
+/// a second engine on a thread, so exactly one pointer is valid at any moment and comparing
+/// against it turns a stale-pointer use-after-free into `GIOCHI_ERROR_INVALID_HANDLE`. That
+/// is worth one thread-local read per call.
+///
+/// Returns `Err` with the code to report: `INVALID_ARGUMENT` for NULL, which is a caller
+/// mistake in the call itself, and `INVALID_HANDLE` for a pointer that is not the live
+/// engine, which is a lifetime mistake.
+fn validate_engine(engine: *mut GiochiEngine3D) -> Result<&'static mut GiochiEngine3D, i32> {
+    if engine.is_null() {
+        return Err(state::invalid_argument("engine must not be NULL"));
+    }
+    if engine != CURRENT_3D.with(Cell::get) {
+        state::set_last_error(
+            "engine is not the one this thread created; it is either from another thread \
+             or already destroyed",
+        );
+        return Err(codes::INVALID_HANDLE);
+    }
+
+    // SAFETY: `engine` is exactly the pointer `create` stored in this thread's slot and
+    // `destroy` has not run (it clears the slot first). No two `&mut` exist at once because
+    // no function here calls another that borrows the engine.
+    Ok(unsafe { &mut *engine })
+}
+
+/// Whether a 3D engine exists on this thread.
+///
+/// Used by `giochi_engine_init` to refuse the 2D engine with a clear message instead of
+/// letting SDL fail with "an `EventPump` instance is already alive".
+pub(crate) fn engine_is_live() -> bool {
+    !CURRENT_3D.with(Cell::get).is_null()
+}
+
 /// Turns a caller-supplied `const char*` into a `String`, or reports why not.
 fn string_or_error(pointer: *const c_char, what: &str) -> Option<String> {
     match state::cstr(pointer) {
@@ -163,6 +200,17 @@ pub extern "C" fn giochi_engine3d_create(config: *const WindowConfig) -> *mut Gi
             state::set_last_error(
                 "a 3D engine already exists on this thread; \
                  call giochi_engine3d_destroy before creating another",
+            );
+            return core::ptr::null_mut();
+        }
+        // The 2D engine owns the process-wide SDL state, including the single `EventPump`.
+        // Letting SDL report that would hand the caller "an `EventPump` instance is already
+        // alive", which names an internal type they have never used and never says the rule
+        // that actually applies (ADR-037: a game picks one renderer).
+        if state::is_installed() {
+            state::set_last_error(
+                "the 2D engine is already initialised in this process; the 2D and 3D \
+                 renderers cannot share one (ADR-037) -- call giochi_engine_shutdown first",
             );
             return core::ptr::null_mut();
         }
@@ -282,14 +330,10 @@ pub extern "C" fn giochi_engine3d_destroy(engine: *mut GiochiEngine3D) {
 #[no_mangle]
 pub extern "C" fn giochi_engine3d_begin_frame(engine: *mut GiochiEngine3D) -> i32 {
     guard(codes::INTERNAL, || {
-        if engine.is_null() {
-            state::invalid_argument("engine must not be NULL");
-            return codes::INVALID_ARGUMENT;
-        }
-
-        // SAFETY: non-NULL pointer the caller owns, asserted above to be the thread's
-        // current engine by the same rule the other functions use.
-        let engine = unsafe { &mut *engine };
+        let engine = match validate_engine(engine) {
+            Ok(engine) => engine,
+            Err(code) => return code,
+        };
         engine.render.begin_frame(&engine.window);
         codes::OK
     })
@@ -309,13 +353,10 @@ pub extern "C" fn giochi_engine3d_begin_frame(engine: *mut GiochiEngine3D) -> i3
 #[no_mangle]
 pub extern "C" fn giochi_engine3d_end_frame(engine: *mut GiochiEngine3D) -> i32 {
     guard(codes::INTERNAL, || {
-        if engine.is_null() {
-            state::invalid_argument("engine must not be NULL");
-            return codes::INVALID_ARGUMENT;
-        }
-
-        // SAFETY: as in `begin_frame`.
-        let engine = unsafe { &mut *engine };
+        let engine = match validate_engine(engine) {
+            Ok(engine) => engine,
+            Err(code) => return code,
+        };
         engine.render.end_frame(&engine.window);
         codes::OK
     })
@@ -660,13 +701,10 @@ fn builtin_shader(which: i32) -> Option<BuiltinShader> {
 #[no_mangle]
 pub extern "C" fn giochi_renderer3d_clear(engine: *mut GiochiEngine3D, color: Color3D) -> i32 {
     guard(codes::INTERNAL, || {
-        if engine.is_null() {
-            state::invalid_argument("engine must not be NULL");
-            return codes::INVALID_ARGUMENT;
-        }
-
-        // SAFETY: non-NULL pointer the caller owns.
-        let engine = unsafe { &mut *engine };
+        let engine = match validate_engine(engine) {
+            Ok(engine) => engine,
+            Err(code) => return code,
+        };
         engine.render.set_clear_color(color);
         let state = engine.render.state();
         state.clear(engine.render.glow());
@@ -704,10 +742,10 @@ pub extern "C" fn giochi_renderer3d_draw_mesh(
     color: Color3D,
 ) -> i32 {
     guard(codes::INTERNAL, || {
-        if engine.is_null() {
-            state::invalid_argument("engine must not be NULL");
-            return codes::INVALID_ARGUMENT;
-        }
+        let engine = match validate_engine(engine) {
+            Ok(engine) => engine,
+            Err(code) => return code,
+        };
         if model.is_null() {
             state::invalid_argument(
                 "model must not be NULL; use giochi_transform3d_identity() for no transform",
@@ -719,9 +757,9 @@ pub extern "C" fn giochi_renderer3d_draw_mesh(
             return codes::INVALID_ARGUMENT;
         }
 
-        // SAFETY: all three pointers are non-NULL and caller-provided; the two structs
-        // are read, never retained.
-        let (engine, model, camera) = unsafe { (&mut *engine, &*model, &*camera) };
+        // SAFETY: the engine was validated above and the two structs are non-NULL pointers
+        // to caller-provided `#[repr(C)]` values, read and never retained.
+        let (model, camera) = unsafe { (&*model, &*camera) };
 
         match engine
             .render
@@ -872,5 +910,35 @@ mod tests {
             "the message must say what was expected"
         );
         assert_eq!(handle, 0);
+    }
+
+    #[test]
+    fn a_pointer_that_is_not_the_live_engine_is_refused() {
+        // No engine exists in this test, so every pointer is "not the live engine". Before
+        // `validate_engine` existed the code checked only for NULL and then dereferenced
+        // whatever it was given, with a SAFETY comment claiming a check that was not there.
+        // An opaque pointer in C is only as good as its owner, but the one engine per thread
+        // rule makes this comparison possible, and it turns a use-after-free into a code.
+        let dangling = core::ptr::NonNull::<GiochiEngine3D>::dangling().as_ptr();
+
+        assert_eq!(giochi_engine3d_begin_frame(dangling), codes::INVALID_HANDLE);
+        assert_eq!(giochi_engine3d_end_frame(dangling), codes::INVALID_HANDLE);
+        assert_eq!(
+            giochi_renderer3d_clear(dangling, Color3D::WHITE),
+            codes::INVALID_HANDLE
+        );
+        assert!(
+            state::last_error_text().contains("already destroyed")
+                || state::last_error_text().contains("another thread"),
+            "the message must say why: {}",
+            state::last_error_text()
+        );
+
+        // A NULL pointer is a mistake in the call, not in its lifetime, so it keeps the
+        // distinct code part I uses for a bad argument.
+        assert_eq!(
+            giochi_engine3d_begin_frame(core::ptr::null_mut()),
+            codes::INVALID_ARGUMENT
+        );
     }
 }

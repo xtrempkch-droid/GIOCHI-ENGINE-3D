@@ -225,6 +225,20 @@ int main(void)
     CHECK(giochi_get_last_error()[0] == '\0');
     CHECK(giochi_engine_video_driver() != NULL);
 
+    /* ---- 2D and 3D cannot share a process (ADR-037) ------------------------- */
+    /* A 3D engine needs its own SDL video initialisation, and SDL allows one
+     * `EventPump` per process. Without this check the caller got "an `EventPump`
+     * instance is already alive", which names an internal SDL type and never states
+     * the rule that actually applies. */
+    {
+        GiochiWindowConfig window = {0};
+        window.width = 320;
+        window.height = 240;
+        CHECK(giochi_engine3d_create(&window) == NULL);
+        CHECK(strstr(giochi_get_last_error(), "2D and 3D renderers") != NULL);
+        CHECK(strstr(giochi_get_last_error(), "giochi_engine_shutdown") != NULL);
+    }
+
     uint32_t width = 0, height = 0;
     CHECK_CODE(giochi_render_size(&width, &height));
     CHECK(width > 0 && height > 0);
