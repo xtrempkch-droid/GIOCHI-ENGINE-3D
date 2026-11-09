@@ -37,8 +37,8 @@ env_logger = "0.11"
 serde = { version = "1", features = ["derive"] }
 mlua = { version = "0.12", features = ["lua54", "vendored"] }
 cbindgen = "0.27"
-# Fase 16: benchmarks estatísticos. As `html_reports` são o que a fase 18 usa para
-# comparar com a `main` no CI de performance.
+# Phase 16: statistical benchmarks. The `html_reports` feature is what phase 18's
+# performance CI uses to compare a branch against `main`.
 criterion = { version = "0.5", features = ["html_reports"] }
 # 3D (phases 9–14). `glow` is a thin GL/GLES binding: it declares the functions and
 # lets the loader supply the pointers, without tying us to a windowing library.
