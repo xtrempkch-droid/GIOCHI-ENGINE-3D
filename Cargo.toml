@@ -39,7 +39,7 @@ mlua = { version = "0.12", features = ["lua54", "vendored"] }
 cbindgen = "0.27"
 # Phase 16: statistical benchmarks. The `html_reports` feature is what phase 18's
 # performance CI uses to compare a branch against `main`.
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 # 3D (phases 9–14). `glow` is a thin GL/GLES binding: it declares the functions and
 # lets the loader supply the pointers, without tying us to a windowing library.
 glow = "0.14"
