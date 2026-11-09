@@ -168,6 +168,16 @@ println!(
 The baseline and the method behind it live in [`PERF_LOG.md`](PERF_LOG.md); the design
 choice (bitmap overlay instead of egui/puffin) is ADR-042.
 
+The same numbers reach C: `giochi_engine_frame_stats(&stats)` fills a `GiochiFrameStats`
+(ABI v3, `docs/C_ABI_CONTRACT.md` part III) with the durations and counters above. It is
+zeroed unless the library is built with the feature, and it only writes on success.
+
+**If you are changing the engine**, `tests/perf_regression.rs` is the gate that matters:
+it asserts *counts* — allocations per frame, draw calls per batch — that are identical
+on every machine, so a regression there means the code, not the runner. Run
+`cargo bench -p giochi-engine` when a change touches the per-frame path, and record what
+you measured in [`PERF_LOG.md`](PERF_LOG.md) with the machine next to it.
+
 ---
 
 ## 5. Rendering

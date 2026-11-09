@@ -103,6 +103,88 @@ both are recorded. See ADR-044.
 scene, and `--instanced`/`--loop`/`--scale`/`--cubes`/`--width`/`--height`/`--bench` for
 unattended runs.
 
+### Added — phase 18: C ABI v3 exposes frame statistics
+
+`giochi_engine_frame_stats(&stats)` and `GiochiFrameStats` (120 bytes, alignment 8) give
+a C host the same per-frame numbers the debug overlay shows: `frame_time_ns`,
+`cpu_time_ns`, `update_ns`, `render2d_ns`, `render3d_ns`, `audio_ns`, `fps`,
+`draw_calls`, `sprites_drawn`, `meshes_drawn`, `frames`, `vertices_uploaded` and
+`bytes_uploaded`. `GIOCHI_ABI_VERSION` moves 2 → 3.
+
+It is purely additive: **every signature from parts I and II is unchanged**, and a
+consumer written against version 1 or 2 keeps working — which the test suite now
+demonstrates rather than claims, since `c_smoke_3d.c` and `python_smoke_3d.py` were
+written against version 2 and needed only their version assertion relaxed to `>= 2`.
+
+The struct is a *projection* of the Rust `FrameStats`, not the same type, so an internal
+measurement added to the engine cannot widen the C ABI: the conversion is an explicit
+`From` that fails to compile until someone decides whether the new field belongs. All
+fields are zero when the library is built without the `profiling` feature (ADR-042);
+`frames` distinguishes "no frame measured" from "a frame of zero length", and the call
+succeeds either way. See ADR-045 and part III of `docs/C_ABI_CONTRACT.md`.
+
+### Changed — phase 18: the release payload is much smaller
+
+Binary size, not speed, is what this phase bought, and it was measured rather than
+assumed:
+
+| Binary | Before | After | Δ |
+| --- | --- | --- | --- |
+| `mini_fps` (x86_64) | 2 073 496 B | 1 574 288 B | −24.1 % |
+| `profiler_demo` (x86_64) | 719 648 B | 487 480 B | −32.3 % |
+| `giochi-demo` (x86_64) | 2 909 960 B | 2 300 368 B | −20.9 % |
+| `mini_fps` (aarch64) | 2 024 560 B | 1 381 360 B | −31.8 % |
+
+`[profile.release]` is now `lto = "fat"` plus `strip = "symbols"`. On ARM64 the stripping
+is 25.3 % of the win and the code generation the other 8.7 %. Frame rates did not change
+within noise on either machine (5-run interleaved medians are in `docs/PERF_LOG.md`).
+
+`panic` stays **`"unwind"`**. The C ABI contract guarantees that no Rust panic crosses the
+boundary, which `catch_unwind` implements; `abort` would remove the ability to catch and
+cost roughly 5 % of the size saved. A build that embeds this engine should not die
+because a bug was hit inside it.
+
+### Changed — phase 18: console builds are compiled for the console's CPU
+
+`cortex-a35` with `+crc,+aes,+sha2`, selected with `GIOCHI_TARGET_CPU`; see
+`docs/CROSS_COMPILE.md` for the table. Two things the plan specified were not usable:
+
+- `-C target-cpu=native` cannot work in a cross build — the compiler runs on the host.
+- `+lse` was **rejected**: it is ARMv8.1 and the PX30's Cortex-A35 is ARMv8.0-A, and the
+  device's `/proc/cpuinfo` lists no `atomics`. Enabling it would have produced a binary
+  that dies with `SIGILL` on the first `Arc::clone`.
+
+`.cargo/config.toml` alone was also not enough: cargo ignores a config file's `rustflags`
+whenever `RUSTFLAGS` is set, and the cross-build script sets it. The script now passes the
+flags itself, and `docs/CROSS_COMPILE.md` documents how to confirm what the compiler was
+actually told.
+
+### Added — phase 18: a performance gate that cannot flake, and benchmarks
+
+`tests/perf_regression.rs` asserts quantities that are identical on every machine: **0
+allocations** per steady-state frame (empty, and with 512 batched sprites) counted with a
+wrapping global allocator, and exactly `ceil(sprites / max_sprites)` draw calls for 5000
+atlas sprites. Wall-clock assertions were rejected for the blocking gate because a shared
+CI runner measures the runner; time appears only as a 16.67 ms empty-frame ceiling with
+66x of headroom. It runs in CI with and without the `profiling` feature.
+
+`benches/engine_overhead.rs` measures what the engine charges per frame — `present` alone,
+a full empty `step`, and the same with the overlay on — so a regression in the frame budget
+can be attributed to the engine instead of to whatever content was on screen.
+
+`.github/workflows/perf.yml` runs the deterministic gate as blocking, and compares
+criterion medians against `main` built in the same job on the same runner
+(`scripts/perf-compare.py`, 10 %). Comparing against numbers recorded on a different
+machine is how benchmark CI earns a reputation for lying.
+
+### Fixed — phase 18: `flush_batch` allocated once per frame
+
+The new gate found it on its first run: `SpriteBatch::flush_runs` returned a
+`Vec<RunView>`, so every flush since phase 16 collected a fresh vector.
+`flush_runs` now returns an iterator and `flush_batch` destructures `self` so the
+borrow of `batch` can coexist with `textures` and `canvas`. Zero allocations per frame in
+both measured paths.
+
 ## [0.2.2] - 2026-11-08
 
 ### Fixed — a sixth audit found one more

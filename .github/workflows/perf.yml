@@ -1,0 +1,130 @@
+name: Performance
+
+# Phase 18b. `ci.yml` proves the code is correct; this proves it has not become slower.
+#
+# Two jobs, and they are deliberately different in kind:
+#
+# * `regression-gate` asserts quantities that are identical on every machine —
+#   allocations per frame and draw calls per sprite, counted in-process. It is the
+#   authoritative gate: it cannot flake, and it fails on exactly the changes that make
+#   the engine slower per frame.
+#
+# * `benchmarks` runs criterion and compares the medians against `main` **built and
+#   benchmarked in the same job on the same runner**, so the machine cancels out. That
+#   is the only way a 10% threshold is meaningful; comparing against numbers recorded
+#   on a different machine is how benchmark CI gets a reputation for lying.
+#
+# The 3D benches are compiled here but not timed: they need an OpenGL context, and a
+# GitHub runner has no dependable one. Their numbers live in `docs/PERF_LOG.md`, which
+# records the machine along with the result.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  regression-gate:
+    name: Deterministic regression gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+
+      - name: Install build dependencies
+        run: sudo ./scripts/install-deps.sh
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Per-frame budget (default features)
+        # Allocations per steady-state frame and empty-frame cost. Everything is
+        # counted in-process, so the numbers do not depend on the runner's speed.
+        run: cargo test -p giochi-engine --test perf_regression --target x86_64-unknown-linux-gnu -- --nocapture
+
+      - name: Per-frame budget (profiling)
+        # The draw-call counters exist only with this feature (ADR-042), so the batching
+        # assertions in the same test compile out without it.
+        run: cargo test -p giochi-engine --test perf_regression --features profiling --target x86_64-unknown-linux-gnu -- --nocapture
+
+      - name: Benchmarks still compile
+        # A benchmark that stops compiling stops being run, and then stops being trusted.
+        run: cargo bench --workspace --no-run --target x86_64-unknown-linux-gnu
+
+  benchmarks:
+    name: Benchmarks against main
+    runs-on: ubuntu-latest
+    needs: regression-gate
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # `git worktree add` needs the base branch history, not a shallow tip.
+          fetch-depth: 0
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+
+      - name: Install build dependencies
+        run: sudo ./scripts/install-deps.sh
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Criterion's defaults are tuned for a human asking "how fast is this" and will
+      # take twenty minutes across the two packages. These are the same settings
+      # `docs/PERF_LOG.md` uses for a quick pass: enough samples for a stable median on
+      # sub-millisecond benchmarks, short enough to gate a push.
+      - name: Benchmark this branch
+        run: |
+          cargo bench -p giochi-engine --target x86_64-unknown-linux-gnu -- \
+            --warm-up-time 0.5 --measurement-time 2 --sample-size 30
+
+      - name: Keep this branch's estimates
+        run: cp -r target/criterion "$RUNNER_TEMP/candidate"
+
+      - name: Check out the base branch
+        # A second checkout of the same commit on a push to `main`, which compares the
+        # branch against itself and passes; on a pull request it is the merge target.
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/main" "origin/${{ github.base_ref || 'main' }}"
+          git -C "$RUNNER_TEMP/main" log -1 --oneline
+
+      - name: Benchmark the base branch
+        working-directory: ${{ runner.temp }}/main
+        run: |
+          cargo bench -p giochi-engine --target x86_64-unknown-linux-gnu -- \
+            --warm-up-time 0.5 --measurement-time 2 --sample-size 30
+
+      - name: Compare against the base branch
+        run: |
+          ./scripts/perf-compare.py \
+            --baseline "$RUNNER_TEMP/main/target/criterion" \
+            --candidate "$RUNNER_TEMP/candidate" \
+            --threshold 10
+
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/candidate
+            ${{ runner.temp }}/main/target/criterion
+          if-no-files-found: warn
+          retention-days: 14

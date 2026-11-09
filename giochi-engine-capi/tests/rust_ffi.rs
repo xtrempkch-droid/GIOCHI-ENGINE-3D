@@ -118,6 +118,13 @@ fn abi_type_layouts_match_the_contract() {
     assert_eq!(size_of::<GiochiSceneCallbacks>(), 56);
     assert_eq!(align_of::<GiochiSceneCallbacks>(), 8);
 
+    // Part III (ABI v3). Also asserted in `abi_types.rs` and, from the compiled header,
+    // by `_Static_assert` in `c_smoke.c` -- a C program allocates this struct itself.
+    assert_eq!(size_of::<GiochiFrameStats>(), 120);
+    assert_eq!(align_of::<GiochiFrameStats>(), 8);
+    // A projection, not a re-export: deliberately narrower than the Rust type.
+    assert!(size_of::<GiochiFrameStats>() <= size_of::<giochi_engine::FrameStats>());
+
     // The error codes are part of the ABI and are renumbered only with a version bump.
     assert_eq!(GIOCHI_ERROR_OK, 0);
     assert_eq!(GIOCHI_ERROR_INVALID_HANDLE, -1);
@@ -306,6 +313,29 @@ fn c_abi_end_to_end() {
     assert_eq!(giochi_engine_frames(), before + 1);
     // A nonsense frame time is replaced, not rejected.
     assert_eq!(giochi_engine_step(f32::NAN), GIOCHI_ERROR_OK);
+
+    // ---- part III: frame statistics ---------------------------------------------
+    let mut stats = GiochiFrameStats::default();
+    assert_eq!(
+        giochi_engine_frame_stats(std::ptr::null_mut()),
+        GIOCHI_ERROR_INVALID_ARGUMENT
+    );
+    assert!(message().contains("out_stats"));
+    assert_eq!(
+        giochi_engine_frame_stats(&mut stats),
+        GIOCHI_ERROR_OK,
+        "{}",
+        message()
+    );
+    // Reserved words are zeroed by the library, and with the `profiling` feature off
+    // everything is zero -- which is a state, not a failure.
+    assert_eq!(stats._reserved, [0u32; 8]);
+    if cfg!(feature = "profiling") {
+        assert!(stats.frames > 0, "a stepped frame must be measured");
+        assert!(stats.frame_time_ns > 0);
+    } else {
+        assert_eq!(stats, GiochiFrameStats::default());
+    }
 
     // ---- teardown ---------------------------------------------------------------
     assert_eq!(

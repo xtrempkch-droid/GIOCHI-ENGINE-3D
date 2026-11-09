@@ -11,7 +11,7 @@ use std::ffi::CString;
 use giochi_engine::error::codes;
 use giochi_engine::{Engine, EngineConfig, GiochiError};
 
-use crate::abi_types::GiochiEngineConfig;
+use crate::abi_types::{GiochiEngineConfig, GiochiFrameStats};
 use crate::scene;
 use crate::state::{self, guard};
 
@@ -332,6 +332,39 @@ pub extern "C" fn giochi_engine_steps() -> u64 {
 pub extern "C" fn giochi_engine_timestep() -> f32 {
     guard(0.0, || {
         state::with_engine("the engine is busy", |engine| engine.fixed_timestep()).unwrap_or(0.0)
+    })
+}
+
+/// Copies the statistics of the most recently completed frame into `out_stats`.
+///
+/// Every duration is in nanoseconds. `out_stats` is caller-owned and is only written on
+/// success; a NULL pointer is `GIOCHI_ERROR_INVALID_ARGUMENT`.
+///
+/// Every field is zero unless the library was built with the `profiling` feature
+/// (ADR-042); the call still succeeds, because "no frame has been measured" is a
+/// state, not an error. `out_stats->frames` distinguishes them: it counts the frames
+/// measured so far, so a host can tell a zero-length frame from a build that is not
+/// measuring.
+///
+/// # C ABI
+///
+/// ```c
+/// int32_t giochi_engine_frame_stats(GiochiFrameStats* out_stats);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_engine_frame_stats(out_stats: *mut GiochiFrameStats) -> i32 {
+    guard(codes::INTERNAL, || {
+        if out_stats.is_null() {
+            return state::invalid_argument("out_stats must not be NULL");
+        }
+        match state::with_engine("the engine is busy", |engine| engine.frame_stats()) {
+            Ok(stats) => {
+                // SAFETY: non-NULL, caller-owned writable `GiochiFrameStats`.
+                unsafe { *out_stats = GiochiFrameStats::from(stats) };
+                codes::OK
+            }
+            Err(code) => code,
+        }
     })
 }
 

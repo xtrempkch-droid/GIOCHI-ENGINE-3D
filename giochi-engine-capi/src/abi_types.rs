@@ -26,7 +26,13 @@ const _: () = assert!(ENGINE_TITLE_CAPACITY == 64);
 /// Version of the C ABI implemented by this library.
 ///
 /// Must stay equal to `giochi_abi_version()` and to `docs/C_ABI_CONTRACT.md`.
-pub const GIOCHI_ABI_VERSION: u32 = 2;
+///
+/// * `1` — part I (2D).
+/// * `2` — part II (3D), phase 14. Additive: no part I signature changed.
+/// * `3` — part III (`GiochiFrameStats`), phase 18. Additive as well, so a consumer
+///   written against `1` or `2` keeps working; the contract asks callers to accept
+///   `giochi_abi_version() >= 1` for exactly this reason.
+pub const GIOCHI_ABI_VERSION: u32 = 3;
 
 /// Largest asset the loader accepts, in bytes (64 MiB).
 pub const GIOCHI_MAX_ASSET_SIZE: usize = 64 * 1024 * 1024;
@@ -188,3 +194,98 @@ impl GiochiSceneCallbacks {
         self.update.is_some() && self.render.is_some()
     }
 }
+
+/// Per-frame timings and counters, as reported by `giochi_engine_frame_stats`.
+///
+/// A *projection* of the Rust `FrameStats`, not the whole type: the C surface carries
+/// what a host needs to show or log a frame budget, and stays narrower than the Rust
+/// struct so that adding an internal measurement does not change the ABI. The
+/// conversion is field-by-field in [`From`], so a new Rust field is a compile error
+/// here until someone decides whether it belongs in the ABI — which is the point.
+///
+/// Durations are whole nanoseconds. With the `profiling` feature disabled at build
+/// time every value is zero: the engine reports the frame it measured, and without the
+/// feature it measures nothing (ADR-042).
+///
+/// # C ABI
+///
+/// ```c
+/// typedef struct GiochiFrameStats {
+///     uint64_t frame_time_ns;
+///     uint64_t cpu_time_ns;
+///     uint64_t update_ns;
+///     uint64_t render2d_ns;
+///     uint64_t render3d_ns;
+///     uint64_t audio_ns;
+///     float    fps;
+///     uint32_t draw_calls;
+///     uint32_t sprites_drawn;
+///     uint32_t meshes_drawn;
+///     uint32_t frames;
+///     uint64_t vertices_uploaded;
+///     uint64_t bytes_uploaded;
+///     uint32_t _reserved[8];
+/// } GiochiFrameStats;
+/// ```
+///
+/// Size: 120 bytes, alignment: 8 bytes. Asserted at compile time in this crate and by
+/// `_Static_assert` in `tests/c_smoke.c`: a C consumer allocates the struct itself,
+/// which is the whole reason its layout is in the header.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GiochiFrameStats {
+    /// Wall-clock frame period, in nanoseconds.
+    pub frame_time_ns: u64,
+    /// Time the engine spent computing the frame, in nanoseconds.
+    pub cpu_time_ns: u64,
+    /// Time spent in the `"update"` scope, in nanoseconds.
+    pub update_ns: u64,
+    /// Time spent in 2D rendering, in nanoseconds.
+    pub render2d_ns: u64,
+    /// Time spent in 3D rendering, in nanoseconds.
+    pub render3d_ns: u64,
+    /// Time spent mixing audio, in nanoseconds.
+    pub audio_ns: u64,
+    /// Smoothed frames per second, as the overlay shows it.
+    pub fps: f32,
+    /// Backend draw calls issued in the frame.
+    pub draw_calls: u32,
+    /// Sprites submitted to the backend in the frame.
+    pub sprites_drawn: u32,
+    /// Meshes submitted to the backend in the frame.
+    pub meshes_drawn: u32,
+    /// Frames measured so far in the current run.
+    pub frames: u32,
+    /// Vertices uploaded to the GPU in the frame.
+    pub vertices_uploaded: u64,
+    /// Bytes uploaded to the GPU in the frame.
+    pub bytes_uploaded: u64,
+    /// Reserved for future ABI-compatible fields. Must be zero.
+    pub _reserved: [u32; 8],
+}
+
+impl From<giochi_engine::FrameStats> for GiochiFrameStats {
+    fn from(stats: giochi_engine::FrameStats) -> Self {
+        Self {
+            frame_time_ns: stats.frame_time_ns,
+            cpu_time_ns: stats.cpu_time_ns,
+            update_ns: stats.update_ns,
+            render2d_ns: stats.render2d_ns,
+            render3d_ns: stats.render3d_ns,
+            audio_ns: stats.audio_ns,
+            fps: stats.fps,
+            draw_calls: stats.draw_calls,
+            sprites_drawn: stats.sprites_drawn,
+            meshes_drawn: stats.meshes_drawn,
+            frames: stats.frames,
+            vertices_uploaded: stats.vertices_uploaded,
+            bytes_uploaded: stats.bytes_uploaded,
+            _reserved: [0; 8],
+        }
+    }
+}
+
+// The C header states these numbers in prose and `tests/c_smoke.c` asserts the same
+// ones from the compiled header, so the two cannot drift apart silently.
+const _: () = assert!(core::mem::size_of::<GiochiFrameStats>() == 120);
+const _: () = assert!(core::mem::align_of::<GiochiFrameStats>() == 8);

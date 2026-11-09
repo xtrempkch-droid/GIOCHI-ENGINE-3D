@@ -1362,3 +1362,89 @@ rejected), 5 in `tests/upscale.rs` (visible frame at 1.0/0.75/0.5/0.25, window-s
 output, no GL error, target released), 11 unit tests in `mesh/static_batch.rs`, 5 in
 `render3d/instanced.rs`, 5 in `render3d/upscale.rs`, 5 in `context/instancing.rs`, and
 `benches/meshes_3d.rs`.
+
+## ADR-045 — Compile for the named core, keep `unwind`, and gate performance on counters rather than clocks
+
+**Context.** Phase 18 asks for ARM64 compile flags, a benchmark suite, a performance CI
+and a C ABI v3. Three of its four parts have a decision in them that outlives the phase,
+and two of the plan's own suggestions turned out to be unusable as written.
+
+1. **`target-cpu=native` and `+lse` are both wrong here, for different reasons.**
+   `native` cannot work in a cross build — cargo runs the compiler on the host, so
+   "native" would describe the development machine. And the plan's suggested
+   `+lse,+crc,+crypto` includes a feature the console's CPU does not have: the PX30 is a
+   Cortex-A35, which is ARMv8.0-A, and LSE atomics are ARMv8.1. `/proc/cpuinfo` on the
+   device lists `fp asimd evtstrm aes pmull sha1 sha2 crc32 cpuid` — no `atomics`. The
+   first `Arc::clone` of the first frame would be an illegal instruction.
+2. **`panic = "abort"` cannot be applied.** `docs/C_ABI_CONTRACT.md` guarantees that no
+   Rust panic crosses the C boundary; every exported function is wrapped in
+   `catch_unwind` and reports `GIOCHI_ERROR_INTERNAL`. `abort` would remove the ability
+   to catch anything, converting a recoverable bug into a process kill in a host game.
+3. **A wall-clock CI gate lies on shared runners.** The suite has to run on
+   `ubuntu-latest`, where a 10 % frame-time threshold is inside the noise of a noisy
+   neighbour and the honest outcome is a flaky red X that people learn to re-run.
+
+**Decision.**
+
+- **Name the core, derive the features from the device.** `cortex-a35` is the default and
+  is written in both `.cargo/config.toml` and `scripts/build-aarch64.sh`, because cargo
+  ignores the config file's `rustflags` whenever `RUSTFLAGS` is set and the cross-build
+  script sets it. `GIOCHI_TARGET_CPU` overrides the core for other boards; an unknown
+  core gets **no** target features, since a wrong `+feature` is a `SIGILL` on an
+  unattended device and a missing one is only slower. **`+lse` is never added**; the
+  reason is written at both sites. The feature list is checked against
+  `/proc/cpuinfo`, not against a datasheet.
+- **`[profile.release]`: `lto = "fat"`, `codegen-units = 1`, `opt-level = 3`,
+  `strip = "symbols"`, and `panic = "unwind"` (the default, deliberately kept).**
+  `[profile.bench]` matches on `lto`/`opt-level`/`codegen-units` but keeps
+  `debug = true`: a profiler has to be able to resolve the frames, and a stripped
+  benchmark measures a binary nobody ships.
+- **The blocking CI gate asserts counts, not clocks.** `tests/perf_regression.rs` uses a
+  wrapping global allocator and the existing draw-call counters, so its assertions are
+  identical on every machine: **0 allocations** per steady-state frame (empty and
+  512 batched sprites), and exactly `ceil(sprites / max_sprites)` draw calls for 5000
+  atlas sprites. Time is used only for a 16.67 ms empty-frame sanity ceiling, 66x above
+  the measured value. The wall-clock comparison against `main` exists too
+  (`.github/workflows/perf.yml` builds both and runs `scripts/perf-compare.py` at a 10 %
+  threshold), but both sides are measured minutes apart on the same runner, which is the
+  only arrangement in which a percentage means anything.
+- **C ABI v3 is additive.** `GiochiFrameStats` is a hand-written *projection* of the Rust
+  `FrameStats`, not the type itself, with an explicit `From` so that a new Rust field is
+  a compile error until someone decides whether it belongs in the ABI.
+  `giochi_engine_frame_stats` writes into caller-owned memory and returns a status code,
+  following the `giochi_asset_size` precedent. `GIOCHI_ABI_VERSION` moves 2 → 3; a
+  consumer written against 1 or 2 keeps working, which is why the contract asks callers
+  to test `>= 1` rather than `==`.
+
+**Consequences.**
+
+- The console payload is 24 % (x86_64 `mini_fps`) to 32 % (`profiler_demo`) smaller, at
+  unchanged speed — measured, not assumed. Stripping is 25.3 % of the ARM64 win and
+  LTO/codegen the other 8.7 %; the phase changed no number that a frame-time reader would
+  notice, and `docs/PERF_LOG.md` says so instead of implying a speedup.
+- `strip = "symbols"` does not break the C ABI: `.symtab` goes, `.dynsym` stays, and all
+  74 `giochi_*` exports remain resolvable. This was checked rather than assumed, because
+  a stripped `cdylib` is exactly the kind of thing that fails only in the consumer.
+- Keeping `unwind` costs about 5 % of the release payload, per the plan's own note. That
+  is the price of the panic guarantee, and it is the right trade for an embeddable
+  engine.
+- `.cargo/config.toml` is now a place where a flag can be silently inert. The build
+  script reproduces the flags, and the way to confirm what the compiler was told is
+  documented in `docs/CROSS_COMPILE.md`.
+- The regression gate found a real per-frame allocation on its first run
+  (`SpriteBatch::flush_runs` collecting a `Vec` every flush, since phase 16). It is fixed
+  by returning an iterator; the gate's baseline is now 0.
+
+**Why not gate on frame time.** Because the number that matters is not reproducible on
+the machine the gate runs on. A CPU-time gate on a shared runner measures the runner.
+Counters and allocation counts do not: they are properties of the code, and they catch
+the same changes — extra per-frame work, lost batching — earlier and with certainty.
+
+**Verified by.** `tests/perf_regression.rs` (allocations, draw calls, empty-frame
+ceiling; run in CI with and without `profiling`), `scripts/perf-compare.py` (self-compare
+0 %, a synthetic +50 % caught, a −30 % reported), `c_smoke.c` and `python_smoke.py`
+(`GiochiFrameStats` size/offset `_Static_assert`, NULL argument, zeroed reserved words),
+`c_smoke_3d.c` and `python_smoke_3d.py` unchanged except for `>= 2`, the four
+`scripts/ffi-smoke.sh` consumers passing on ABI 3, a `RUSTC_WRAPPER` probe confirming
+`target-cpu=cortex-a35` reaches the compiler, and a SIGILL-free run of the resulting
+binary on the PX30.

@@ -20,6 +20,12 @@ criterion = { workspace = true }
 name = "sprites_2d"
 harness = false
 
+# Phase 18b: per-frame engine overhead, so a frame-budget regression can be attributed
+# to the engine rather than to the content that happens to be on screen.
+[[bench]]
+name = "engine_overhead"
+harness = false
+
 [features]
 # Compila o SDL2 do código-fonte — o padrão, e o que o CI usa em x86_64.
 default = ["sdl2-bundled"]

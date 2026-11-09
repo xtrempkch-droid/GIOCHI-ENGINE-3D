@@ -1,14 +1,19 @@
 # GIOCHI-ENGINE — C ABI Contract
 
-**Contract version: `GIOCHI_ABI_VERSION 1` for part I (2D), `2` for part II (3D).**
+**Contract version: `GIOCHI_ABI_VERSION 1` for part I (2D), `2` for part II (3D), `3` for
+part III (frame statistics).**
 **Engine version: `0.2.2`**
 **Status: authoritative.** This document is the law of the project. If a Rust type
 cannot be expressed in the C form below, the *type* is redesigned — the contract
 is never relaxed.
 
-Part I (§1–§7) is implemented and exported. Part II (§8–§12) specifies 3D and is
-written before the code on purpose; it ships in phase 14 and bumps
-`GIOCHI_ABI_VERSION` to 2. Part I signatures never change.
+Part I (§1–§7) is implemented and exported. Part II (§8–§12) specifies 3D and was
+written before the code on purpose; it shipped in phase 14 and bumped
+`GIOCHI_ABI_VERSION` to 2. Part III (§13) adds frame statistics in phase 18 and bumps it
+to 3. **Every part is additive: no signature from an earlier part has ever changed, and
+a consumer written against version 1 or 2 keeps working against version 3 unchanged.**
+That is why this contract tells consumers to test `giochi_abi_version() >= 1` rather than
+equality.
 
 The header `giochi-engine-capi/include/giochi.h` is generated from the Rust crate
 by `cbindgen` and must match this document exactly; `scripts/gen-header.sh --check`
@@ -879,9 +884,99 @@ The same type the Rust side calls `WindowConfig`, so there is nothing to keep in
 |---|---|
 | Every 3D type is `#[repr(C)]` with `_reserved` | `giochi-engine-3d/tests/abi_layout_3d.rs` (phase 14), mirroring `abi_layout.rs` |
 | Handles are `u64` with `0` invalid | `tests/rust_ffi_3d.rs` |
-| `GIOCHI_ABI_VERSION == 2` and `giochi_abi_version()` agrees | `python_smoke_3d.py`, `rust_ffi_3d.rs` |
+| `giochi_abi_version()` is at least 2, and agrees with the header's `GIOCHI_ABI_VERSION` | `python_smoke_3d.py`, `rust_ffi_3d.rs` |
 | No `glow`, `glam` or `sdl2` type appears in a public struct field | the same test that checks the 2D crate's rule (ADR-032) |
 | 3D additions never change a part I signature | `git diff` review plus `c_smoke.c` continuing to pass untouched |
 | The sizes in §9 are the ones a C compiler produces | `c_smoke_3d.c` `_Static_assert`s them — 28, 32, 88 |
 | Every type this document names is in `giochi.h` | `scripts/gen-header.sh --check`. A type defined here but missing from `cbindgen.toml`'s `include` is silently not emitted; `GiochiDirectionalLight` was, until the third audit |
 | Every function in §10 exists and is exported | `scripts/ffi-smoke.sh` links each one from C. A documented-but-unimplemented function is a link error at the consumer, which is how the missing `giochi_renderer3d_set_light` would have been caught before shipping |
+
+# Part III — Frame statistics (ABI version 3, phase 18)
+
+Part III is one function and one struct. It exists because phase 15 built a profiler that
+only a Rust host could read: a C consumer could drive the engine and get `fps` nowhere.
+
+Everything here is additive. `GIOCHI_ABI_VERSION` moves to `3`, the header's existing
+declarations are byte-identical to version 2, and the four consumers in
+`scripts/ffi-smoke.sh` — two of which were written against version 2 — keep passing
+without being edited beyond relaxing their version assertion to `>= 2`.
+
+## 13. Types and functions
+
+### 13.1 `GiochiFrameStats`
+
+```c
+typedef struct GiochiFrameStats {
+    uint64_t frame_time_ns;      /* wall-clock frame period */
+    uint64_t cpu_time_ns;        /* time the engine spent computing the frame */
+    uint64_t update_ns;          /* "update" scope */
+    uint64_t render2d_ns;        /* 2D rendering */
+    uint64_t render3d_ns;        /* 3D rendering */
+    uint64_t audio_ns;           /* audio mixing */
+    float    fps;                /* smoothed, as the debug overlay shows it */
+    uint32_t draw_calls;         /* backend draw calls issued */
+    uint32_t sprites_drawn;      /* sprites submitted to the backend */
+    uint32_t meshes_drawn;       /* meshes submitted to the backend */
+    uint32_t frames;             /* frames measured so far this run */
+    uint64_t vertices_uploaded;  /* GPU vertex uploads */
+    uint64_t bytes_uploaded;     /* GPU byte uploads */
+    uint32_t _reserved[8];       /* must be zero */
+} GiochiFrameStats;
+```
+
+**Size: 120 bytes, alignment: 8 bytes.** A C consumer allocates this struct itself, so
+the layout is part of the contract: `c_smoke.c` and `python_smoke.py` assert the size and
+two offsets, and `abi_types.rs` asserts the same numbers at compile time.
+
+It is a **projection** of the Rust `FrameStats`, not a re-export of it. The C surface
+carries what a host needs to display or log a frame budget and stays narrower than the
+Rust type, so an internal measurement added to the engine does not widen the ABI. The
+conversion is an explicit `From` in `abi_types.rs`, which fails to compile when the Rust
+struct gains a field — a deliberate speed bump.
+
+**Every field is zero when the library was built without the `profiling` feature**
+(ADR-042). This is not an error and does not change the return code: the engine reports
+what it measured, and without the feature it measures nothing. `frames` distinguishes the
+two states — a measuring build counts frames, a non-measuring one leaves it at zero.
+
+### 13.2 `giochi_engine_frame_stats`
+
+```c
+int32_t giochi_engine_frame_stats(GiochiFrameStats* out_stats);
+```
+
+Copies the statistics of the most recently completed frame into `out_stats`.
+
+| Condition | Result |
+|---|---|
+| `out_stats == NULL` | `GIOCHI_ERROR_INVALID_ARGUMENT`, message names `out_stats`; the struct is not written |
+| Engine not initialised | `GIOCHI_ERROR_NOT_INITIALIZED`; the struct is not written |
+| Engine busy (re-entered from a callback on the same thread) | `GIOCHI_ERROR_SCENE`, the code the boundary already uses for "the engine is on the stack" |
+| Otherwise | `GIOCHI_OK`, and `out_stats` is fully written, `_reserved` zeroed |
+
+`out_stats` is caller-owned and is **only written on success**, so a failed call cannot
+half-update a struct the host is already displaying.
+
+## 14. What part III deliberately does not have
+
+- **No per-frame history.** `FrameTimeSummary` (p50/p99 over a window) is not projected:
+  percentiles are a display concern with no single right window, and a host that wants
+  them can keep its own ring of `frame_time_ns`.
+- **No `gpu_time_hint_ns`.** The Rust type has it and it is always zero — GLES 2.0 has no
+  timer query and `sdl2::render` exposes none. A field that is permanently zero invites a
+  consumer to display a number that is not measured.
+- **No setters, no reset.** The measurement window belongs to the engine's run.
+- **No struct-by-value return.** `giochi_engine_frame_stats` writes through a pointer and
+  returns a status, matching `giochi_asset_size`; a 120-byte return in a register pair is
+  an ABI detail no consumer should have to know.
+
+## 15. Compliance checklist for part III
+
+| Requirement | Enforced by |
+|---|---|
+| `GIOCHI_ABI_VERSION == 3` and `giochi_abi_version()` agrees | `python_smoke.py`, `rust_ffi.rs`, `c_smoke.c` |
+| `GiochiFrameStats` is 120 bytes, alignment 8, offsets stable | `_Static_assert` in `c_smoke.c`, `ctypes.sizeof`/`offset` in `python_smoke.py`, `const` asserts in `abi_types.rs` |
+| Reserved words are zeroed by the library | `c_smoke.c` and `python_smoke.py` memset the struct to `0xAB` first, then check all eight words |
+| `NULL` is rejected without writing | `c_smoke.c`, `python_smoke.py` |
+| Version 1 and 2 consumers keep working untouched | `c_smoke_3d.c` and `python_smoke_3d.py` assert `>= 2` and otherwise unchanged; `c_smoke.c` still asserts `>= 1` |
+| The function is exported and reachable from C and Python | `scripts/ffi-smoke.sh` links and calls it from both |

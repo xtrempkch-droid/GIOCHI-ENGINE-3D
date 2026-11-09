@@ -9,6 +9,7 @@
  *      giochi-engine-capi/tests/c_smoke.c -L target/debug -lgiochi -o c_smoke
  */
 #include <ctype.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -332,6 +333,40 @@ int main(void)
     uint64_t before = giochi_engine_frames();
     CHECK_CODE(giochi_engine_step(1.0f / 60.0f));
     CHECK(giochi_engine_frames() == before + 1);
+
+    /* ---- part III: frame statistics (ABI v3) ------------------------------ */
+    /* Written against the version 3 header but still guarded by "at least", for the
+     * same reason as the check at the top: this is what a consumer that predates a
+     * future part looks like. */
+    if (giochi_abi_version() >= 3) {
+        /* The layout is in the header, so a C program allocates the struct itself and
+         * the two sizes have to agree. */
+        _Static_assert(sizeof(GiochiFrameStats) == 120, "GiochiFrameStats size");
+        _Static_assert(offsetof(GiochiFrameStats, fps) == 48, "fps offset");
+        _Static_assert(offsetof(GiochiFrameStats, vertices_uploaded) == 72,
+                       "vertices_uploaded offset");
+
+        CHECK(giochi_engine_frame_stats(NULL) == GIOCHI_ERROR_INVALID_ARGUMENT);
+        CHECK(strstr(giochi_get_last_error(), "out_stats") != NULL);
+
+        GiochiFrameStats stats;
+        memset(&stats, 0xAB, sizeof(stats));
+        CHECK_CODE(giochi_engine_frame_stats(&stats));
+        /* Durations are only meaningful with the `profiling` feature, which this
+         * library may not have been built with, so the assertions here are the ones
+         * that hold either way: the reserved space is zeroed (the contract requires
+         * it, and a consumer memcpy'ing the struct must not leak stack bytes) and the
+         * frame counter agrees with the engine's own. */
+        for (int i = 0; i < 8; i++) {
+            CHECK(stats._reserved[i] == 0);
+        }
+        if (stats.frames != 0) {
+            /* Only reached in a build with `profiling`. A stepped frame then has a
+             * measurable period, and the counters cannot be negative. */
+            CHECK(stats.frame_time_ns > 0);
+            CHECK(stats.fps >= 0.0f);
+        }
+    }
 
     /* ---- teardown --------------------------------------------------------- */
     CHECK_CODE(giochi_scene_destroy(scene));

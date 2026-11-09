@@ -20,6 +20,16 @@ if [[ "${1:-}" == "--release" ]]; then
     cargo_flags+=(--release)
 fi
 
+# Phase 18c: build with the `profiling` feature to prove that `GIOCHI_ABI_VERSION 3`
+# reports real measurements through the C ABI and not just zeros. The consumers assert
+# both states without being told which one they are in, so the same script covers both.
+#
+#   GIOCHI_CAPI_FEATURES=profiling scripts/ffi-smoke.sh
+if [[ -n "${GIOCHI_CAPI_FEATURES:-}" ]]; then
+    cargo_flags+=(--features "$GIOCHI_CAPI_FEATURES")
+    echo "==> features:    $GIOCHI_CAPI_FEATURES"
+fi
+
 target_dir="${CARGO_TARGET_DIR:-$repo_root/target}/x86_64-unknown-linux-gnu/$profile"
 
 echo "==> building libgiochi ($profile)"

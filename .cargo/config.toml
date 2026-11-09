@@ -13,3 +13,29 @@ CMAKE_POLICY_VERSION_MINIMUM = { value = "3.5", force = false }
 # AArch64" from the x86_64 linker. Ignored by host builds.
 [target.aarch64-unknown-linux-gnu]
 linker = "aarch64-linux-gnu-gcc"
+# Phase 18a: code generation for the console CPU.
+#
+# `-C target-cpu=native` cannot work here. Cargo runs the compiler on the *host*, so
+# during a cross build "native" would resolve to the host's model, not the console's.
+# The core has to be named.
+#
+# `cortex-a35` is the PX30's core (`CPU part 0xd04` in /proc/cpuinfo) and this LLVM has
+# a model for it, so it is the default rather than the `cortex-a53` the plan suggested.
+# For another board, change this line or pass `RUSTFLAGS`, which overrides this file
+# entirely; `scripts/build-aarch64.sh` turns `GIOCHI_TARGET_CPU` into exactly that, and
+# `docs/CROSS_COMPILE.md` tabulates the model for each supported board.
+#
+# The feature list comes from the device itself:
+#
+#   Features : fp asimd evtstrm aes pmull sha1 sha2 crc32 cpuid
+#
+# `+crc`, `+aes` and `+sha2` therefore name instructions this core really has. `+lse` is
+# absent, and the plan's suggestion to enable it was wrong for this hardware: LSE
+# atomics are ARMv8.1 and the Cortex-A35 is ARMv8.0-A, so `+lse` emits `ldadd`/`swpal`
+# instructions the core cannot decode and the binary dies on the first atomic — which
+# in this engine is an `Arc::clone` on the very first frame. Do not add it unless
+# `atomics` appears in /proc/cpuinfo.
+rustflags = [
+    "-C", "target-cpu=cortex-a35",
+    "-C", "target-feature=+crc,+aes,+sha2",
+]

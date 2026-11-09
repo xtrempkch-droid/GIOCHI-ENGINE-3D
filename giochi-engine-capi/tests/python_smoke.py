@@ -23,6 +23,8 @@ from ctypes import (
     CFUNCTYPE,
     POINTER,
     Structure,
+    addressof,
+    byref,
     c_char_p,
     c_float,
     c_int32,
@@ -30,6 +32,8 @@ from ctypes import (
     c_uint32,
     c_uint64,
     c_void_p,
+    memset,
+    sizeof,
 )
 
 GIOCHI_ERROR_OK = 0
@@ -91,6 +95,27 @@ UPDATE = CFUNCTYPE(None, c_void_p, POINTER(GiochiTime))
 RENDER = CFUNCTYPE(None, c_void_p)
 
 
+class GiochiFrameStats(Structure):
+    """Part III (ABI v3). Durations are nanoseconds; zero without `profiling`."""
+
+    _fields_ = [
+        ("frame_time_ns", c_uint64),
+        ("cpu_time_ns", c_uint64),
+        ("update_ns", c_uint64),
+        ("render2d_ns", c_uint64),
+        ("render3d_ns", c_uint64),
+        ("audio_ns", c_uint64),
+        ("fps", c_float),
+        ("draw_calls", c_uint32),
+        ("sprites_drawn", c_uint32),
+        ("meshes_drawn", c_uint32),
+        ("frames", c_uint32),
+        ("vertices_uploaded", c_uint64),
+        ("bytes_uploaded", c_uint64),
+        ("_reserved", c_uint32 * 8),
+    ]
+
+
 class GiochiSceneCallbacks(Structure):
     _fields_ = [
         ("user_data", c_void_p),
@@ -126,6 +151,8 @@ def declare(lib: ctypes.CDLL) -> None:
     lib.giochi_engine_request_quit.restype = None
     lib.giochi_engine_is_running.restype = c_int32
     lib.giochi_engine_frames.restype = c_uint64
+    lib.giochi_engine_frame_stats.argtypes = [POINTER(GiochiFrameStats)]
+    lib.giochi_engine_frame_stats.restype = c_int32
     lib.giochi_engine_timestep.restype = c_float
     lib.giochi_engine_video_driver.restype = c_char_p
     lib.giochi_engine_scene_depth.restype = c_uint32
@@ -228,9 +255,9 @@ def main() -> int:
             failures.append(f"{what} ({message})")
 
     # Part I was written against 1; this script ships with the library, so it names the
-    # current number. A consumer that predates part II should test `>= 1` instead, which
+    # current number. A consumer that predates a part should test `>= 1` instead, which
     # is the compatibility rule in giochi.h.
-    check(lib.giochi_abi_version() == 2, "abi version")
+    check(lib.giochi_abi_version() == 3, "abi version")
     check(lib.giochi_abi_version() >= 1, "abi version is at least part I")
     check(lib.giochi_engine_version() > 0, "engine version")
     check(lib.giochi_get_last_error() == b"", "last error starts empty")
@@ -351,6 +378,29 @@ def main() -> int:
     before = lib.giochi_engine_frames()
     check(lib.giochi_engine_step(1.0 / 60.0) == GIOCHI_ERROR_OK, "step")
     check(lib.giochi_engine_frames() == before + 1, "step advanced one frame")
+
+    # ---- part III: frame statistics (ABI v3) --------------------------------
+    check(sizeof(GiochiFrameStats) == 120, "GiochiFrameStats size")
+    check(
+        GiochiFrameStats.fps.offset == 48,
+        "GiochiFrameStats layout",
+    )
+
+    stats = GiochiFrameStats()
+    # Fill with a pattern first: the reserved words have to come back zero, and a struct
+    # the library forgot to write would otherwise look valid.
+    memset(addressof(stats), 0xAB, sizeof(stats))
+    check(
+        lib.giochi_engine_frame_stats(None) == GIOCHI_ERROR_INVALID_ARGUMENT,
+        "frame stats rejects NULL",
+    )
+    check(b"out_stats" in lib.giochi_get_last_error(), "frame stats NULL message")
+    check(lib.giochi_engine_frame_stats(byref(stats)) == GIOCHI_ERROR_OK, "frame stats")
+    check(all(word == 0 for word in stats._reserved), "frame stats zeroes reserved")
+    if stats.frames != 0:
+        # Only a build with `profiling` measures anything.
+        check(stats.frame_time_ns > 0, "frame stats period")
+        check(stats.fps >= 0.0, "frame stats fps")
 
     # ---- teardown -----------------------------------------------------------
     check(lib.giochi_scene_destroy(scene) == GIOCHI_ERROR_OK, "scene destroy")

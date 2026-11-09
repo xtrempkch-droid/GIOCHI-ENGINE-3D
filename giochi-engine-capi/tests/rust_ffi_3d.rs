@@ -81,10 +81,12 @@ fn release(engine: Option<*mut GiochiEngine3D>) {
 }
 
 #[test]
-fn the_abi_version_is_two_and_a_part_one_consumer_still_compiles_against_it() {
-    // Pinned: a consumer that was built against 1 and gets 2 must be able to tell, and the
-    // rule for part I callers is ">= what I was built for", never "==".
-    assert_eq!(GIOCHI_ABI_VERSION, 2);
+fn a_part_two_consumer_still_works_after_part_three() {
+    // This test was written against part II. Part III (frame statistics) raised the number
+    // to 3 and this assertion was relaxed from `== 2` to `>= 2` -- which is the whole
+    // compatibility claim, demonstrated rather than asserted: the consumer needed no other
+    // change. The rule for callers is ">= what I was built for", never "==".
+    const { assert!(GIOCHI_ABI_VERSION >= 2) };
     assert_eq!(giochi_abi_version(), GIOCHI_ABI_VERSION);
     assert!(giochi_abi_version() >= 1);
 }

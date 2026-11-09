@@ -115,9 +115,20 @@ impl RenderContext {
             return;
         }
 
-        for run in self.batch.flush_runs() {
+        // Fields are borrowed separately instead of through `self`: the runs are an
+        // iterator over `self.batch` now, and it stays alive for the whole loop while
+        // the body needs `self.textures` and `self.canvas`.
+        let Self {
+            batch,
+            textures,
+            canvas,
+            counters,
+            ..
+        } = self;
+
+        for run in batch.flush_runs() {
             let handle = run.texture;
-            let Some(texture) = self.textures.resolve(handle) else {
+            let Some(texture) = textures.resolve(handle) else {
                 // A texture destroyed with sprites still queued: those sprites were
                 // submitted first, but there is nothing left to draw them with.
                 log::debug!("batched draw skipped: texture {handle} is no longer alive");
@@ -127,20 +138,21 @@ impl RenderContext {
                 // Nothing to merge in a run of one: the plain copy is cheaper than
                 // building and submitting four vertices for a single sprite.
                 RunKind::Single { dst, src } => match to_sdl_rect(dst) {
-                    Some(dst) => self.canvas.copy(&texture, to_sdl_rect(src), dst),
+                    Some(dst) => canvas.copy(&texture, to_sdl_rect(src), dst),
                     // The run only exists because the quad had an area, so this is
                     // unreachable; treated as "nothing to draw" rather than a panic.
                     None => Ok(()),
                 },
                 RunKind::Geometry { vertices, indices } => {
-                    self.canvas
-                        .render_geometry(vertices, Some(&texture), indices)
+                    canvas.render_geometry(vertices, Some(&texture), indices)
                 }
             };
             match result {
                 Ok(()) => {
                     #[cfg(feature = "profiling")]
-                    self.counters.record_draw_calls(1);
+                    counters.record_draw_calls(1);
+                    #[cfg(not(feature = "profiling"))]
+                    let _ = counters;
                 }
                 Err(err) => log::error!("batched draw failed: {err}"),
             }

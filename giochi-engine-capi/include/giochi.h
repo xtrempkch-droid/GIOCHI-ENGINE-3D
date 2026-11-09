@@ -1,5 +1,5 @@
 /*
- * GIOCHI-ENGINE C ABI, version 2.
+ * GIOCHI-ENGINE C ABI, version 3.
  *
  * Link against libgiochi.so (or libgiochi.a) and call giochi_engine_init() before
  * anything else. Every fallible function returns 0 on success and a negative code
@@ -16,6 +16,10 @@
  * Version 2 adds part II (3D) in docs/C_ABI_CONTRACT.md sections 8-12. Nothing in part I
  * changed, so a consumer written against version 1 keeps working; it should accept
  * giochi_abi_version() >= 1 rather than == 1.
+ *
+ * Version 3 adds part III: giochi_engine_frame_stats() and GiochiFrameStats, section 13.
+ * It is additive in the same way, so a version 1 or 2 consumer compiles and runs
+ * unchanged.
  *
  * The 3D engine is an opaque pointer the caller owns (ADR-039), unlike the 2D singleton.
  * giochi_mesh_* and giochi_shader_* take no engine: they act on the most recently created
@@ -43,7 +47,13 @@ typedef struct GiochiEngine3D GiochiEngine3D;
 // Version of the C ABI implemented by this library.
 //
 // Must stay equal to `giochi_abi_version()` and to `docs/C_ABI_CONTRACT.md`.
-#define GIOCHI_ABI_VERSION 2
+//
+// * `1` — part I (2D).
+// * `2` — part II (3D), phase 14. Additive: no part I signature changed.
+// * `3` — part III (`GiochiFrameStats`), phase 18. Additive as well, so a consumer
+//   written against `1` or `2` keeps working; the contract asks callers to accept
+//   `giochi_abi_version() >= 1` for exactly this reason.
+#define GIOCHI_ABI_VERSION 3
 
 // Largest asset the loader accepts, in bytes (64 MiB).
 #define GIOCHI_MAX_ASSET_SIZE ((64 * 1024) * 1024)
@@ -150,6 +160,73 @@ typedef struct GiochiEngineConfig {
 // typedef uint64_t GiochiScene;
 // ```
 typedef uint64_t GiochiScene;
+
+// Per-frame timings and counters, as reported by `giochi_engine_frame_stats`.
+//
+// A *projection* of the Rust `FrameStats`, not the whole type: the C surface carries
+// what a host needs to show or log a frame budget, and stays narrower than the Rust
+// struct so that adding an internal measurement does not change the ABI. The
+// conversion is field-by-field in [`From`], so a new Rust field is a compile error
+// here until someone decides whether it belongs in the ABI — which is the point.
+//
+// Durations are whole nanoseconds. With the `profiling` feature disabled at build
+// time every value is zero: the engine reports the frame it measured, and without the
+// feature it measures nothing (ADR-042).
+//
+// # C ABI
+//
+// ```c
+// typedef struct GiochiFrameStats {
+//     uint64_t frame_time_ns;
+//     uint64_t cpu_time_ns;
+//     uint64_t update_ns;
+//     uint64_t render2d_ns;
+//     uint64_t render3d_ns;
+//     uint64_t audio_ns;
+//     float    fps;
+//     uint32_t draw_calls;
+//     uint32_t sprites_drawn;
+//     uint32_t meshes_drawn;
+//     uint32_t frames;
+//     uint64_t vertices_uploaded;
+//     uint64_t bytes_uploaded;
+//     uint32_t _reserved[8];
+// } GiochiFrameStats;
+// ```
+//
+// Size: 120 bytes, alignment: 8 bytes. Asserted at compile time in this crate and by
+// `_Static_assert` in `tests/c_smoke.c`: a C consumer allocates the struct itself,
+// which is the whole reason its layout is in the header.
+typedef struct GiochiFrameStats {
+    // Wall-clock frame period, in nanoseconds.
+    uint64_t frame_time_ns;
+    // Time the engine spent computing the frame, in nanoseconds.
+    uint64_t cpu_time_ns;
+    // Time spent in the `"update"` scope, in nanoseconds.
+    uint64_t update_ns;
+    // Time spent in 2D rendering, in nanoseconds.
+    uint64_t render2d_ns;
+    // Time spent in 3D rendering, in nanoseconds.
+    uint64_t render3d_ns;
+    // Time spent mixing audio, in nanoseconds.
+    uint64_t audio_ns;
+    // Smoothed frames per second, as the overlay shows it.
+    float fps;
+    // Backend draw calls issued in the frame.
+    uint32_t draw_calls;
+    // Sprites submitted to the backend in the frame.
+    uint32_t sprites_drawn;
+    // Meshes submitted to the backend in the frame.
+    uint32_t meshes_drawn;
+    // Frames measured so far in the current run.
+    uint32_t frames;
+    // Vertices uploaded to the GPU in the frame.
+    uint64_t vertices_uploaded;
+    // Bytes uploaded to the GPU in the frame.
+    uint64_t bytes_uploaded;
+    // Reserved for future ABI-compatible fields. Must be zero.
+    uint32_t _reserved[8];
+} GiochiFrameStats;
 
 // Descriptor for creating the main window.
 //
@@ -797,6 +874,24 @@ uint64_t giochi_engine_steps(void);
 // float giochi_engine_timestep(void);
 // ```
 float giochi_engine_timestep(void);
+
+// Copies the statistics of the most recently completed frame into `out_stats`.
+//
+// Every duration is in nanoseconds. `out_stats` is caller-owned and is only written on
+// success; a NULL pointer is `GIOCHI_ERROR_INVALID_ARGUMENT`.
+//
+// Every field is zero unless the library was built with the `profiling` feature
+// (ADR-042); the call still succeeds, because "no frame has been measured" is a
+// state, not an error. `out_stats->frames` distinguishes them: it counts the frames
+// measured so far, so a host can tell a zero-length frame from a build that is not
+// measuring.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_engine_frame_stats(GiochiFrameStats* out_stats);
+// ```
+int32_t giochi_engine_frame_stats(struct GiochiFrameStats *out_stats);
 
 // NUL-terminated name of the video driver actually in use (`"KMSDRM"`,
 // `"x11"`, `"dummy"`, …).

@@ -46,7 +46,38 @@ glow = "0.14"
 bytemuck = { version = "1", features = ["derive"] }
 tobj = "4"
 
+# Phase 18a. Shipping build for the consoles.
+#
+# `lto = "fat"` rather than `"thin"`: the console payload is a handful of binaries
+# linked once per release, so the extra link time is paid a few times and never by a
+# player, while whole-program optimisation across the engine/capi boundary is where the
+# wins are (everything goes through `#[repr(C)]` structs and `catch_unwind` guards, all
+# of which thin LTO tends to leave as opaque calls).
+#
+# `strip = "symbols"` is free size and free time: the console deployment copies a
+# binary, runs it, and reads its output. Symbols were never part of the artifact.
+#
+# `panic = "unwind"` is the default and MUST stay that way. `giochi-engine-capi` wraps
+# every exported function in `catch_unwind` so that a Rust panic becomes
+# `GIOCHI_ERROR_INTERNAL` instead of tearing down the host application — that is a
+# documented guarantee in `docs/C_ABI_CONTRACT.md`, not an implementation detail, and
+# `abort` would silently turn every such bug into a process kill inside a game that
+# embeds the engine. The plan allowed keeping `unwind` at a cost of roughly 5% of the
+# size; the measured cost is in `docs/PERF_LOG.md` under "After Phase 18".
 [profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+strip = "symbols"
+
+# Phase 18b. Benchmarks are compiled like the shipping build (`lto`, one codegen unit,
+# `-O3`) but keep debug info on purpose: `cargo bench` profiles are only actionable if
+# the profiler can resolve the frames, and a stripped benchmark measures a binary
+# nobody ships. `lto = "thin"` keeps criterion's edit-benchmark loop affordable — the
+# benchmark numbers are not the artifact, so the last percent of codegen quality is not
+# worth minutes per iteration.
+[profile.bench]
 lto = "thin"
 codegen-units = 1
 opt-level = 3
+debug = true

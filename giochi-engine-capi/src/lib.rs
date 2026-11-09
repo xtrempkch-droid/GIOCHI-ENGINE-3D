@@ -75,8 +75,8 @@ mod state;
 mod version;
 
 pub use abi_types::{
-    GiochiEngineConfig, GiochiSceneCallbacks, GIOCHI_ABI_VERSION, GIOCHI_ERROR_ASSET,
-    GIOCHI_ERROR_AUDIO, GIOCHI_ERROR_INTERNAL, GIOCHI_ERROR_INVALID_ARGUMENT,
+    GiochiEngineConfig, GiochiFrameStats, GiochiSceneCallbacks, GIOCHI_ABI_VERSION,
+    GIOCHI_ERROR_ASSET, GIOCHI_ERROR_AUDIO, GIOCHI_ERROR_INTERNAL, GIOCHI_ERROR_INVALID_ARGUMENT,
     GIOCHI_ERROR_INVALID_HANDLE, GIOCHI_ERROR_NOT_INITIALIZED, GIOCHI_ERROR_OK,
     GIOCHI_ERROR_PLATFORM, GIOCHI_ERROR_RENDER, GIOCHI_ERROR_SCENE, GIOCHI_ERROR_UNSUPPORTED,
     GIOCHI_MAX_ASSET_SIZE, GIOCHI_SHADER_FLAT, GIOCHI_SHADER_PHONG, GIOCHI_SHADER_TEXTURED,
@@ -89,10 +89,10 @@ pub use audio::{
     giochi_sound_play,
 };
 pub use engine::{
-    giochi_engine_elapsed, giochi_engine_frames, giochi_engine_init, giochi_engine_is_running,
-    giochi_engine_request_quit, giochi_engine_reset_quit, giochi_engine_run,
-    giochi_engine_run_scene, giochi_engine_shutdown, giochi_engine_step, giochi_engine_steps,
-    giochi_engine_timestep, giochi_engine_video_driver,
+    giochi_engine_elapsed, giochi_engine_frame_stats, giochi_engine_frames, giochi_engine_init,
+    giochi_engine_is_running, giochi_engine_request_quit, giochi_engine_reset_quit,
+    giochi_engine_run, giochi_engine_run_scene, giochi_engine_shutdown, giochi_engine_step,
+    giochi_engine_steps, giochi_engine_timestep, giochi_engine_video_driver,
 };
 pub use input::{
     giochi_gamepad_axis, giochi_gamepad_button_down, giochi_gamepad_connected,
@@ -138,8 +138,10 @@ mod tests {
 
     #[test]
     fn abi_version_matches_contract() {
-        assert_eq!(giochi_abi_version(), 2);
-        assert_eq!(GIOCHI_ABI_VERSION, 2);
+        // The number `docs/C_ABI_CONTRACT.md` names as the current part. Bump it with
+        // the contract, never to make a test pass.
+        assert_eq!(GIOCHI_ABI_VERSION, 3);
+        assert_eq!(giochi_abi_version(), GIOCHI_ABI_VERSION);
     }
 
     #[test]

@@ -18,6 +18,18 @@
 #   2. A sysroot from the target device or vendor SDK, pointed at with
 #        CROSS_SYSROOT=/path/to/sysroot scripts/build-aarch64.sh
 #
+# The build is compiled for the console's own core, not for a baseline ARMv8-A. Which
+# core is `GIOCHI_TARGET_CPU`, defaulting to the PX30's Cortex-A35; see the table in
+# docs/CROSS_COMPILE.md for the other boards, and pass it for anything else:
+#
+#   GIOCHI_TARGET_CPU=cortex-a72 scripts/build-aarch64.sh --release
+#
+# This has to be done here rather than only in `.cargo/config.toml`: cargo ignores the
+# `rustflags` in that file as soon as `RUSTFLAGS` is set in the environment, which this
+# script does below in order to add the sysroot to the link search path. A phase-18
+# build was verified to be compiling for generic ARMv8-A for exactly that reason -- the
+# flags were in the config file, the script had hidden them, and nothing failed.
+#
 # Usage:
 #   scripts/build-aarch64.sh             # debug
 #   scripts/build-aarch64.sh --release   # release
@@ -28,6 +40,25 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 target=aarch64-unknown-linux-gnu
+
+# Code generation for the console CPU. `native` cannot work in a cross build: the
+# compiler runs on the host, so it would describe the host.
+GIOCHI_TARGET_CPU="${GIOCHI_TARGET_CPU:-cortex-a35}"
+case "$GIOCHI_TARGET_CPU" in
+    cortex-a35 | cortex-a53 | cortex-a55 | cortex-a72 | cortex-a76 | cortex-a78)
+        # ARMv8-A cores whose vendor builds ship the optional CRC and crypto
+        # instructions -- the PX30 reports `aes pmull sha1 sha2 crc32` in /proc/cpuinfo.
+        # LSE atomics are deliberately absent: they are ARMv8.1 and the A35 is ARMv8.0-A,
+        # so `+lse` produces instructions the core cannot decode. See
+        # docs/CROSS_COMPILE.md.
+        GIOCHI_TARGET_FEATURES="${GIOCHI_TARGET_FEATURES:-+crc,+aes,+sha2}"
+        ;;
+    *)
+        # Anything unknown gets no target features: a wrong `+feature` is a SIGILL on a
+        # device nobody is watching, and a missed optimisation is merely slower.
+        GIOCHI_TARGET_FEATURES="${GIOCHI_TARGET_FEATURES:-}"
+        ;;
+esac
 satellites=(libSDL2_image.so libSDL2_mixer.so libSDL2_ttf.so)
 
 die() {
@@ -90,9 +121,18 @@ fi
 
 export CMAKE_TOOLCHAIN_FILE_aarch64_unknown_linux_gnu="$repo_root/cmake/aarch64-linux-toolchain.cmake"
 
+# Always set, so `.cargo/config.toml` cannot be the thing that decides whether the
+# console build is optimised for the console. The CPU flags are repeated here rather
+# than left to the config file, which cargo ignores while this variable is set.
+target_rustflags="-C target-cpu=$GIOCHI_TARGET_CPU"
+if [[ -n "$GIOCHI_TARGET_FEATURES" ]]; then
+    target_rustflags="$target_rustflags -C target-feature=$GIOCHI_TARGET_FEATURES"
+fi
+export RUSTFLAGS="${RUSTFLAGS:-} $target_rustflags"
+
 # A plain sysroot is not in gcc's default search path; a multiarch directory is.
 if [[ -n "${CROSS_SYSROOT:-}" ]]; then
-    export RUSTFLAGS="${RUSTFLAGS:-} -Lnative=$lib_dir"
+    export RUSTFLAGS="$RUSTFLAGS -Lnative=$lib_dir"
 
     # SDL2's CMake probes X11, Wayland, EGL, PulseAudio and sndio through
     # pkg-config, which knows nothing about CMAKE_FIND_ROOT_PATH. Left alone it
@@ -105,6 +145,7 @@ if [[ -n "${CROSS_SYSROOT:-}" ]]; then
 fi
 
 echo "==> target:      $target"
+echo "==> cpu:         $GIOCHI_TARGET_CPU ${GIOCHI_TARGET_FEATURES:-(no extra target features)}"
 echo "==> satellites:  $lib_dir"
 echo "==> profile:     $([[ " $* " == *" --release "* ]] && echo release || echo debug)"
 

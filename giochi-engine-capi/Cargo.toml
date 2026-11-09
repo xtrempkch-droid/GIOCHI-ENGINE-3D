@@ -22,3 +22,12 @@ giochi-engine = { path = "../giochi-engine", version = "0.2.2" }
 # that wants both link two things and keep two versions in step.
 giochi-engine-3d = { path = "../giochi-engine-3d", version = "0.2.2" }
 log = { workspace = true }
+
+[features]
+# Phase 18c: makes `giochi_engine_frame_stats` report real measurements instead of
+# zeros. Off by default for the same reason it is off in `giochi-engine` (ADR-042) --
+# the counters cost a little in the hot path and most hosts do not read them.
+#
+#   cargo build -p giochi-engine-capi --features profiling
+#   ./scripts/ffi-smoke.sh            # honours GIOCHI_CAPI_FEATURES, see the script
+profiling = ["giochi-engine/profiling"]

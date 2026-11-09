@@ -457,7 +457,181 @@ stops adding latency of its own.
 
 ## After Phase 18 (ARM64 flags + benchmark CI)
 
-To be filled when phase 18 lands.
+Date: 2026-11-08 | Build: release | vsync: off on the console, uncapped on x86_64
+
+Phase 18 has four parts — compile flags, a benchmark suite, a regression gate in CI and
+a C ABI v3 — and only the first is expected to move a number. It moved exactly one, and
+the honest result is that it moved **size, not speed**.
+
+### What the flags do, and one the plan got wrong
+
+`-C target-cpu=native` was rejected outright. Nothing about it can work in a cross
+build: cargo runs the compiler on the host, and a host is not a PX30. The core has to be
+named, and the PX30's core is a **Cortex-A35** (`CPU part 0xd04` in `/proc/cpuinfo`), not
+the `cortex-a53` the plan suggested. This toolchain has a model for it, so
+`target-cpu=cortex-a35` is what both `.cargo/config.toml` and `scripts/build-aarch64.sh`
+now use.
+
+The plan also proposed `-C target-feature=+lse,+crc,+crypto`. Two of those are right and
+one would have shipped a broken binary:
+
+```text
+$ grep Features /proc/cpuinfo
+Features : fp asimd evtstrm aes pmull sha1 sha2 crc32 cpuid
+```
+
+`crc32`, `aes`, `pmull`, `sha1` and `sha2` are present, so `+crc`, `+aes` and `+sha2` are real
+instructions on this part. Those three are also the spellings rustc accepts: it warns
+that `crypto` is "unknown and unstable", so the umbrella name from the plan is replaced
+by the individual stable features it stands for. **`atomics` is absent**, and LSE atomics are an ARMv8.1
+feature while the Cortex-A35 is ARMv8.0-A: `+lse` emits `ldadd`/`swpal`-class
+instructions the core cannot decode, and the first atomic in the engine is an
+`Arc::clone` on the first frame. `+lse` is not applied, and the reason is written next to
+the flag in both places it would be added.
+
+This is the phase-17 lesson repeating: the plan named ANGLE and the hardware had EXT.
+Here the plan named a feature the CPU does not have. The flag list is now derived from
+the device's own `/proc/cpuinfo`, and `scripts/build-aarch64.sh` gives any unknown CPU
+**no** target features rather than a guess, because a wrong `+feature` is a SIGILL on a
+device nobody is watching and a missed optimisation is merely slower.
+
+There was a second, quieter version of the same trap. `.cargo/config.toml` had the flags
+and the cross build still compiled for baseline ARMv8-A, because
+`scripts/build-aarch64.sh` exports `RUSTFLAGS` (for the sysroot link path) and cargo
+**ignores the config file's `rustflags` entirely while `RUSTFLAGS` is set**. Nothing
+failed; the binary was simply never optimised for the console. The script now appends the
+CPU flags itself, and the fact was verified with a `RUSTC_WRAPPER` probe that logs the
+real compiler command line:
+
+```text
+$ grep -o "target-cpu=[a-z0-9-]*" /tmp/rustc-args.log | sort -u
+target-cpu=cortex-a35
+$ grep -o "target-feature=[^ ]*" /tmp/rustc-args.log | sort -u
+target-feature=+crc,+aes,+sha2
+```
+
+### `panic = "abort"` was rejected
+
+The plan offered `abort` for the release profile, and it is not usable here.
+`giochi-engine-capi` wraps every exported function in `catch_unwind`, and
+`docs/C_ABI_CONTRACT.md` §5 states as a guarantee that no Rust panic may cross the
+boundary — a panic becomes `GIOCHI_ERROR_INTERNAL`. `abort` removes the ability to catch,
+turning every such bug into a process kill inside whatever game embeds the engine. The
+plan allowed keeping `unwind` at a cost of roughly 5 % of size; that cost is included in
+the numbers below, in exchange for keeping a documented guarantee.
+
+### Binary size, and where it came from
+
+x86_64, `cargo build --release --workspace`:
+
+| Binary | Before (thin LTO, symbols) | After (fat LTO, stripped) | Δ |
+| --- | --- | --- | --- |
+| `mini_fps` | 2 073 496 B | 1 574 288 B | **−24.1 %** |
+| `profiler_demo` | 719 648 B | 487 480 B | **−32.3 %** |
+| `giochi-demo` | 2 909 960 B | 2 300 368 B | **−20.9 %** |
+| `libgiochi.so` | (not previously built) | 812 304 B | — |
+
+ARM64 (`aarch64-unknown-linux-gnu`, `mini_fps`), decomposed so the two mechanisms stay
+attributable:
+
+| Step | Size | Share |
+| --- | --- | --- |
+| Before | 2 024 560 B | — |
+| `strip = "symbols"` only | 1 512 432 B | **−25.3 %** |
+| `+ lto = "fat"`, `cortex-a35` | 1 381 360 B | **−31.8 % total** |
+
+The remaining 8.7 % is code, not symbols: `.text` falls 1 414 302 → 1 323 066 bytes
+(−6.5 %). Stripping is thus most of the win, and stripping is free — the console copies a
+binary and runs it, and never read a symbol table.
+
+`strip = "symbols"` was verified not to break the C ABI: `--strip-all` removes `.symtab`
+but the dynamic symbol table survives, and all 74 exported `giochi_*` functions are still
+resolvable from the stripped `libgiochi.so` via `nm -D`. The four FFI smoke consumers
+pass against a stripped build.
+
+### Speed: measured, and unchanged
+
+Both changes were benchmarked head-to-head against the previous profile, built from the
+same source, interleaved on the same machine to cancel out the load it was under (a
+concurrent image build held the 12-core host at load ~12–18 for the whole session).
+
+x86_64, `mini_fps --instanced`, 100 cubes, `SDL_VIDEODRIVER=offscreen`:
+
+| Run | old profile | new profile |
+| --- | --- | --- |
+| 1 | 14 378 | 15 069 |
+| 2 | 15 626 | 10 689 |
+| 3 | 15 087 | 15 149 |
+| 4 | 15 072 | 14 884 |
+| 5 | 14 767 | 14 613 |
+| **median** | **15 072** | **14 884** |
+
+A 1.3 % difference against a spread of 10 689–15 626 between two runs of the same binary:
+that is noise, not a regression. Only LTO and stripping changed on x86_64 — no
+`target-cpu` was set there — and neither can change how many instructions the frame
+needs.
+
+A cleaner scalar, because it excludes the sprite and GL work entirely: the empty-frame
+cost that `tests/perf_regression.rs` prints, same two binaries, interleaved:
+
+| Run | old profile | new profile |
+| --- | --- | --- |
+| 1 | 267.9 µs | 271.2 µs |
+| 2 | 267.3 µs | 263.3 µs |
+| 3 | 271.4 µs | 262.8 µs |
+| 4 | 258.5 µs | 258.8 µs |
+| 5 | 274.7 µs | 261.3 µs |
+| **median** | **267.9 µs** | **262.8 µs** |
+
+−1.9 %, in the same direction in 4 runs of 5 but inside the spread. The frame is ~249 µs
+of SDL software `present`; the engine's own share is ~5 µs, and that is all LTO could
+have touched.
+
+PX30, KMSDRM 640x480, `mini_fps --loop --cubes 2000` (the CPU-bound arm: 2000 separate
+draw calls, ~21 fps, so the panel's 60 Hz pacing does not hide anything):
+
+| Run | old profile | new profile |
+| --- | --- | --- |
+| 1 | 21.8 fps | 21.8 fps |
+| 2 | 21.7 fps | 21.6 fps |
+| 3 | 21.7 fps | 21.4 fps |
+| **median** | **21.7 fps** | **21.6 fps** |
+
+Unchanged, and that is the expected result rather than a disappointing one. This frame is
+limited by the Mali-G31/Panfrost driver draining 2000 draw calls, not by the quality of
+the A53-class integer code — which is exactly what phase 16 and 17 measured too. The
+`+crc`/`+aes`/`+sha2` features cannot help at all: the engine does no CRC and no cryptography,
+so they are enabled because they describe the part honestly, not because they pay.
+
+**The phase-18 result is a 24–32 % smaller binary at unchanged speed.** Smaller is not
+cosmetic on this device: the payload is written to a small rootfs over a slow link, and
+`profiler_demo` losing a third of its size is a third of that transfer.
+
+### The regression gate found a real allocation
+
+`tests/perf_regression.rs` counts allocations with a wrapping global allocator, and its
+first run failed: a steady-state frame with 512 batched sprites allocated **exactly once
+per frame**, and an empty frame allocated zero. The culprit was
+`SpriteBatch::flush_runs`, which returned `Vec<RunView>` — `collect()` on every flush,
+since phase 16. It now returns an iterator and collects nothing, with `flush_batch`
+destructuring `self` so the iterator over `batch` can live while the body borrows
+`textures` and `canvas`. Both the 512-sprite and the empty frame are now at 0
+allocations, which is the gate's recorded baseline.
+
+The time cost of that allocation was never measurable — it is a few dozen bytes once a
+frame — and it is recorded here as what it is: a correctness-shaped improvement found by
+a gate, not a performance win.
+
+### What phase 18 establishes
+
+| Claim | Status |
+| --- | --- |
+| Console builds are compiled for the console's core | **Met.** `cortex-a35 +crc,+aes,+sha2`, proven from the compiler command line, and a SIGILL-free run on the PX30 |
+| Release payload is materially smaller | **Met.** −24.1 % x86_64 `mini_fps`, −31.8 % ARM64, −32.3 % `profiler_demo` |
+| No performance regression from the flags | **Met.** unchanged within noise on both machines, 5-run interleaved medians recorded above |
+| Per-frame cost has a gate that cannot flake | **Met.** 0 allocations per frame, `ceil(N/1024)` draw calls, run in CI with and without `profiling` |
+| C ABI v3 reports frame statistics | **Met.** `giochi_engine_frame_stats` + `GiochiFrameStats`, additive; the four v1/v2 consumers pass unchanged |
+
 
 ## ARM64 validation — **measured on the PX30**
 
@@ -489,8 +663,10 @@ SDL_VIDEODRIVER=kmsdrm /tmp/profiler_demo --width 640 --height 480 \
       profiler and has no per-frame stats; it is recorded as a sanity number, not a
       phase-16 comparison point.
 
-The phase-18 build matrix must include `cortex-a35` (PX30) in addition to
-`cortex-a53/a72/a76`.
+The phase-18 build matrix was to include `cortex-a35` (PX30) in addition to
+`cortex-a53/a72/a76`. It does — `cortex-a35` is the default and the others are in the
+table in `docs/CROSS_COMPILE.md`, selected with `GIOCHI_TARGET_CPU`. See "After Phase 18"
+above for the measured result.
 
 ## Conclusions
 

@@ -37,14 +37,23 @@ extensão v2.1). Gates 2D revalidados a cada fase 3D.
       **103 → 4 draw calls**, campo 100 → **1**; x86_64 **5.87x** de FPS e
       **12.19x** no benchmark a 100 cubos; PX30 segura 60 FPS com 2000 cubos onde o
       loop faz 21.9; upscaling a 0.75 no PX30 **+61.3 %**)
-- [ ] Fase 18 — Flags ARM64 + CI de performance + C ABI v3
+- [x] Fase 18 — Flags ARM64 + CI de performance + C ABI v3 (binário **−24.1 %** no
+      x86_64 e **−31.8 %** no ARM64 com velocidade inalterada — medido, não suposto;
+      `cortex-a35 +crc,+aes,+sha2` provado na linha de comando do compilador e sem SIGILL
+      no PX30; gate de regressão com **0 alocações por frame** e
+      `ceil(N/1024)` draw calls; `GIOCHI_ABI_VERSION 3` aditivo, com os quatro
+      consumidores C/Python das versões 1 e 2 passando sem alteração)
 
-**Próxima fase: 18 — Flags ARM64 + Benchmark Suite + CI de Performance + C ABI v3.**
-Duas conclusões que a fase 18 herda: (a) o painel KMSDRM fixa tudo em 60 FPS, portanto
-os critérios de FPS no aparelho têm de ser medidos com uma cena pesada o suficiente para
-sair do vblank, ou em `render2d`/CPU; e (b) `GIOCHI_GL_VERSION=3` ainda não foi testado
-no PX30 — a fase 17 mediu tudo em GLES 2.0 com `GL_EXT_instanced_arrays`, que é o que o
-driver oferece por omissão.
+**Próxima fase: nenhuma planeada.** A extensão de performance (fases 15–18) está
+concluída. O que fica aberto, e é honesto dizê-lo:
+
+- `GIOCHI_GL_VERSION=3` nunca foi testado no PX30 — a fase 17 mediu tudo em GLES 2.0 com
+  `GL_EXT_instanced_arrays`, que é o que o driver oferece por omissão.
+- O bug de overlay em `mini_fps` (o renderer 3D não tem caminho 2D para desenhar texto)
+  continua aberto.
+- A comparação de benchmarks no CI corre contra `main` no mesmo runner, mas nunca foi
+  observada a falhar num PR real: a primeira vez que ela reprovar algo é a primeira vez
+  que ela prova o que vale.
 
 
 ## Gates validados
@@ -192,6 +201,87 @@ overlay visível, medido por CPU do processo (`/usr/bin/time`), dentro dos 2 %.
 - A overlay não aparece em `mini_fps` (o renderer 3D não tem caminho 2D para desenhar
   texto). Os contadores 3D estão medidos e expostos; a overlay 3D fica para quando
   houver um caminho de UI GLES.
+
+## Fase 18 — Flags ARM64 + Benchmark Suite + CI de Performance + C ABI v3
+Data: 2026-11-08
+
+**Escopo:** compilar para o CPU do console, medir o custo por frame, criar um gate que
+não possa falhar por ruído, e expor as estatísticas de frame ao C. A API existente não
+muda (R12); a ABI C cresce de forma aditiva.
+
+### O que o plano pedia e o que o hardware permite
+
+Duas sugestões do plano não eram utilizáveis como escritas:
+
+- **`-C target-cpu=native`** não pode funcionar num cross build: o cargo compila no host,
+  então "native" descreve a máquina de desenvolvimento. O núcleo tem de ser nomeado, e o
+  do PX30 é **Cortex-A35** (`CPU part 0xd04`), não o `cortex-a53` que o plano sugeria.
+- **`+lse`** foi rejeitado. `grep Features /proc/cpuinfo` no aparelho devolve
+  `fp asimd evtstrm aes pmull sha1 sha2 crc32 cpuid`: há `crc32`, `aes` e `sha2`, mas
+  **não há `atomics`**. LSE é ARMv8.1 e o A35 é ARMv8.0-A, portanto `+lse` emitiria
+  instruções que o núcleo não decodifica — o primeiro `Arc::clone` do primeiro frame
+  seria SIGILL. `+crc`, `+aes` e `+sha2` ficam; `+lse` não, e o motivo está escrito ao lado da
+  flag nos dois lugares onde ela seria adicionada.
+
+Houve uma segunda armadilha, mais silenciosa: `.cargo/config.toml` tinha as flags e o
+build continuava a sair para ARMv8-A genérico, porque `scripts/build-aarch64.sh` exporta
+`RUSTFLAGS` (para o caminho de link do sysroot) e o cargo **ignora completamente** o
+`rustflags` do ficheiro de configuração quando essa variável existe. Nada falhava. O
+script passou a acrescentar as flags ele próprio, e o facto foi verificado com um
+`RUSTC_WRAPPER` que registra a linha de comando real do compilador.
+
+`panic = "abort"` também foi rejeitado: `docs/C_ABI_CONTRACT.md` garante que nenhum pânico
+Rust cruza a fronteira (`catch_unwind` → `GIOCHI_ERROR_INTERNAL`), e `abort` destruiria
+essa garantia para poupar ~5 % de tamanho.
+
+### Resultado medido
+
+| Medida | x86_64 | ARM64 (PX30) |
+|---|---|---|
+| `mini_fps` | 2 073 496 → **1 574 288 B** (−24.1 %) | 2 024 560 → **1 381 360 B** (−31.8 %) |
+| `profiler_demo` | 719 648 → **487 480 B** (−32.3 %) | — |
+| `giochi-demo` | 2 909 960 → **2 300 368 B** (−20.9 %) | — |
+| FPS, `--instanced` 100 cubos | 15 072 → 14 884 (mediana de 5, dentro do ruído) | — |
+| Frame vazio (custo do engine) | 267.9 → 262.8 µs (−1.9 %, no ruído) | — |
+| FPS, `--loop --cubes 2000` | — | 21.7 → 21.6 (inalterado) |
+
+**A conclusão da fase é tamanho, não velocidade.** No ARM64 o `strip` sozinho vale
+−25.3 % e o LTO/codegen os outros 8.7 % (`.text` 1 414 302 → 1 323 066 bytes). A
+velocidade não mudou em nenhuma das duas máquinas, o que é o resultado esperado: o frame
+do PX30 é limitado pelo driver a escoar draw calls, não pela qualidade do código inteiro,
+e `+crc`/`+aes`/`+sha2` não têm onde render — o engine não faz CRC nem criptografia.
+
+O `strip = "symbols"` foi verificado contra a ABI C em vez de assumido: o `.symtab`
+desaparece mas o `.dynsym` fica, e as 74 funções `giochi_*` continuam resolúveis
+(`nm -D`).
+
+### O gate de regressão encontrou uma alocação real
+
+`tests/perf_regression.rs` conta alocações com um alocador global embrulhado, e falhou na
+primeira execução: um frame em regime com 512 sprites batched alocava **exatamente uma vez
+por frame**. A causa era `SpriteBatch::flush_runs`, que devolvia `Vec<RunView>` — um
+`collect()` a cada flush, desde a fase 16. Passou a devolver um iterador, e `flush_batch`
+desestrutura `self` para que o iterador sobre `batch` viva enquanto o corpo empresta
+`textures` e `canvas`. O frame vazio e o de 512 sprites estão agora em 0 alocações.
+
+O custo em tempo dessa alocação nunca foi mensurável; fica registado como o que é: uma
+melhoria encontrada por um gate, não uma vitória de performance.
+
+### CI e ABI
+
+- `.github/workflows/perf.yml`: job bloqueante com o gate determinístico (alocações e
+  draw calls, com e sem a feature `profiling`) e um job que constrói e mede `main` e o
+  branch **no mesmo runner, minutos um do outro**, comparando com
+  `scripts/perf-compare.py` a 10 %. Medir contra números gravados noutra máquina é como
+  a CI de benchmark ganha reputação de mentir.
+- `GIOCHI_ABI_VERSION 2 → 3`: `giochi_engine_frame_stats` + `GiochiFrameStats` (120
+  bytes, alinhamento 8). É uma **projeção** do `FrameStats` Rust, com um `From` explícito
+  que falha a compilar quando o tipo Rust ganha um campo. Aditivo: `c_smoke.c` continua a
+  testar `>= 1`, e `c_smoke_3d.c`/`python_smoke_3d.py` passaram de `== 2` para `>= 2` e
+  nada mais — que é precisamente a prova de compatibilidade que a fase devia dar.
+
+Ver `docs/PERF_LOG.md` (secção "After Phase 18"), ADR-045 e
+`docs/CROSS_COMPILE.md` (tabela `GIOCHI_TARGET_CPU`).
 
 ## Fase 17 — Instancing 3D + Static Batching + Upscaling
 Data: 2026-11-08

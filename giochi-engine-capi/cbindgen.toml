@@ -24,7 +24,7 @@ documentation_length = "full"
 usize_is_size_t = true
 
 header = """/*
- * GIOCHI-ENGINE C ABI, version 2.
+ * GIOCHI-ENGINE C ABI, version 3.
  *
  * Link against libgiochi.so (or libgiochi.a) and call giochi_engine_init() before
  * anything else. Every fallible function returns 0 on success and a negative code
@@ -41,6 +41,10 @@ header = """/*
  * Version 2 adds part II (3D) in docs/C_ABI_CONTRACT.md sections 8-12. Nothing in part I
  * changed, so a consumer written against version 1 keeps working; it should accept
  * giochi_abi_version() >= 1 rather than == 1.
+ *
+ * Version 3 adds part III: giochi_engine_frame_stats() and GiochiFrameStats, section 13.
+ * It is additive in the same way, so a version 1 or 2 consumer compiles and runs
+ * unchanged.
  *
  * The 3D engine is an opaque pointer the caller owns (ADR-039), unlike the 2D singleton.
  * giochi_mesh_* and giochi_shader_* take no engine: they act on the most recently created

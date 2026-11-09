@@ -381,7 +381,33 @@ it is not a crash either. `giochi_engine3d_destroy` releases the GL context and 
 window; handles you made become meaningless at that point, so free them first if you want
 the engine to report leaks — it logs a warning when objects outlive the context.
 
-## 10. Verification
+## 10. Part III: frame statistics (ABI version 3)
+
+Part III is one function and one struct, and it is purely additive:
+`giochi_abi_version()` returns `3`, and a program written against `1` or `2` keeps
+working unchanged. The contract is part III of
+[C_ABI_CONTRACT.md](C_ABI_CONTRACT.md); this is the short version.
+
+```c
+GiochiFrameStats stats;
+if (giochi_engine_frame_stats(&stats) == GIOCHI_OK) {
+    printf("%.1f fps, %u draw calls, %.2f ms\n",
+           stats.fps, stats.draw_calls, stats.frame_time_ns / 1e6);
+}
+```
+
+The struct is **zeroed unless the library was built with the `profiling` feature**
+(ADR-042). `stats.frames` tells the two cases apart: a measuring build counts frames, a
+non-measuring one leaves it at zero. The call itself succeeds either way — "nothing has
+been measured" is a state, not a failure — and it writes `out_stats` only on success, so
+a failed call cannot half-update a struct that is already being displayed.
+
+Durations are whole nanoseconds. The struct is a *projection* of the Rust `FrameStats`,
+not the same type: the C surface stays narrower so that an internal measurement added to
+the engine does not widen the ABI. It is 120 bytes, alignment 8, and a C program
+allocates it itself — `c_smoke.c` and `python_smoke.py` assert the size and the offsets.
+
+## 11. Verification
 
 ```bash
 cargo test -p giochi-engine-capi            # unit tests + rust_ffi.rs + rust_ffi_3d.rs

@@ -1,5 +1,7 @@
 /*
- * C smoke test for part II of the GIOCHI-ENGINE C ABI (3D, GIOCHI_ABI_VERSION 2).
+ * C smoke test for part II of the GIOCHI-ENGINE C ABI (3D). Written against
+ * GIOCHI_ABI_VERSION 2 and run against whatever the library reports, so it also proves
+ * that part III (v3) did not break a v2 consumer.
  *
  * A real C consumer: it includes only `giochi.h`, links against libgiochi, creates a 3D
  * engine, draws a lit cube for a few frames, and tears everything down. Built and run by
@@ -96,12 +98,14 @@ static GiochiColor3D color3d(float r, float g, float b, float a)
 int main(void)
 {
     /* ---- version ---------------------------------------------------------- */
-    /* Part I consumers were written against 1 and must keep working: the rule is "at
-     * least what I was built for", which is why this is not an equality against the
-     * number in the header. */
-    CHECK(giochi_abi_version() >= 1);
+    /* This file was written against part II. The rule is "at least what I was built
+     * for", which is why it is an inequality: part III (frame statistics, ABI v3)
+     * shipped afterwards and must not break a consumer that predates it. The equality
+     * next to it is a different check -- that the header in the include path and the
+     * library being linked describe the same version. */
+    CHECK(giochi_abi_version() >= 2);
     CHECK(giochi_abi_version() == GIOCHI_ABI_VERSION);
-    CHECK(GIOCHI_ABI_VERSION == 2);
+    CHECK(GIOCHI_ABI_VERSION >= 2);
     CHECK(giochi_engine_version() > 0);
 
     /* ---- everything before the engine exists ------------------------------ */

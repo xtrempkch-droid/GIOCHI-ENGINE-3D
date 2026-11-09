@@ -33,7 +33,7 @@ GIOCHI_SHADER_FLAT = 0
 GIOCHI_SHADER_TEXTURED = 1
 GIOCHI_SHADER_PHONG = 2
 
-GIOCHI_ABI_VERSION = 2
+GIOCHI_ABI_VERSION = 3
 SKIP_CODE = 77
 
 
@@ -203,8 +203,12 @@ def main() -> int:
 
     # ---- version ------------------------------------------------------------
     # The checklist in docs/C_ABI_CONTRACT.md §12 names this file for the version check.
-    check(lib.giochi_abi_version() == GIOCHI_ABI_VERSION, "abi version is 2")
-    check(GIOCHI_ABI_VERSION == 2, "the struct declarations match ABI 2")
+    # This file was written against part II (ABI 2); the inequality is the compatibility
+    # rule, so it keeps passing once a later part raises the number. The equality checks
+    # that these struct declarations describe the same version the library exports.
+    check(lib.giochi_abi_version() >= 2, "abi version is at least part II")
+    check(lib.giochi_abi_version() == GIOCHI_ABI_VERSION, "abi version matches the header")
+    check(GIOCHI_ABI_VERSION >= 2, "the struct declarations match ABI >= 2")
 
     # ---- the structs must be the size the header documents ------------------
     for name, size in [

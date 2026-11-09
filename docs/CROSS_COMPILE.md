@@ -200,6 +200,7 @@ A successful run ends with the artefact inspection:
 
 ```text
 ==> target:      aarch64-unknown-linux-gnu
+==> cpu:         cortex-a35 +crc,+aes,+sha2
 ==> satellites:  /usr/lib/aarch64-linux-gnu
 ==> profile:     release
 ...
@@ -211,6 +212,58 @@ aarch64 build OK.
 
 That assertion is deliberate: a mis-set linker can quietly produce host binaries
 when nothing imports the target architecture explicitly.
+
+## Choosing the CPU (`GIOCHI_TARGET_CPU`)
+
+The build is compiled for the console's core, not for baseline ARMv8-A.
+`-C target-cpu=native` **cannot** be used: cargo runs the compiler on the host, and
+during a cross build "native" describes the host, not the device. The core is named
+instead, and `GIOCHI_TARGET_CPU` selects it:
+
+```bash
+GIOCHI_TARGET_CPU=cortex-a72 scripts/build-aarch64.sh --release
+```
+
+If it is not set, it is `cortex-a35`. The value must be one rustc knows:
+
+```bash
+rustc --print target-cpus --target aarch64-unknown-linux-gnu | grep cortex-a
+```
+
+| Board / SoC | Core | `GIOCHI_TARGET_CPU` | Target features |
+| --- | --- | --- | --- |
+| Powkiddy X35H (Rockchip PX30 / RK3326) | 4× Cortex-A35 | `cortex-a35` (default) | `+crc,+aes,+sha2` |
+| Raspberry Pi 3 / many RK3328 boards | 4× Cortex-A53 | `cortex-a53` | `+crc,+aes,+sha2` |
+| Raspberry Pi 4 | 4× Cortex-A72 | `cortex-a72` | `+crc,+aes,+sha2` |
+| Raspberry Pi 5 | 4× Cortex-A76 | `cortex-a76` | `+crc,+aes,+sha2` |
+
+Two rules, both of which have already been broken once in this repository:
+
+**Take the feature list from the device, not from a datasheet or a plan.** Read it:
+
+```bash
+ssh root@device 'grep Features /proc/cpuinfo'
+```
+
+On the PX30 that is `fp asimd evtstrm aes pmull sha1 sha2 crc32 cpuid`. `crc32`, `aes`
+and `sha2` are there, so `+crc`, `+aes` and `+sha2` are real. **`atomics` is not**, and LSE
+atomics are ARMv8.1 while the A35 is ARMv8.0-A: `+lse` emits instructions the core
+cannot decode, so the binary dies with `SIGILL` on the first atomic — which in this
+engine is an `Arc::clone` on the first frame, not an exotic corner. An unknown CPU is
+given **no** target features by the script on purpose: a wrong `+feature` is a SIGILL
+on a device nobody is watching, while a missing one is merely slower.
+
+**`RUSTFLAGS` hides `.cargo/config.toml`.** Cargo ignores the `rustflags` table in
+`.cargo/config.toml` completely once `RUSTFLAGS` is set in the environment, and
+`scripts/build-aarch64.sh` sets it to add the sysroot to the link search path. That is
+why the CPU flags live in the script as well as in the config file, and why a build
+that looked correctly configured compiled for baseline ARMv8-A for a while without
+anything failing. To confirm what the compiler was actually told:
+
+```bash
+CROSS_SYSROOT=... RUSTC_WRAPPER=/tmp/probe.sh scripts/build-aarch64.sh --release
+grep -o 'target-cpu=[a-z0-9-]*' /tmp/probe.log | sort -u
+```
 
 ## KMSDRM in a cross build
 
