@@ -173,7 +173,7 @@ choice (bitmap overlay instead of egui/puffin) is ADR-042.
 ## 5. Rendering
 
 ```rust
-use giochi_engine::{Camera, Color, Rect, Sprite, Vec2};
+use giochi_engine::{Camera, Color, Rect, Sprite, TextureAtlas, Vec2};
 ```
 
 ### Screen-space primitives
@@ -187,6 +187,50 @@ renderer.present();
 
 `Rect::ZERO` as `src` means "the whole texture". A destination whose width or height
 rounds to zero is a no-op, not an error. Coordinates are physical pixels.
+
+### Batching and atlases
+
+`draw_texture` **queues** the quad and `present` draws it. Consecutive quads that share
+a texture become one `SDL_RenderGeometry` call, so a scene that draws 1000 sprites of one
+texture issues one draw call instead of 1000 — with no change to the call you already
+write. Order is never changed: SDL's 2D renderer composites in submission order and has
+no depth buffer, so the batch only merges neighbours (ADR-043).
+
+```rust
+for sprite in &scene.sprites {
+    renderer.draw_texture(sprite.texture, sprite.dst, Rect::ZERO)?;
+}
+// Nothing to do: `present` flushes. Call this if you want the work to happen now,
+// or before reading the target yourself.
+renderer.flush_batch();
+assert_eq!(renderer.sprite_batch().draw_calls(), 1);
+```
+
+Anything that reads or resets the target (`read_pixels`, `clear`) and every unbatched
+primitive (`draw_rect`, `draw_line`, `draw_texture_ex`, `draw_texture_immediate`)
+flush first, so a queued sprite is never drawn out of order or lost.
+
+An atlas puts many images in one texture, which is what turns a scene that alternates
+between sprites into one draw call:
+
+```rust
+let atlas = renderer.load_atlas(&["assets/player.png", "assets/coin.png"])?;
+let player = atlas.region("player").pixel_rect();      // region names are file stems
+let coin   = atlas.region("coin").pixel_rect();
+renderer.draw_texture(atlas.texture(), dst, player)?;
+
+// Generated content needs no file:
+let rgba = [255u8, 0, 0, 255].repeat(8 * 8);
+let atlas = TextureAtlas::from_rgba_images(&renderer, &[("red", 8, 8, &rgba)])?;
+```
+
+The packer uses a 1 px padded shelf layout, sorts by height, rounds the atlas up to a
+power of two and refuses a set that will not fit in 4096x4096 rather than loading
+partially.
+
+`set_batch_config(SpriteBatchConfig::new(initial, max))` changes the queue depth; the
+default of 1024 was chosen by measurement. A batch of 1 disables merging.
+`draw_texture_immediate` bypasses the queue with the pre-phase-16 `RenderCopy` path.
 
 ### Textures
 

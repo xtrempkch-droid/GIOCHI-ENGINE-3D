@@ -12,6 +12,8 @@ use crate::math::{Color, Rect, Vec2};
 use crate::perf::FrameCounters;
 use crate::platform::sdl::SdlContext;
 use crate::platform::window::Window;
+use crate::render::atlas::TextureAtlas;
+use crate::render::batch::{RunKind, SpriteBatch, SpriteBatchConfig};
 use crate::render::camera::Camera;
 use crate::render::sprite::Sprite;
 use crate::render::texture::{TextureHandle, TextureRegistry};
@@ -22,6 +24,12 @@ use crate::render::texture::{TextureHandle, TextureRegistry};
 /// only drawing primitives the engine has. `draw_rect` and `draw_texture` work in
 /// **screen** space; `draw_sprite` treats the sprite rectangle as **world** space
 /// and applies the current [`Camera`].
+///
+/// Textured draws are **batched**: consecutive sprites that share a texture become one
+/// backend call, flushed on [`RenderContext::present`], on any call that observes the
+/// target ([`RenderContext::read_pixels`]), and before an unbatched primitive so
+/// submission order is preserved. [`RenderContext::draw_texture`] keeps its signature.
+/// See ADR-043.
 ///
 /// Creating the context consumes the [`Window`], because SDL binds the renderer to
 /// its window; the context takes over the window-level operations it can provide
@@ -43,6 +51,9 @@ pub struct RenderContext {
     resources: ResourceManager,
     camera: Camera,
     counters: FrameCounters,
+    batch: SpriteBatch,
+    /// Window size cached for culling; refreshed by [`RenderContext::clear`].
+    window_size: (u32, u32),
     _context: Rc<SdlContext>,
     _reserved: [u32; 4],
 }
@@ -53,6 +64,7 @@ impl std::fmt::Debug for RenderContext {
             .field("size", &self.size())
             .field("textures", &self.textures.len())
             .field("camera", &self.camera)
+            .field("batch", &self.batch)
             .finish_non_exhaustive()
     }
 }
@@ -77,9 +89,75 @@ impl RenderContext {
             resources: ResourceManager::new(),
             camera: Camera::new(Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32)),
             counters: FrameCounters::new(),
+            batch: SpriteBatch::new(),
+            window_size: size,
             _context: context,
             _reserved: [0; 4],
         })
+    }
+
+    /// Loads `paths` into one packed texture. See [`TextureAtlas::from_images`].
+    ///
+    /// Flushes the pending batch first: the atlas allocates a texture, and every
+    /// queued sprite was submitted before that allocation.
+    pub fn load_atlas(&mut self, paths: &[&str]) -> Result<TextureAtlas, GiochiError> {
+        self.flush_batch();
+        TextureAtlas::from_images(self, paths)
+    }
+
+    /// Sends every queued sprite to the backend, one call per texture run.
+    ///
+    /// Called automatically by [`RenderContext::present`], by any method that reads the
+    /// target, and before an unbatched primitive. A host that wants to control when the
+    /// work happens can call it explicitly; the cost is the same either way.
+    pub fn flush_batch(&mut self) {
+        if self.batch.is_empty() {
+            return;
+        }
+
+        for run in self.batch.flush_runs() {
+            let handle = run.texture;
+            let Some(texture) = self.textures.resolve(handle) else {
+                // A texture destroyed with sprites still queued: those sprites were
+                // submitted first, but there is nothing left to draw them with.
+                log::debug!("batched draw skipped: texture {handle} is no longer alive");
+                continue;
+            };
+            let result = match run.kind {
+                // Nothing to merge in a run of one: the plain copy is cheaper than
+                // building and submitting four vertices for a single sprite.
+                RunKind::Single { dst, src } => match to_sdl_rect(dst) {
+                    Some(dst) => self.canvas.copy(&texture, to_sdl_rect(src), dst),
+                    // The run only exists because the quad had an area, so this is
+                    // unreachable; treated as "nothing to draw" rather than a panic.
+                    None => Ok(()),
+                },
+                RunKind::Geometry { vertices, indices } => {
+                    self.canvas
+                        .render_geometry(vertices, Some(&texture), indices)
+                }
+            };
+            match result {
+                Ok(()) => {
+                    #[cfg(feature = "profiling")]
+                    self.counters.record_draw_calls(1);
+                }
+                Err(err) => log::error!("batched draw failed: {err}"),
+            }
+        }
+
+        self.batch.clear();
+    }
+
+    /// The batch, for inspection (`len`, `draw_calls`) and configuration.
+    pub fn sprite_batch(&self) -> &SpriteBatch {
+        &self.batch
+    }
+
+    /// Replaces the batching configuration, flushing what is queued first.
+    pub fn set_batch_config(&mut self, config: SpriteBatchConfig) {
+        self.flush_batch();
+        self.batch = SpriteBatch::with_config(config);
     }
 
     /// The texture registry owned by this context.
@@ -143,6 +221,7 @@ impl RenderContext {
     /// cache needs the registry at the same time, and a caller outside the crate
     /// cannot borrow both halves of a `RenderContext`.
     pub fn clear_resource_cache(&mut self) {
+        self.flush_batch();
         self.resources.clear(&self.textures);
         debug_assert_eq!(self.resources.cached_texture_count(), 0);
     }
@@ -173,7 +252,11 @@ impl RenderContext {
     }
 
     /// Releases a texture. Returns `false` for an invalid or already-freed handle.
-    pub fn destroy_texture(&self, texture: TextureHandle) -> bool {
+    ///
+    /// Flushes the pending batch first: queued sprites were submitted before the
+    /// destroy and must not vanish because the handle went away.
+    pub fn destroy_texture(&mut self, texture: TextureHandle) -> bool {
+        self.flush_batch();
         self.textures.destroy_texture(texture)
     }
 
@@ -254,11 +337,17 @@ impl RenderContext {
     /// zoom. Called at construction and available for resize handling.
     pub fn fit_camera_to_window(&mut self) {
         let (width, height) = self.size();
+        self.window_size = (width, height);
         self.camera.viewport = Rect::new(0.0, 0.0, width as f32, height as f32);
     }
 
     /// Clears the whole target with `color`.
+    ///
+    /// Anything queued in the batch is drawn first, so a clear wipes what was
+    /// submitted before it and nothing that comes after.
     pub fn clear(&mut self, color: Color) {
+        self.flush_batch();
+        self.window_size = self.size();
         self.canvas.set_draw_color(to_sdl_color(color));
         self.canvas.clear();
     }
@@ -270,6 +359,7 @@ impl RenderContext {
         let Some(dst) = to_sdl_rect(rect) else {
             return;
         };
+        self.flush_batch();
         self.canvas.set_draw_color(to_sdl_color(color));
         if let Err(err) = self.canvas.fill_rect(dst) {
             log::error!("draw_rect failed: {err}");
@@ -286,6 +376,7 @@ impl RenderContext {
         let Some(dst) = to_sdl_rect(rect) else {
             return;
         };
+        self.flush_batch();
         self.canvas.set_draw_color(to_sdl_color(color));
         if let Err(err) = self.canvas.draw_rect(dst) {
             log::error!("stroke_rect failed: {err}");
@@ -305,6 +396,7 @@ impl RenderContext {
         if converted.is_empty() {
             return;
         }
+        self.flush_batch();
         self.canvas.set_draw_color(to_sdl_color(color));
         if let Err(err) = self.canvas.fill_rects(&converted) {
             log::error!("fill_rects failed: {err}");
@@ -319,6 +411,7 @@ impl RenderContext {
     /// 1-pixel rectangles serrates the diagonals twice (once by the rasteriser,
     /// once by the approximation).
     pub fn draw_line(&mut self, from: Vec2, to: Vec2, color: Color) {
+        self.flush_batch();
         self.canvas.set_draw_color(to_sdl_color(color));
         // `to_sdl_coord`, not `as i32`, so this path follows the same policy as every other
         // draw in this module. Rust's `as` is saturating, so an infinite endpoint became
@@ -337,11 +430,46 @@ impl RenderContext {
         self.counters.record_draw_call();
     }
 
-    /// Copies `src` of `texture` into `dst` (both screen space).
+    /// Queues `src` of `texture` into `dst` (both screen space) for a batched draw.
     ///
-    /// A zero-sized `src` means "the whole texture". An invalid handle or an empty
-    /// destination is reported and nothing is drawn.
+    /// A zero-sized `src` means "the whole texture". An invalid handle is reported;
+    /// an empty destination or one entirely outside the window is a no-op. Consecutive
+    /// calls that share a texture become a single backend draw call at
+    /// [`RenderContext::flush_batch`] time.
     pub fn draw_texture(
+        &mut self,
+        texture: TextureHandle,
+        dst: Rect,
+        src: Rect,
+    ) -> Result<(), GiochiError> {
+        let Some(size) = self.textures.size(texture) else {
+            return Err(GiochiError::InvalidHandle(texture));
+        };
+        let Some(dst) = to_sdl_rect(dst) else {
+            return Ok(());
+        };
+
+        if !self.is_visible(dst) {
+            return Ok(());
+        }
+        if self.batch.is_full() {
+            self.flush_batch();
+        }
+
+        self.batch
+            .push_quad(texture, rect_from_sdl(dst), src, size)?;
+        #[cfg(feature = "profiling")]
+        self.counters.record_queued_sprite();
+        Ok(())
+    }
+
+    /// Draws `texture` immediately, bypassing the batch.
+    ///
+    /// Kept for two callers: [`RenderContext::draw_texture_ex`], whose rotation and
+    /// mirroring would need per-quad CPU geometry to batch, and the benchmark that
+    /// compares batched and unbatched frames in the same binary. Normal drawing should
+    /// use [`RenderContext::draw_texture`].
+    pub fn draw_texture_immediate(
         &mut self,
         texture: TextureHandle,
         dst: Rect,
@@ -357,6 +485,8 @@ impl RenderContext {
         };
         let src = to_sdl_rect(src);
 
+        // Anything queued was submitted before this draw, so it must land first.
+        self.flush_batch();
         self.canvas
             .copy(&texture, src, dst)
             .map_err(|err| GiochiError::Render(format!("draw_texture failed: {err}")))?;
@@ -372,6 +502,10 @@ impl RenderContext {
     /// element is rotated into device space, and a texture — text is a texture —
     /// has to rotate the same way. Rotating the *bitmap* in software instead
     /// would resample the glyphs and change their pixels.
+    ///
+    /// This path is not batched: SDL rotates around the centre of `dst`, and copying
+    /// that semantics into four CPU-computed corners is not worth doing for the few
+    /// rotated elements a 2D scene has. It flushes the pending batch first.
     pub fn draw_texture_ex(
         &mut self,
         texture: TextureHandle,
@@ -391,6 +525,7 @@ impl RenderContext {
         };
         let src = to_sdl_rect(src);
 
+        self.flush_batch();
         self.canvas
             .copy_ex(
                 &texture,
@@ -419,7 +554,10 @@ impl RenderContext {
     }
 
     /// Presents the back buffer on screen.
+    ///
+    /// Flushes the pending batch first, so every queued sprite is in the frame.
     pub fn present(&mut self) {
+        self.flush_batch();
         self.canvas.present();
     }
 
@@ -427,7 +565,11 @@ impl RenderContext {
     ///
     /// Intended for tests and screenshot tooling: it forces a GPU→CPU copy and must
     /// not be used in a frame loop. Returns `row-major` pixels, 4 bytes each.
-    pub fn read_pixels(&self, rect: Rect) -> Result<Vec<u8>, GiochiError> {
+    ///
+    /// Takes `&mut self` because a read has to flush the pending batch: returning the
+    /// target without the sprites submitted before the read would be wrong.
+    pub fn read_pixels(&mut self, rect: Rect) -> Result<Vec<u8>, GiochiError> {
+        self.flush_batch();
         let Some(rect) = to_sdl_rect(rect) else {
             return Ok(Vec::new());
         };
@@ -435,6 +577,20 @@ impl RenderContext {
         self.canvas
             .read_pixels(Some(rect), sdl2::pixels::PixelFormatEnum::RGBA32)
             .map_err(|err| GiochiError::Render(format!("read_pixels failed: {err}")))
+    }
+
+    /// Whether `dst` intersects the window.
+    ///
+    /// Sprites entirely outside it would be rasterised by the driver for nothing; the
+    /// batch is the last place where skipping them is free. Partially visible sprites
+    /// are kept whole — clipping happens in the renderer.
+    fn is_visible(&self, dst: sdl2::rect::Rect) -> bool {
+        let (width, height) = self.window_size;
+        let left = dst.x();
+        let top = dst.y();
+        let right = left.saturating_add(dst.width() as i32);
+        let bottom = top.saturating_add(dst.height() as i32);
+        right > 0 && bottom > 0 && left < width as i32 && top < height as i32
     }
 
     pub(crate) fn texture_creator(&self) -> TextureCreator<WindowContext> {
@@ -483,6 +639,19 @@ fn to_sdl_rect(rect: Rect) -> Option<sdl2::rect::Rect> {
     }
 
     Some(sdl2::rect::Rect::new(x, y, w as u32, h as u32))
+}
+
+/// Converts SDL's integer rectangle back into the engine's float rectangle.
+///
+/// Used by the batcher, which receives the already-rounded destination so the vertices
+/// land on the same pixel grid SDL's own `copy` would have used.
+fn rect_from_sdl(rect: sdl2::rect::Rect) -> Rect {
+    Rect::new(
+        rect.x() as f32,
+        rect.y() as f32,
+        rect.width() as f32,
+        rect.height() as f32,
+    )
 }
 
 fn to_sdl_coord(value: f32) -> i32 {

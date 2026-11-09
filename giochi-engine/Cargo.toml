@@ -13,6 +13,13 @@ sdl2 = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
 
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "sprites_2d"
+harness = false
+
 [features]
 # Compila o SDL2 do código-fonte — o padrão, e o que o CI usa em x86_64.
 default = ["sdl2-bundled"]

@@ -339,13 +339,23 @@ impl FrameCounters {
         self.draw_calls = self.draw_calls.saturating_add(1);
     }
 
-    /// Records one sprite draw call.
-    ///
-    /// The 2D backend does not expose how many vertices it submits, so the vertex
-    /// and byte counters stay untouched.
+    /// Records one sprite drawn immediately (not through the batch).
     pub fn record_sprite(&mut self) {
         self.draw_calls = self.draw_calls.saturating_add(1);
         self.sprites_drawn = self.sprites_drawn.saturating_add(1);
+    }
+
+    /// Records one sprite queued in the batch, before it is drawn.
+    ///
+    /// The matching draw call is recorded by [`FrameCounters::record_draw_calls`] when
+    /// the batch is flushed.
+    pub fn record_queued_sprite(&mut self) {
+        self.sprites_drawn = self.sprites_drawn.saturating_add(1);
+    }
+
+    /// Records `calls` backend draw calls (a flush, or a primitive).
+    pub fn record_draw_calls(&mut self, calls: u32) {
+        self.draw_calls = self.draw_calls.saturating_add(calls);
     }
 
     /// Records one mesh draw call and the vertices and bytes it submitted.

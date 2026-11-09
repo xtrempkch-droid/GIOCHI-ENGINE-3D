@@ -23,6 +23,54 @@ the PX30 console (measured; budget 2 %).
 `docs/PERF_LOG.md` records the numbers, the method and the pending ARM64 validation.
 See ADR-042.
 
+### Added — phase 16: 2D sprite batching and a texture atlas
+
+**The 2D renderer now draws a sprite scene in one call instead of one call per sprite,
+without changing a line of game code.** `RenderContext::draw_texture` queues its quad
+into a `SpriteBatch` and `flush_batch` issues one `SDL_RenderGeometry` per run of
+consecutive quads that share a texture. Runs are never reordered: SDL's 2D renderer has
+no depth buffer, so sorting by texture would change what overlapping sprites look like.
+`present`, `read_pixels`, `clear`, every unbatched primitive and `Engine`'s render scope
+flush automatically, so nothing can observe a half-queued frame. The public API is
+unchanged (R12) and so is `giochi.h`; C consumers get the speed-up for free.
+
+`TextureAtlas` packs several images into one texture with a 1 px padded shelf layout
+(`from_images` for files, `from_rgba_images` for generated content), and
+`SpriteBatchConfig` exposes the batch limit. `draw_texture_immediate` keeps the old
+`SDL_RenderCopy` path for callers that want it.
+
+Measured (detail in `docs/PERF_LOG.md`): 1000 sprites go from 1000 draw calls to 1 on
+every backend. `opengl` runs the phase-15 scene at 2390.8 → 6765.5 FPS (`render2d`
+0.403 → 0.131 ms, 3.08x); the criterion benchmark measures 737 → 191 µs (3.86x). On the
+PX30 console `render2d` at 20000 sprites drops 28.495 → 22.853 ms, and a scene of ten
+interleaved textures goes from 10.8 to 58.6 FPS at 5000 sprites once the images live in
+an atlas (5.4x). On SDL's `software` renderer with the whole field visible, batching
+costs 3.1 % at 1000 sprites — that backend's geometry path is a triangle rasteriser
+while its `RenderCopy` is a fast blit — which is inside the 10 % budget, recorded with
+its cause, and avoidable with a batch of 1. See ADR-043.
+
+### Changed — phase 16: two `RenderContext` methods now take `&mut self`
+
+`read_pixels` and `destroy_texture` must flush the pending batch before they touch the
+target or free a handle — otherwise a queued sprite would be read as missing or would
+silently disappear. Flushing writes to the canvas, so both now take `&mut self`.
+Callers holding `&RenderContext` need `render_mut()`. **The C ABI is unchanged**: no
+`giochi.h` function signature moved (`scripts/gen-header.sh --check` verifies it), and
+`giochi_render_draw_texture` still means what it did. This is the only Rust-level
+signature change in the phase, and it is intentional rather than incidental: the
+alternative (taking `&self` and documenting "call `flush_batch` first") makes a
+correctness requirement that the compiler can enforce into a footnote.
+
+### Added — phase 16: `profiler_demo` measurement flags
+
+`--textures N`, `--use-atlas`, `--immediate`, `--centred-camera`, `--sprite-size N` and
+`--batch-max N`, plus `renderer=`/`accelerated=` in the machine-readable line. The
+`--immediate` arm is the pre-phase-16 path and `--centred-camera` reproduces the
+phase-15 scene, so the before/after tables come from one binary. The demo's default
+camera is now pinned to the viewport centre; the old default centred the world origin
+and left three quarters of the sprite field off-screen, which the earlier baseline
+silently measured.
+
 ## [0.2.2] - 2026-11-08
 
 ### Fixed — a sixth audit found one more

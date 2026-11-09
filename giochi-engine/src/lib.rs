@@ -85,7 +85,8 @@ pub use crate::perf::{DebugOverlay, FrameCounters, FrameStats, FrameTimeSummary,
 pub use crate::platform::sdl::{quit_signal, sdl_version, Platform, QuitSignal, VideoDriverChoice};
 pub use crate::platform::window::{Window, WindowConfig};
 pub use crate::render::{
-    Camera, RenderContext, Sprite, TextureHandle, TextureRegistry, TextureSize,
+    AtlasRegion, Camera, RenderContext, Sprite, SpriteBatch, SpriteBatchConfig, TextureAtlas,
+    TextureHandle, TextureRegistry, TextureSize,
 };
 pub use crate::scene::{EmptyScene, Scene, SceneHandle, SceneManager, SceneTransition};
 

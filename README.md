@@ -118,9 +118,33 @@ cargo run --release -p giochi-demo --example profiler_demo --features profiling 
     --sprites 1000 --frames 600
 ```
 
-The N-sprite demo is the phase-16 baseline; `docs/PERF_LOG.md` records the measured
-numbers and the overhead (≤1.1 % on x86_64, 1.94 % on the PX30 at 1000 sprites). See
-ADR-042 for why the overlay is a bitmap font on `sdl2::render` rather than egui/puffin.
+The demo's `--immediate` arm draws through the pre-phase-16 path and `--centred-camera`
+reproduces the phase-15 scene, so a before/after table comes from one binary;
+`--textures N`, `--use-atlas`, `--sprite-size N` and `--batch-max N` select the
+scenario. `docs/PERF_LOG.md` records the measured numbers and the profiler's overhead
+(≤1.1 % on x86_64, 1.94 % on the PX30 at 1000 sprites). See ADR-042 for why the overlay
+is a bitmap font on `sdl2::render` rather than egui/puffin.
+
+### Batching
+
+Phase 16 makes `draw_texture` queue into a `SpriteBatch`: consecutive sprites that
+share a texture become one draw call, without reordering (SDL's 2D renderer has no
+depth buffer, so reordering would change what overlapping sprites look like).
+`present` flushes automatically, the public API is unchanged, and `TextureAtlas` packs
+several images into one texture for the cases where the order alternates.
+
+```rust
+let atlas = renderer.load_atlas(&["assets/player.png", "assets/coin.png"])?;
+renderer.draw_texture(atlas.texture(), dst, atlas.region("coin").pixel_rect())?;
+// one draw call on flush
+```
+
+Measured: 1000 sprites of one texture go from 1000 draw calls to 1, and `render2d`
+drops 3.08x on the accelerated backend (0.403 → 0.131 ms). On the PX30 a scene of ten
+interleaved textures runs at 10.8 → 58.6 FPS at 5000 sprites once the images share an
+atlas. On SDL's `software` renderer batching costs 3 % at 1000 sprites — that backend
+rasterises triangles instead of using its fast blit — so a host there can set a batch
+of 1 or call `draw_texture_immediate`. Details in `docs/PERF_LOG.md` and ADR-043.
 
 ### Cross build for ARM64
 

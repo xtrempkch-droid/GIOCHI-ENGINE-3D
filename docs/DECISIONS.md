@@ -1171,3 +1171,96 @@ is also what the phase-15 acceptance command uses.
 `profiler_smoke` integration test (counts, percentiles, overlay pixels, no texture
 leak), the `context_smoke` 3D counter test, and the off/on comparison on x86_64 and on
 the PX30 in `docs/PERF_LOG.md`.
+
+## ADR-043 — 2D batching merges consecutive texture runs, and the atlas is a shelf packer
+
+**Context.** Phase 16 has to turn "one `SDL_RenderCopy` per sprite" into "a few
+`SDL_RenderGeometry` calls". Two facts constrain the design:
+
+1. SDL's 2D renderer has **no depth buffer**: overlapping draws composite in
+   submission order. Any reordering is therefore visible, not just slower or faster.
+   A "sort the frame by texture" batcher changes what a game looks like whenever two
+   sprites overlap, silently, and no test would catch it because the pixels are
+   right for a different scene.
+2. `SDL_RenderGeometry` takes one texture per call. There is no multi-texture batch
+   in the 2D API — that is what the 3D path's instancing work (phase 17) is for.
+
+**Decision.**
+
+- `RenderContext::draw_texture` queues a quad into a `SpriteBatch`. The batch splits
+  the queue into **runs of consecutive quads that share a texture**, and
+  `flush_batch` issues one `render_geometry` call per run, in submission order. A
+  texture change starts a new run; nothing is ever reordered. A scene that draws its
+  sprites grouped (a tilemap, then entities) collapses to one call per group; a scene
+  that interleaves ten textures gets ten calls per ten sprites, which is the old cost
+  and is documented rather than hidden.
+- Indices in each run are **run-relative**. `SDL_RenderGeometry` validates them
+  against the vertex slice it is handed, so absolute offsets into the whole batch made
+  every run after the first fail to parse. This was a real bug, caught by the
+  "later draw must stay on top" test.
+- `flush_batch` is called by `present`, by `read_pixels` (which is why it became
+  `&mut self`), by `clear`, by every unbatched primitive (`fill_rect`, `draw_line`,
+  `draw_point`, `draw_texture_ex`, `draw_texture_immediate`), by `destroy_texture`,
+  by `clear_resource_cache`, by `set_batch_config`, and by `Engine::step` at the end
+  of its 2D scope. So no public method can be observed with work still queued.
+- `DEFAULT_MAX_SPRITES` is **1024**, not "as many as fit". A single `render_geometry`
+  call of several thousand quads is *slower* than the same quads in chunks on the
+  software renderer: it sets up the vertex array per call and then rasterises each
+  triangle with per-vertex interpolation, instead of the fast blit path
+  `RenderCopy` uses. Measured at 5000 sprites, `software`: 1024 quads/call 28.5 ms,
+  4096 quads/call 44.9 ms, 8192 44.3 ms. On `opengl`/`opengles2` the limit makes no
+  measurable difference (5000 sprites: 1.215 ms at 4096, 1.213 ms at 1024).
+- `draw_texture_immediate` keeps the old `RenderCopy` path. `draw_texture_ex`
+  (rotation, mirroring) also stays unbatched: SDL rotates around the centre of the
+  destination rectangle, and reproducing that in four CPU-computed corners is not
+  worth it for the handful of rotated elements a 2D UI has.
+- `TextureAtlas` is a **shelf packer with 1 px padding**, sorted by height, rounded up
+  to power-of-two dimensions, capped at `ATLAS_MAX_SIZE` (4096, the smallest maximum
+  texture size the targets guarantee — GLES 2.0 only requires 2048). Regions carry
+  both the normalised UV rectangle and the pixel rectangle, so a caller can either
+  draw with `src` in pixels or hand the UVs to a custom shader. The atlas owns one
+  texture in the normal registry; it is destroyed like any other. `from_images` takes
+  paths, `from_rgba_images` takes buffers, and both share the same packer, padding
+  rules and duplicate-name check.
+- **The public API does not change (R12).** `giochi_render_draw_texture` still queues
+  a quad; C consumers, Lua bindings and existing games get the speed-up without
+  recompiling. `SpriteBatch`/`SpriteBatchConfig`/`TextureAtlas` are additive, and
+  their fields are `#[repr(C)]` with a reserved tail like every other public struct.
+
+**Why not an atlas-only design ("every sprite must be in an atlas").** Most games
+already load PNGs by path and would have to be rewritten. Batching by run costs one
+comparison per quad and helps those games immediately; the atlas is then an *extra*
+win for content that wants one upload.
+
+**Consequences.** Memory per batch is `max_sprites * (4 vertices + 6 indices)`;
+1024 sprites is 4096 vertices and 6144 indices, about 160 KiB of vertex data, reused
+across frames. A texture destroyed while its sprites are still queued silently drops
+those sprites (`destroy_texture` flushes first, so this only happens if the handle
+died some other way) and logs at debug level. There is no multi-texture batch, no
+sorting, and no z-order API change. `SpriteBatch` is `#[repr(C)]` but not part of the
+C ABI, so its layout is not frozen.
+
+**Measured outcome.** See `docs/PERF_LOG.md` "After Phase 16". The short version:
+
+- Draw calls: N → 1 for a one-texture scene at 1000 sprites on every backend.
+- `opengl`, phase-15 scene: `render2d` 0.403 → 0.131 ms (**3.08x**), whole frame
+  2390.8 → 6765.5 FPS (**2.83x**). Whole-field scene: **4.49x** FPS.
+- Criterion bench: 737 → 191 µs at 1000 sprites (**3.86x**).
+- PX30 (`opengles2`): `render2d` at 20000 sprites **28.495 → 22.853 ms (−19.8 %)**;
+  ten interleaved textures vs an atlas at 5000 sprites **10.8 → 58.6 FPS (5.4x)**.
+- `software` renderer, whole-field scene: **−3.1 %** at 1000 sprites. Batching is not
+  free there, because that backend's geometry path is a triangle rasteriser and its
+  `RenderCopy` is a fast blit. It is inside the 10 % threshold, the cause is named, and
+  a host on that backend can set a batch of 1 or use `draw_texture_immediate`.
+
+A run of one quad is drawn with `RenderCopy`, not `render_geometry`: a single sprite has
+nothing to merge, and the copy is cheaper. A run of two or more is geometry.
+
+**Verified by.** 17 unit tests in `render/batch.rs` (run boundaries, run-relative
+indices, single-quad runs keeping their rectangles, source clipping shrinking the
+destination, capacity, reserved tail), 10 in `render/atlas.rs` (shelf packing,
+non-overlap and padding, power-of-two sizing, in-memory validation), the
+`render_batching` integration test (1000 sprites → 1 call, pixels identical to the
+immediate path, submission order preserved, culling, auto-flush at the limit, file and
+in-memory atlas → 1 call, no texture leak) and the criterion benchmark
+`benches/sprites_2d.rs`.

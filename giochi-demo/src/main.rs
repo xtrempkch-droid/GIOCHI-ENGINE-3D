@@ -211,7 +211,7 @@ fn run(options: Options) -> Result<(), String> {
         }
         let (largura, altura) = engine.render().size();
         let pixels = engine
-            .render()
+            .render_mut()
             .read_pixels(giochi_engine::Rect::new(
                 0.0,
                 0.0,

@@ -28,14 +28,21 @@ extensão v2.1). Gates 2D revalidados a cada fase 3D.
       1000 draw calls; ARM64 PX30: **59.9 FPS** limitado pelo painel, **1.761 ms** de
       `render2d` a 1000 sprites; custo do profiler ≤ **1.1 %** x86_64 e **1.94 %** no
       PX30 com a overlay visível, dentro do orçamento de 2 %)
-- [ ] Fase 16 — Batching 2D + Atlas
+- [x] Fase 16 — Batching 2D + Atlas (1000 sprites → **1 draw call** em todos os
+      backends; `opengl` 896.9 → **4024.8 FPS** com a câmara corrigida e
+      `render2d` 0.403 → **0.131 ms** na cena da fase 15; PX30 `render2d` a 20000
+      sprites 28.495 → **22.853 ms**, e 10 texturas intercaladas vs atlas a 5000
+      sprites 10.8 → **58.6 FPS**)
 - [ ] Fase 17 — Instancing 3D + Upscaling
 - [ ] Fase 18 — Flags ARM64 + CI de performance + C ABI v3
 
-**Próxima fase: 16 — Batching 2D + Atlas.** Só começa depois de a baseline da fase 15
-estar medida. As baselines x86_64 e ARM64 estão em `docs/PERF_LOG.md`; no PX30 o
-critério de FPS da fase 16 tem de usar os 20000 sprites (ou `render2d_avg`), porque o
-KMSDRM limita tudo abaixo de ~10000 sprites a 60 FPS.
+**Próxima fase: 17 — Instancing 3D + Upscaling.** A fase 16 mediu a baseline da fase
+15 e o resultado está em `docs/PERF_LOG.md`. Duas conclusões que a fase 17 herda: (a) a
+cena de 20000 sprites a 24x24 é *fill-bound* no Mali-G31, portanto não serve para
+medir redução de draw calls — usar sprites pequenos ou uma cena que caiba no ecrã; e
+(b) o renderer `software` do SDL não é substituto do console: o caminho
+`SDL_RenderGeometry` dele é um rasterizador de triângulos, não o blit rápido do
+`RenderCopy`.
 
 
 ## Gates validados
@@ -183,6 +190,89 @@ overlay visível, medido por CPU do processo (`/usr/bin/time`), dentro dos 2 %.
 - A overlay não aparece em `mini_fps` (o renderer 3D não tem caminho 2D para desenhar
   texto). Os contadores 3D estão medidos e expostos; a overlay 3D fica para quando
   houver um caminho de UI GLES.
+
+## Fase 16 — Batching 2D + Atlas
+Data: 2026-11-08
+
+**Escopo:** reduzir N `SDL_RenderCopy` por frame a poucos `SDL_RenderGeometry`. A API
+pública não muda (R12): `draw_texture` mantém a assinatura e passa a agrupar.
+
+### Entregue
+
+- `giochi-engine/src/render/batch.rs` — `SpriteBatch`/`SpriteBatchConfig`. Agrupa
+  quads em **runs consecutivos com a mesma textura** e emite uma chamada por run, por
+  ordem de submissão. Não reordena: o renderer 2D do SDL não tem z-buffer, portanto
+  ordenar por textura mudaria o resultado visual de sprites sobrepostos. Índices são
+  **relativos ao run** (o SDL valida-os contra a fatia de vértices que recebe — índices
+  absolutos faziam todos os runs depois do primeiro falhar). Um run de um único quad
+  é desenhado com `RenderCopy`, não com geometria: não há nada para juntar e a cópia é
+  mais barata. `DEFAULT_MAX_SPRITES = 1024`, escolhido por medição (ver abaixo).
+- `giochi-engine/src/render/atlas.rs` — `TextureAtlas`/`AtlasRegion`: empacotador de
+  prateleiras com 1 px de padding, ordenado por altura, dimensões potência de dois,
+  limite `ATLAS_MAX_SIZE = 4096`. `from_images` (paths) e `from_rgba_images` (buffers
+  em memória) partilham o empacotador, as regras de padding e a verificação de nomes
+  duplicados.
+- `RenderContext`: `draw_texture` enfileira; `flush_batch`, `draw_texture_immediate`,
+  `sprite_batch`, `set_batch_config`, `load_atlas`. `flush_batch` é chamado por
+  `present`, `read_pixels` (que passou a `&mut self`), `clear`, todas as primitivas não
+  agrupadas, `destroy_texture`, `clear_resource_cache`, `set_batch_config` e pelo
+  `Engine` no fim do scope `render2d` — nenhum método público pode ser observado com
+  trabalho em fila. Corte por visibilidade aplicado antes de enfileirar.
+- `FrameCounters::record_queued_sprite`/`record_draw_calls`, para a overlay contar
+  sprites enfileirados e chamadas realmente emitidas.
+- `giochi-engine/tests/render_batching.rs` — 1000 sprites → 1 chamada, pixels
+  idênticos ao caminho imediato, ordem preservada, corte, flush automático no limite,
+  atlas de ficheiro e atlas em memória → 1 chamada, sem fugas de textura.
+- `giochi-engine/benches/sprites_2d.rs` — criterion, cenários `same_texture`,
+  `same_texture_unbatched`, `ten_textures_grouped`, `ten_textures_interleaved`, `atlas`.
+- `profiler_demo`: `--textures N`, `--use-atlas`, `--immediate`, `--centred-camera`,
+  `--sprite-size`, `--batch-max`, e a linha de saída passou a incluir
+  `renderer=`/`accelerated=`.
+- ADR-043 em `docs/DECISIONS.md`; `docs/PERF_LOG.md` com a secção "After Phase 16".
+
+### Resultados (detalhe e método em `docs/PERF_LOG.md`)
+
+| | Draw calls | Antes | Depois | Ganho |
+|---|---:|---:|---:|---:|
+| x86_64 `opengl`, cena da fase 15, 1000 sprites | 1 | 2390.8 FPS | 6765.5 FPS | 2.83x |
+| x86_64 `opengl`, `render2d` a 1000 sprites | 1 | 0.403 ms | 0.131 ms | **3.08x** |
+| x86_64 `opengl`, campo inteiro, 1000 sprites | 1 | 896.9 FPS | 4024.8 FPS | 4.49x |
+| criterion, 1000 sprites, 8x8 | 1 | 737 µs | 191 µs | 3.86x |
+| PX30, 20000 sprites, 1 textura | 20 | 28.495 ms | 22.853 ms | −19.8 % |
+| PX30, 5000 sprites, 10 texturas → atlas | 1 | 10.8 FPS | 58.6 FPS | **5.4x** |
+
+Duas correções de cena que os números expuseram, e que ficam no demo:
+
+1. O demo colocava os sprites em `0..width` com a câmara por omissão, que centra a
+   origem do mundo no viewport — três quartos do campo ficavam fora do ecrã. O
+   `--centred-camera` reproduz essa cena para comparar com a baseline da fase 15; o
+   modo por omissão passa a fixar a câmara e a medir o campo inteiro.
+2. A 24x24 a cena é *fill-bound*: 1000 sprites cobrem 576 000 pixels. Nenhum backend
+   mostra ganho de FPS nessa configuração. `--sprite-size` e o cenário de 10 texturas
+   contra atlas existem para medir onde as chamadas são de facto o gargalo.
+
+### Regressão registada
+
+No renderer `software` do SDL, com o campo inteiro, o agrupamento é **−3.1 %** a 1000
+sprites e −8.3 % a 5000: nesse backend `RenderCopy` é um blit rápido escrito à mão e
+`SDL_RenderGeometry` é um rasterizador de triângulos com interpolação por pixel. Está
+dentro do limite de 10 %, a causa está nomeada no `PERF_LOG` e um host nesse backend
+pode usar `set_batch_config(SpriteBatchConfig::new(_, 1))` ou `draw_texture_immediate`.
+Na cena da fase 15 (a que a baseline registou) o mesmo backend **melhora 6.5 %**.
+
+### Gates da fase
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo clippy -p giochi-engine -p giochi-engine-3d -p giochi-demo --all-targets --features profiling -- -D warnings`
+- [x] `cargo test --workspace` — ver `scripts/gates.sh`
+- [x] `cargo test -p giochi-engine --lib render::batch` — 17 testes
+- [x] `cargo test -p giochi-engine --lib render::atlas` — 10 testes
+- [x] `SDL_VIDEODRIVER=dummy cargo test -p giochi-engine --test render_batching`
+- [x] `SDL_VIDEODRIVER=dummy cargo test -p giochi-demo --example profiler_demo --features profiling` — 9 testes do parser e da linha de saída
+- [x] `cargo bench -p giochi-engine --bench sprites_2d --no-run` e `-- --quick`
+- [x] `CROSS_SYSROOT=/tmp/r35s-sysroot scripts/build-aarch64.sh --release -p giochi-demo --example profiler_demo --features profiling` — corrido no PX30
+- [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --test context_smoke`
 
 ## Sexta auditoria — os binários 2D tratavam um limite de frames mal escrito como "sem limite"
 Data: 2026-11-08

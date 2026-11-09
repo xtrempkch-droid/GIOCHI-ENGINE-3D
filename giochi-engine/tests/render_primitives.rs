@@ -17,7 +17,7 @@ const AZUL: Color = Color::rgb(0, 0, 255);
 const AMARELO: Color = Color::rgb(255, 255, 0);
 const BRANCO: Color = Color::rgb(255, 255, 255);
 
-fn pixel(render: &RenderContext, x: f32, y: f32) -> (u8, u8, u8) {
+fn pixel(render: &mut RenderContext, x: f32, y: f32) -> (u8, u8, u8) {
     let bytes = render
         .read_pixels(Rect::new(x, y, 1.0, 1.0))
         .expect("the pixel must be readable");
@@ -52,7 +52,7 @@ fn primitives_and_canvas_blend_write_expected_pixels() {
     // todos os pixels do caminho.
     render.draw_line(Vec2::new(4.0, 4.0), Vec2::new(43.0, 4.0), VERDE);
     assert_eq!(
-        pixel(&render, 20.0, 4.0),
+        pixel(&mut render, 20.0, 4.0),
         (0, 255, 0),
         "a linha deve estar em y=4"
     );
@@ -60,12 +60,12 @@ fn primitives_and_canvas_blend_write_expected_pixels() {
     // Contorno: pinta a borda e **não** o interior.
     render.stroke_rect(Rect::new(4.0, 20.0, 20.0, 20.0), AZUL);
     assert_eq!(
-        pixel(&render, 4.0, 20.0),
+        pixel(&mut render, 4.0, 20.0),
         (0, 0, 255),
         "o contorno deve pintar o canto"
     );
     assert_eq!(
-        pixel(&render, 12.0, 30.0),
+        pixel(&mut render, 12.0, 30.0),
         (0, 0, 0),
         "o contorno não pode preencher"
     );
@@ -79,11 +79,15 @@ fn primitives_and_canvas_blend_write_expected_pixels() {
         AMARELO,
     );
     assert_eq!(
-        pixel(&render, 31.0, 31.0),
+        pixel(&mut render, 31.0, 31.0),
         (255, 255, 0),
         "primeiro do lote"
     );
-    assert_eq!(pixel(&render, 39.0, 31.0), (255, 255, 0), "segundo do lote");
+    assert_eq!(
+        pixel(&mut render, 39.0, 31.0),
+        (255, 255, 0),
+        "segundo do lote"
+    );
 
     // Alfa no alvo: branco coberto por vermelho a 50 % tem de dar a média.
     //
@@ -91,7 +95,7 @@ fn primitives_and_canvas_blend_write_expected_pixels() {
     // cru. É a diferença entre "a cor foi passada" e "a cor foi composta".
     render.clear(BRANCO);
     render.draw_rect(Rect::new(0.0, 0.0, 48.0, 48.0), Color::new(255, 0, 0, 128));
-    let (r, g, b) = pixel(&render, 24.0, 24.0);
+    let (r, g, b) = pixel(&mut render, 24.0, 24.0);
     assert!(
         (i32::from(r) - 255).abs() <= 2
             && (i32::from(g) - 128).abs() <= 3

@@ -472,6 +472,9 @@ impl Engine {
         if let Some(scene) = self.scenes.current_mut() {
             scene.render(&mut self.render);
         }
+        // Flush inside the scope: the cost of submitting the batch is part of rendering,
+        // and it must be counted before `end_frame` takes the snapshot.
+        self.render.flush_batch();
         self.profiler.end_scope();
 
         let audio_ns = self.audio.take_profile_time_ns();

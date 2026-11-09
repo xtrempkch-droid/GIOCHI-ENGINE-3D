@@ -60,8 +60,9 @@ fn the_engine_reports_the_frame_it_just_drew() {
     assert_eq!(stats.frames, 1);
     assert_eq!(stats.sprites_drawn, 4);
     assert_eq!(
-        stats.draw_calls, 4,
-        "one draw call per sprite, overlay excluded"
+        stats.draw_calls, 1,
+        "four sprites of one texture collapse into one backend call; the overlay's \
+         own draws happen after the snapshot"
     );
     assert!((stats.frame_time_ms() - 16.666).abs() < 0.01);
     assert!((stats.fps - 60.0).abs() < 0.01, "fps: {}", stats.fps);
@@ -92,7 +93,7 @@ fn the_engine_reports_the_frame_it_just_drew() {
         "refreshing the panel must reuse its texture, not allocate another"
     );
     let pixel = engine
-        .render()
+        .render_mut()
         .read_pixels(Rect::new(9.0, 9.0, 1.0, 1.0))
         .expect("read back the overlay");
     assert_eq!(pixel.len(), 4);

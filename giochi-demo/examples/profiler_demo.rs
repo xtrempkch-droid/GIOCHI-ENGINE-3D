@@ -1,14 +1,26 @@
 //! `profiler_demo` — the phase-15 baseline for the batching work in phase 16.
 //!
-//! Draws N sprites with one texture, using the ordinary
-//! [`RenderContext::draw_sprite`](giochi_engine::RenderContext::draw_sprite) path.
-//! That is exactly the workload phase 16 must make faster, so this example is kept
-//! deliberately naive: one draw call per sprite, no atlas, no batching.
+//! Draws N sprites with one texture through
+//! [`RenderContext::draw_texture`](giochi_engine::RenderContext::draw_texture), the
+//! path `draw_sprite` uses. That is exactly the workload phase 16 must make faster,
+//! so the scene itself is deliberately naive; the speed-up has to come from the engine.
+//!
+//! `--immediate` draws through
+//! [`RenderContext::draw_texture_immediate`](giochi_engine::RenderContext::draw_texture_immediate)
+//! instead, which is the phase-15 `SDL_RenderCopy` path. Same scene, same binary, so the
+//! A/B does not depend on rebuilding an old commit.
+//!
+//! `--textures N` gives each sprite one of `N` textures (`i % N`), which is the
+//! worst case for batching: a texture change starts a new run. `--use-atlas` packs
+//! those same `N` images into one [`TextureAtlas`] and draws regions of it, so the
+//! scene and the pixel coverage stay identical while the draw calls collapse to one.
 //!
 //! ```text
 //! cargo run -p giochi-demo --example profiler_demo --features profiling
 //! cargo run -p giochi-demo --example profiler_demo --features profiling -- --sprites 200 --frames 600
 //! cargo run --release -p giochi-demo --example profiler_demo --features profiling -- --sprites 1000 --frames 600
+//! cargo run --release -p giochi-demo --example profiler_demo --features profiling -- --sprites 1000 --textures 10
+//! cargo run --release -p giochi-demo --example profiler_demo --features profiling -- --sprites 1000 --textures 10 --use-atlas
 //! ```
 //!
 //! Without `--frames` the example runs interactively at 60 Hz; `F1` toggles the
@@ -22,14 +34,19 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use giochi_engine::{
-    AudioSystem, Engine, EngineConfig, FrameStats, FrameTimeSummary, Input, RenderContext, Scene,
-    Sprite, TextureHandle, Time,
+    AudioSystem, Camera, Engine, EngineConfig, FrameStats, FrameTimeSummary, Input, Rect,
+    RenderContext, Scene, SpriteBatchConfig, TextureAtlas, TextureHandle, Time, Vec2,
 };
 
 const DEFAULT_WIDTH: u32 = 1280;
 const DEFAULT_HEIGHT: u32 = 720;
 const DEFAULT_SPRITES: u32 = 1_000;
-const SPRITE_SIZE: f32 = 24.0;
+/// Default drawn size of a sprite, in pixels. At 24x24 a thousand sprites already
+/// cover the screen several times over, so a run at that size measures the
+/// rasteriser; `--sprite-size 8` shifts the balance towards per-call overhead.
+const DEFAULT_SPRITE_SIZE: f32 = 24.0;
+/// Side of every generated source image, in pixels.
+const SOURCE_SIZE: u32 = 16;
 
 fn main() -> ExitCode {
     match run() {
@@ -48,6 +65,19 @@ struct Options {
     sprites: u32,
     frames: Option<u64>,
     overlay: bool,
+    /// Distinct source images. Sprite `i` uses image `i % textures`.
+    textures: u32,
+    /// Pack the source images into one atlas instead of separate textures.
+    use_atlas: bool,
+    /// Draw through `draw_texture_immediate`, the pre-phase-16 path, for an A/B.
+    immediate: bool,
+    /// Keep the camera at its default (centred on the world origin), which is what
+    /// the phase-15 baseline measured, so the two tables stay comparable.
+    centred_camera: bool,
+    /// `SpriteBatchConfig::max_sprites`; `0` keeps the engine default.
+    batch_max: u32,
+    /// Drawn side of a sprite, in pixels.
+    sprite_size: f32,
 }
 
 impl Default for Options {
@@ -58,6 +88,12 @@ impl Default for Options {
             sprites: DEFAULT_SPRITES,
             frames: None,
             overlay: true,
+            textures: 1,
+            use_atlas: false,
+            immediate: false,
+            centred_camera: false,
+            batch_max: 0,
+            sprite_size: DEFAULT_SPRITE_SIZE,
         }
     }
 }
@@ -98,10 +134,33 @@ impl Options {
                 options.overlay = false;
             } else if arg == "--overlay" {
                 options.overlay = true;
+            } else if let Some(value) = arg.strip_prefix("--textures=") {
+                options.textures = parse_number(value, "--textures")?;
+            } else if arg == "--textures" {
+                options.textures =
+                    parse_number(next_value(&mut args, "--textures")?, "--textures")?;
+            } else if arg == "--use-atlas" {
+                options.use_atlas = true;
+            } else if arg == "--immediate" {
+                options.immediate = true;
+            } else if arg == "--centred-camera" {
+                options.centred_camera = true;
+            } else if let Some(value) = arg.strip_prefix("--sprite-size=") {
+                options.sprite_size = parse_number(value, "--sprite-size")?;
+            } else if arg == "--sprite-size" {
+                options.sprite_size =
+                    parse_number(next_value(&mut args, "--sprite-size")?, "--sprite-size")?;
+            } else if let Some(value) = arg.strip_prefix("--batch-max=") {
+                options.batch_max = parse_number(value, "--batch-max")?;
+            } else if arg == "--batch-max" {
+                options.batch_max =
+                    parse_number(next_value(&mut args, "--batch-max")?, "--batch-max")?;
             } else {
                 return Err(format!(
                     "unknown argument '{arg}'; accepted: --sprites N, --frames N, \
-                     --width N, --height N, --overlay, --no-overlay"
+                     --width N, --height N, --textures N, --overlay, --no-overlay, \
+                     --use-atlas, --immediate, --centred-camera, --batch-max N, \
+                     --sprite-size N"
                 ));
             }
         }
@@ -112,8 +171,14 @@ impl Options {
         if options.sprites == 0 {
             return Err("--sprites must be greater than zero".to_owned());
         }
+        if options.textures == 0 {
+            return Err("--textures must be greater than zero".to_owned());
+        }
         if options.frames == Some(0) {
             return Err("--frames must be greater than zero".to_owned());
+        }
+        if !(options.sprite_size.is_finite() && options.sprite_size > 0.0) {
+            return Err("--sprite-size must be a positive number".to_owned());
         }
         Ok(options)
     }
@@ -140,22 +205,53 @@ fn run() -> Result<(), String> {
 
     let mut engine = Engine::new(config).map_err(|error| error.to_string())?;
     engine.set_overlay_visible(options.overlay);
-    let texture = create_sprite_texture(&mut engine)?;
+
+    // `Camera::new` centres the world origin in the viewport, so with sprites placed
+    // at `0..width` three quarters of the field lands off-screen — which is what the
+    // phase-15 baseline measured without saying so. Pinning the camera position to the
+    // viewport centre makes world coordinates screen coordinates and the frame covers
+    // the whole screen. `--centred-camera` restores the old placement so the two
+    // tables can be compared like for like.
+    let width = options.width as f32;
+    let height = options.height as f32;
+    if !options.centred_camera {
+        engine.render_mut().set_camera(Camera::with_position(
+            Rect::new(0.0, 0.0, width, height),
+            width / 2.0,
+            height / 2.0,
+        ));
+    }
+
+    let (source, source_label) = build_source(&mut engine, &options)?;
+    if options.batch_max > 0 {
+        let current = engine.render().sprite_batch().config();
+        engine.render_mut().set_batch_config(SpriteBatchConfig::new(
+            current.initial_sprites,
+            options.batch_max,
+        ));
+    }
+
     engine.push_scene(Box::new(SpriteField::new(
-        texture,
+        source,
         options.sprites,
-        options.width as f32,
-        options.height as f32,
+        width,
+        height,
+        options.immediate,
+        options.sprite_size,
     )));
 
+    let render = engine.render();
     println!(
-        "profiler_demo: {} sprites, overlay {} (F1 alterna, ESC sai)",
+        "profiler_demo: {} sprites, {source_label}, overlay {} \
+         (F1 alterna, ESC sai) — backend {} (accelerated: {})",
         options.sprites,
         if engine.is_overlay_visible() {
             "ligado"
         } else {
             "desligado"
-        }
+        },
+        render.renderer_name(),
+        render.renderer_is_accelerated(),
     );
 
     if let Some(frames) = options.frames {
@@ -163,6 +259,60 @@ fn run() -> Result<(), String> {
     }
 
     engine.run_current().map_err(|error| error.to_string())
+}
+
+/// Builds the scene's textures, either as separate uploads or packed into one atlas.
+///
+/// Returns the source and a human-readable description of it.
+fn build_source(engine: &mut Engine, options: &Options) -> Result<(SpriteSource, String), String> {
+    let images: Vec<Vec<u8>> = (0..options.textures).map(sprite_pixels).collect();
+
+    if options.use_atlas {
+        let names: Vec<String> = (0..images.len())
+            .map(|index| format!("tex{index}"))
+            .collect();
+        let regions: Vec<(&str, u32, u32, &[u8])> = names
+            .iter()
+            .zip(&images)
+            .map(|(name, pixels)| (name.as_str(), SOURCE_SIZE, SOURCE_SIZE, pixels.as_slice()))
+            .collect();
+        let atlas = TextureAtlas::from_rgba_images(engine.render(), &regions)
+            .map_err(|error| error.to_string())?;
+        let bounds: Vec<Rect> = atlas
+            .names()
+            .into_iter()
+            .map(|name| atlas.region(&name).pixel_rect())
+            .collect();
+        let label = format!(
+            "{} region(s) in one {}x{} atlas",
+            bounds.len(),
+            atlas.size().0,
+            atlas.size().1
+        );
+        return Ok((
+            SpriteSource::Atlas {
+                texture: atlas.texture(),
+                regions: bounds,
+            },
+            label,
+        ));
+    }
+
+    let mut textures = Vec::with_capacity(images.len());
+    for pixels in &images {
+        textures.push(
+            engine
+                .render_mut()
+                .create_texture_from_rgba(SOURCE_SIZE, SOURCE_SIZE, pixels)
+                .map_err(|error| error.to_string())?,
+        );
+    }
+    if textures.len() == 1 {
+        Ok((SpriteSource::Single(textures[0]), "1 texture".to_owned()))
+    } else {
+        let label = format!("{} textures (interleaved)", textures.len());
+        Ok((SpriteSource::Many(textures), label))
+    }
 }
 
 /// Runs exactly `frames` iterations without sleeping and prints the measured result.
@@ -213,6 +363,8 @@ fn benchmark(engine: &mut Engine, frames: u64, sprites: u32) -> Result<(), Strin
         summary,
         cpu_avg_ms,
         render2d_avg_ms,
+        renderer: engine.render().renderer_name(),
+        accelerated: engine.render().renderer_is_accelerated(),
     };
     println!("{}", summary_line(&measurement));
     Ok(())
@@ -228,13 +380,15 @@ struct Measurement {
     summary: FrameTimeSummary,
     cpu_avg_ms: f64,
     render2d_avg_ms: f64,
+    renderer: &'static str,
+    accelerated: bool,
 }
 
 fn summary_line(measurement: &Measurement) -> String {
     format!(
         "profiler_demo: sprites={} frames={} wall={:.3}s fps={:.1} \
          frame_avg={:.3}ms frame_p99={:.3}ms cpu_avg={:.3}ms \
-         render2d_avg={:.3}ms draw_calls={}",
+         render2d_avg={:.3}ms draw_calls={} renderer={} accelerated={}",
         measurement.sprites,
         measurement.frames,
         measurement.wall,
@@ -243,66 +397,98 @@ fn summary_line(measurement: &Measurement) -> String {
         measurement.summary.p99_ms(),
         measurement.cpu_avg_ms,
         measurement.render2d_avg_ms,
-        measurement.stats.draw_calls
+        measurement.stats.draw_calls,
+        measurement.renderer,
+        measurement.accelerated
     )
 }
 
 /// Builds a 16x16 RGBA sprite with a bright border, so every draw is visible.
-fn create_sprite_texture(engine: &mut Engine) -> Result<TextureHandle, String> {
-    const SIZE: u32 = 16;
-    let mut pixels = vec![0u8; (SIZE * SIZE * 4) as usize];
-    for y in 0..SIZE {
-        for x in 0..SIZE {
-            let border = x < 2 || y < 2 || x >= SIZE - 2 || y >= SIZE - 2;
+///
+/// `variant` shifts the interior colour, so images packed into one atlas stay
+/// distinguishable on screen.
+fn sprite_pixels(variant: u32) -> Vec<u8> {
+    let size = SOURCE_SIZE;
+    let mut pixels = vec![0u8; (size * size * 4) as usize];
+    for y in 0..size {
+        for x in 0..size {
+            let border = x < 2 || y < 2 || x >= size - 2 || y >= size - 2;
             let colour = if border {
                 [232, 240, 255, 255]
             } else {
-                [(40 + x * 10) as u8, (80 + y * 8) as u8, 180u8, 255]
+                [
+                    (40 + x * 10 + variant * 3) as u8,
+                    (80 + y * 8) as u8,
+                    (180 + variant * 7) as u8,
+                    255,
+                ]
             };
-            let offset = ((y * SIZE + x) * 4) as usize;
+            let offset = ((y * size + x) * 4) as usize;
             pixels[offset..offset + 4].copy_from_slice(&colour);
         }
     }
+    pixels
+}
 
-    engine
-        .render_mut()
-        .create_texture_from_rgba(SIZE, SIZE, &pixels)
-        .map_err(|error| error.to_string())
+/// Where the sprites' pixels come from.
+enum SpriteSource {
+    /// One texture for every sprite, drawn from its whole area.
+    Single(TextureHandle),
+    /// Several textures, cycled per sprite: the worst case for the batcher.
+    Many(Vec<TextureHandle>),
+    /// One atlas, with sprites cycling through its regions.
+    Atlas {
+        texture: TextureHandle,
+        regions: Vec<Rect>,
+    },
 }
 
 /// A fixed number of sprites bouncing inside the window.
 struct SpriteField {
-    texture: TextureHandle,
+    source: SpriteSource,
     bodies: Vec<Body>,
     width: f32,
     height: f32,
+    /// Use `draw_texture_immediate`, the phase-15 path, instead of `draw_texture`.
+    immediate: bool,
+    /// Drawn side of every sprite, in pixels.
+    sprite_size: f32,
 }
 
 impl SpriteField {
-    fn new(texture: TextureHandle, count: u32, width: f32, height: f32) -> Self {
+    fn new(
+        source: SpriteSource,
+        count: u32,
+        width: f32,
+        height: f32,
+        immediate: bool,
+        sprite_size: f32,
+    ) -> Self {
         let mut seed = 0x1234_5678u32;
         let mut bodies = Vec::with_capacity(count as usize);
         for _ in 0..count {
             bodies.push(Body {
-                x: random(&mut seed) * (width - SPRITE_SIZE),
-                y: random(&mut seed) * (height - SPRITE_SIZE),
+                x: random(&mut seed) * (width - sprite_size).max(0.0),
+                y: random(&mut seed) * (height - sprite_size).max(0.0),
                 vx: (random(&mut seed) - 0.5) * 120.0,
                 vy: (random(&mut seed) - 0.5) * 120.0,
             });
         }
         Self {
-            texture,
+            source,
             bodies,
             width,
             height,
+            immediate,
+            sprite_size,
         }
     }
 }
 
 impl Scene for SpriteField {
     fn update(&mut self, time: Time, _input: &Input, _audio: &mut AudioSystem) {
-        let max_x = self.width - SPRITE_SIZE;
-        let max_y = self.height - SPRITE_SIZE;
+        let max_x = (self.width - self.sprite_size).max(0.0);
+        let max_y = (self.height - self.sprite_size).max(0.0);
         for body in &mut self.bodies {
             body.x += body.vx * time.delta;
             body.y += body.vy * time.delta;
@@ -318,11 +504,29 @@ impl Scene for SpriteField {
     }
 
     fn render(&mut self, renderer: &mut RenderContext) {
-        // The camera is the identity by default, so world coordinates are screen
-        // coordinates and the comparison with phase 16 stays about draw calls.
-        for body in &self.bodies {
-            let sprite = Sprite::new(self.texture, body.x, body.y, SPRITE_SIZE, SPRITE_SIZE);
-            let _ = renderer.draw_sprite(&sprite);
+        // Positions stay in world space and go through the camera exactly like
+        // `draw_sprite` does. With the default (centred) camera that puts three
+        // quarters of the field off-screen, which is the phase-15 scene; `run` pins
+        // the camera otherwise so the frame covers the whole screen. Either way the
+        // batched and immediate arms see identical geometry.
+        for (index, body) in self.bodies.iter().enumerate() {
+            let origin = renderer.world_to_screen(Vec2::new(body.x, body.y));
+            let dst = Rect::new(origin.x, origin.y, self.sprite_size, self.sprite_size);
+            let (texture, src) = match &self.source {
+                SpriteSource::Single(texture) => (*texture, Rect::ZERO),
+                SpriteSource::Many(textures) if !textures.is_empty() => {
+                    (textures[index % textures.len()], Rect::ZERO)
+                }
+                SpriteSource::Atlas { texture, regions } if !regions.is_empty() => {
+                    (*texture, regions[index % regions.len()])
+                }
+                _ => continue,
+            };
+            let _ = if self.immediate {
+                renderer.draw_texture_immediate(texture, dst, src)
+            } else {
+                renderer.draw_texture(texture, dst, src)
+            };
         }
     }
 }
@@ -399,11 +603,43 @@ mod tests {
             },
             cpu_avg_ms: 2.5,
             render2d_avg_ms: 2.0,
+            renderer: "software",
+            accelerated: false,
         });
 
         assert!(line.contains("sprites=200"));
         assert!(line.contains("frames=600"));
         assert!(line.contains("draw_calls=200"));
         assert!(line.contains("cpu_avg=2.500ms"));
+        assert!(line.contains("renderer=software"));
+    }
+
+    #[test]
+    fn the_parser_accepts_texture_and_atlas_modes() {
+        let options = parse(&["--textures", "10", "--use-atlas"]).expect("valid");
+        assert_eq!(options.textures, 10);
+        assert!(options.use_atlas);
+        assert_eq!(Options::default().textures, 1);
+        assert!(parse(&["--textures", "0"]).is_err());
+    }
+
+    #[test]
+    fn the_parser_can_reproduce_the_phase_15_scene() {
+        assert!(!Options::default().centred_camera);
+        assert!(parse(&["--centred-camera"]).expect("valid").centred_camera);
+    }
+
+    #[test]
+    fn the_parser_accepts_the_measurement_overrides() {
+        let options =
+            parse(&["--immediate", "--batch-max", "1024", "--sprite-size=8"]).expect("valid");
+        assert!(options.immediate);
+        assert_eq!(options.batch_max, 1024);
+        assert!((options.sprite_size - 8.0).abs() < f32::EPSILON);
+        assert!((Options::default().sprite_size - DEFAULT_SPRITE_SIZE).abs() < f32::EPSILON);
+
+        assert!(parse(&["--sprite-size", "0"]).is_err());
+        assert!(parse(&["--sprite-size", "-4"]).is_err());
+        assert!(parse(&["--batch-max=oops"]).is_err());
     }
 }

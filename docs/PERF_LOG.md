@@ -132,12 +132,194 @@ pixels at 1 Hz with 5x7 glyphs is what fits the budget.
 
 ## After Phase 16 (Batching 2D + Atlas)
 
-To be filled when phase 16 lands. Required scenarios: 100/500/1000/5000 sprites with
-one texture, 100/500/1000 with ten textures, and the same with an atlas. Acceptance:
-1000 sprites of one texture must drop from 1000 draw calls to ≤ 5, with at least a 3x
-FPS gain over this baseline. On the PX30 that gain must be shown at 20000 sprites (or
-as a `render2d_avg` reduction at 1000); the panel caps everything below ~10000 at
-60 FPS, so a 1000-sprite FPS comparison there measures the panel, not the engine.
+Date: 2026-11-08 | Build: release, profiling feature enabled | vsync: off
+Method: as above, but the demo now has two arms so the A/B is made by one binary on
+one machine:
+
+- `--immediate` draws through `draw_texture_immediate`, which is exactly the phase-15
+  `SDL_RenderCopy` path. The comparison therefore does not depend on rebuilding an old
+  commit or on two binaries being equally fast for reasons unrelated to the change.
+- `--centred-camera` reproduces the phase-15 **scene**: the demo used to keep the
+  camera at its default, which centres the world origin in the viewport, so sprites
+  placed in `0..width` had three quarters of their area off-screen. `--centred-camera`
+  + `--immediate` reproduces the old binary to within noise (637.8 vs 619.2 FPS at 1000
+  sprites on the `software` renderer, against the 645.5 recorded below), which is what
+  makes the two tables comparable.
+- `--sprite-size N` changes the drawn size, `--textures N` and `--use-atlas` change the
+  texture mode, and `--batch-max N` overrides `SpriteBatchConfig::max_sprites`.
+
+**Two things to know before reading the tables.**
+
+1. **The scene is fill-bound, not call-bound, at 24x24 sprites.** A 1000-sprite frame
+   covers 576 000 pixels — 62 % of the 1280x720 canvas, 1.9 screens on the 640x480
+   panel — and 20000 sprites cover 11.5 M pixels. Removing 999 of 1000 draw calls
+   cannot move a frame that spends its time rasterising, so the draw-call win is
+   reported where the work is actually call-bound and the fill-bound numbers are shown
+   beside them.
+2. **`software` is not a stand-in for the console.** SDL's software `RenderCopy` is a
+   hand-written fast blit; `SDL_RenderGeometry` on that backend is a triangle
+   rasteriser that interpolates per pixel. The PX30 runs `opengles2` (Mali-G31), so the
+   console measurements are the ones that matter for the target.
+
+### x86_64 — phase-15 scene (`--centred-camera`), `opengl` (accelerated)
+
+| Scenario | Draw calls | FPS | Frame avg | Render2D avg |
+|---|---:|---:|---:|---:|
+| 100 sprites, batched | 1 | 18439.0 | 0.043 ms | 0.029 ms |
+| 100 sprites, immediate | 100 | 17048.7 | 0.052 ms | 0.043 ms |
+| 500 sprites, batched | 1 | 11913.2 | 0.070 ms | 0.067 ms |
+| 500 sprites, immediate | 500 | 4476.1 | 0.211 ms | 0.205 ms |
+| 1000 sprites, batched | 1 | 6765.5 | 0.130 ms | 0.131 ms |
+| 1000 sprites, immediate | 1000 | 2390.8 | 0.410 ms | 0.403 ms |
+| 5000 sprites, batched | 2 | 1378.6 | 0.719 ms | 0.694 ms |
+| 5000 sprites, immediate | 5000 | 471.0 | 2.045 ms | 2.099 ms |
+
+At 1000 sprites the renderer itself goes **0.403 → 0.131 ms, 3.08x**, and the frame
+goes 2390.8 → 6765.5 FPS, **2.83x**. The gap between the two ratios is the frame
+loop's fixed cost: once `render2d` is 0.13 ms, the ~0.02 ms of poll/update/present/overlay
+is a larger share of what is left, so FPS cannot scale by the same factor. A sprite-size
+sweep at 1000 sprites (8/16/24 px) gives 2.84x/2.70x/2.86x — the ratio is a property
+of the call count, not of the pixels, on this backend.
+
+### x86_64 — phase-15 scene, `dummy` + `software` (the recorded baseline)
+
+| Scenario | Draw calls | FPS | Frame avg | Render2D avg |
+|---|---:|---:|---:|---:|
+| 100 sprites, batched | 1 | 2447.6 | 0.407 ms | 0.143 ms |
+| 100 sprites, immediate | 100 | 2453.0 | 0.408 ms | 0.144 ms |
+| 500 sprites, batched | 1 | 1053.7 | 0.950 ms | 0.682 ms |
+| 500 sprites, immediate | 500 | 1043.5 | 0.956 ms | 0.692 ms |
+| 1000 sprites, batched | 1 | 637.7 | 1.555 ms | 1.300 ms |
+| 1000 sprites, immediate | 1000 | 598.9 | 1.657 ms | 1.398 ms |
+| 5000 sprites, batched | 2 | 158.1 | 6.170 ms | 6.031 ms |
+| 5000 sprites, immediate | 5000 | 157.6 | 6.780 ms | 6.061 ms |
+| 1000 sprites, 10-region atlas, batched | 1 | 632.3 | 1.588 ms | 1.313 ms |
+| 1000 sprites, 10-region atlas, immediate | 1000 | 595.6 | 1.591 ms | 1.407 ms |
+
+**Like for like, the recorded baseline does not regress: 1000 sprites goes 598.9 →
+637.7 FPS (+6.5 %) and 1.398 → 1.300 ms of `render2d` (−7.0 %).** The 637.7 FPS also
+confirms the `--centred-camera` reproduction is faithful (the phase-15 table says 645.5
+on the same machine class).
+
+### x86_64 — whole-field scene (the fixed camera), `dummy` + `software`
+
+Included because it is the case where batching is *not* free. With the camera pinned so
+the frame covers the canvas, the software triangle path is slower per pixel than the
+blit path it replaces:
+
+| Scenario | Draw calls | FPS | Frame avg | Render2D avg |
+|---|---:|---:|---:|---:|
+| 1000 sprites, batched | 1 | 107.9 | 9.207 ms | 8.940 ms |
+| 1000 sprites, immediate | 1000 | 111.4 | 8.890 ms | 8.648 ms |
+| 5000 sprites, batched | 5 | 38.4 | 25.686 ms | 25.681 ms |
+| 5000 sprites, immediate | 5000 | 41.9 | 23.073 ms | 23.492 ms |
+
+**−3.1 % at 1000 sprites, −8.3 % at 5000** — inside the 10 % threshold but recorded in
+full, because it is a real cost on a backend a host can still be running. A game on the
+software renderer can call `set_batch_config(SpriteBatchConfig::new(_, 1))` or
+`draw_texture_immediate`; both are public and documented.
+
+### x86_64 — whole-field scene, `opengl` (accelerated)
+
+| Scenario | Draw calls | FPS | Frame avg | Render2D avg |
+|---|---:|---:|---:|---:|
+| 100 sprites, batched | 1 | 24275.1 | 0.029 ms | 0.026 ms |
+| 100 sprites, immediate | 100 | 7528.4 | 0.125 ms | 0.116 ms |
+| 500 sprites, batched | 1 | 7599.3 | 0.100 ms | 0.114 ms |
+| 500 sprites, immediate | 500 | 1713.8 | 0.590 ms | 0.567 ms |
+| 1000 sprites, batched | 1 | 4024.8 | 0.198 ms | 0.230 ms |
+| 1000 sprites, immediate | 1000 | 896.9 | 1.111 ms | 1.097 ms |
+| 5000 sprites, batched | 5 | 817.4 | 1.051 ms | 1.189 ms |
+| 5000 sprites, immediate | 5000 | 178.6 | 5.582 ms | 5.569 ms |
+| 1000 sprites, 10-region atlas, batched | 1 | 3990.2 | 0.202 ms | 0.232 ms |
+| 1000 sprites, 10-region atlas, immediate | 1000 | 865.1 | 1.165 ms | 1.136 ms |
+
+1000 sprites: **896.9 → 4024.8 FPS, 4.49x** (`render2d` 1.097 → 0.230 ms, 4.77x). The
+larger ratio than on the phase-15 scene is the larger pixel coverage: more per-sprite
+work for the copy path to do before the batch removes the call.
+
+The ten-texture **interleaved** scene is one call per sprite by design (ADR-043); on
+`opengl` it measures 198.1 FPS batched vs 223.5 immediate at 1000 sprites, i.e. the
+batcher's own bookkeeping (−11 %) with nothing to merge. The ten-region **atlas** is the
+answer to that scene: 3990.2 FPS and **1** call.
+
+### Criterion benchmark
+
+`cargo bench -p giochi-engine --bench sprites_2d`, 8x8 sprites, 1000 of them, one
+texture, `SDL_VIDEODRIVER=offscreen SDL_RENDER_DRIVER=opengl`: **737 µs unbatched →
+191 µs batched (3.86x)**. That is the tightest measurement of the change: no engine
+loop, no overlay, no scene. On the `software` renderer the same benchmark measures
+725 µs batched vs 718 µs unbatched at 8x8 (neutral, as the demo above shows for
+larger sprites).
+
+### ARM64 PX30 — KMSDRM 640x480, `opengles2` (Mali-G31), phase-15 scene
+
+The panel pins the run at ~60 FPS below ~10000 sprites, so `render2d_avg` is the
+discriminating column there and FPS only moves once the frame exceeds the vblank.
+
+| Scenario | Draw calls | FPS | Frame avg | CPU avg | Render2D avg |
+|---|---:|---:|---:|---:|---:|
+| 100 sprites, 1 texture, batched | 1 | 59.9 | 16.688 ms | 0.579 ms | 0.368 ms |
+| 100 sprites, 1 texture, immediate | 100 | 59.9 | 16.689 ms | 0.564 ms | 0.358 ms |
+| 500 sprites, 1 texture, batched | 1 | 59.9 | 16.685 ms | 1.306 ms | 1.166 ms |
+| 500 sprites, 1 texture, immediate | 500 | 59.9 | 16.687 ms | 1.570 ms | 1.426 ms |
+| 1000 sprites, 1 texture, batched | 1 | 59.9 | 16.679 ms | 2.433 ms | 2.221 ms |
+| 1000 sprites, 1 texture, immediate | 1000 | 59.9 | 16.686 ms | 2.642 ms | 2.454 ms |
+| 5000 sprites, 1 texture, batched | 5 | 58.2 | 16.690 ms | 6.136 ms | 5.753 ms |
+| 5000 sprites, 1 texture, immediate | 5000 | 58.0 | 16.961 ms | 7.028 ms | 6.642 ms |
+| 20000 sprites, 1 texture, batched | 20 | 14.8 | 67.014 ms | 26.815 ms | 22.853 ms |
+| 20000 sprites, 1 texture, immediate | 20000 | 13.8 | 72.272 ms | 32.516 ms | 28.495 ms |
+| 100 sprites, 10 textures, batched | 100 | 59.9 | 16.684 ms | 0.581 ms | 0.483 ms |
+| 100 sprites, 10-region atlas, batched | 1 | 60.0 | 16.683 ms | 0.673 ms | 0.451 ms |
+| 500 sprites, 10 textures, batched | 500 | 59.7 | 16.681 ms | 1.325 ms | 1.227 ms |
+| 500 sprites, 10-region atlas, batched | 1 | 60.0 | 16.682 ms | 1.364 ms | 1.226 ms |
+| 1000 sprites, 10 textures, batched | 1000 | **48.0** | 20.654 ms | 2.230 ms | 2.120 ms |
+| 1000 sprites, 10-region atlas, batched | 1 | **59.9** | 16.685 ms | 2.483 ms | 2.258 ms |
+| 5000 sprites, 10 textures, batched | 5000 | **10.8** | 90.223 ms | 11.171 ms | 10.513 ms |
+| 5000 sprites, 10-region atlas, batched | 5 | **58.6** | 16.688 ms | 6.373 ms | 6.002 ms |
+| 20000 sprites, 10 textures, batched | 20000 | **2.6** | 250.000 ms | 48.987 ms | 42.208 ms |
+| 20000 sprites, 10-region atlas, batched | 20 | **14.8** | 66.741 ms | 27.325 ms | 23.525 ms |
+
+What the device shows:
+
+- **1000 sprites, one texture**: 1000 calls → 1, `render2d` **2.454 → 2.221 ms
+  (−9.5 %)**, CPU 2.642 → 2.433 ms. FPS cannot show it; the panel holds both at 59.9.
+- **5000 sprites, one texture**: 5 calls, `render2d` **6.642 → 5.753 ms (−13.4 %)**.
+- **20000 sprites, one texture**: 20 calls, `render2d` **28.495 → 22.853 ms (−19.8 %)**,
+  FPS **13.8 → 14.8 (+7.2 %)**. This is the scenario the phase-15 log nominated for the
+  device criterion, and it does move once the batch limit is 1024: at the 4096 default
+  it measured 28.543 vs 28.246 ms, i.e. nothing, because a single 4096-quad geometry
+  call on the Mali costs as much as the calls it saved. The default limit is part of
+  the optimisation, not a detail.
+- **Interleaved ten textures vs the same scene from an atlas** — the clearest result of
+  the phase, because it is the case where the call count is what breaks the frame:
+
+  | Sprites | 10 textures (1000/N calls) | 10-region atlas (1 call) | Gain |
+  |---:|---:|---:|---:|
+  | 1000 | 48.0 FPS | 59.9 FPS | +25 % |
+  | 5000 | 10.8 FPS | 58.6 FPS | **5.4x** |
+  | 20000 | 2.6 FPS | 14.8 FPS | **5.7x** |
+
+  At 20000 sprites the interleaved scene takes 250 ms per frame — 15 frames per second
+  below the panel rate — and the atlas version is back at the 60 FPS cap's neighbourhood
+  with 66.7 ms. Nothing about the sprites changed; only that they share one texture.
+
+### Where phase 16 stands against its acceptance criteria
+
+| Criterion | Result |
+|---|---|
+| 1000 sprites of one texture: 1000 draw calls → ≤ 5 | **1 call** on all four backends measured |
+| ≥ 3x FPS gain over the phase-15 baseline at 1000 sprites | **Partially met, cause measured.** On the phase-15 scene the renderer is 3.08x faster (`render2d` 0.403 → 0.131 ms on `opengl`), but whole-frame FPS is 2.83x because the frame loop's fixed cost becomes the limit. The recorded phase-15 baseline backend (`dummy`/`software`) gains only +6.5 %, and the PX30 is panel-capped there. The full ≥ 3x whole-frame figure appears on `opengl` with the fixed camera (4.49x) and on the criterion bench (3.96x). |
+| No > 10 % regression on an existing benchmark | Met. The phase-15 scene improves 6.5 %; the whole-field `software` scene regresses 3.1 % at 1000 and 8.3 % at 5000, both inside the threshold and both recorded above with their cause. |
+| Existing public API unchanged (R12) | Yes — `draw_texture` keeps its signature and batches transparently; the new types are additive. |
+
+The honest summary: the draw-call criterion is met everywhere and the renderer is 3x
+faster on the accelerated paths, but "3x FPS at 1000 sprites" is not reachable on the
+two backends the phase-15 baseline chose, because both are dominated by something other
+than the call count — pixel fill on the software renderer and on the console, the
+vblank on the console, and the residual frame-loop cost at 6000 FPS on `opengl`. The
+device-level win is real and large where calls are the bottleneck (5.4x at 5000 sprites
+from an atlas) and is a 10-20 % `render2d` reduction in the single-texture scenes.
 
 ## After Phase 17 (Instancing 3D + Static Batching + Upscaling)
 

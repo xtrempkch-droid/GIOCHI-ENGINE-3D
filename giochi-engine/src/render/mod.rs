@@ -4,11 +4,15 @@
 //! or render pipelines are introduced here. Textures are opaque handles, and the
 //! renderer never exposes an SDL object to user code.
 
+pub mod atlas;
+pub mod batch;
 pub mod camera;
 pub mod renderer;
 pub mod sprite;
 pub mod texture;
 
+pub use atlas::{AtlasRegion, TextureAtlas};
+pub use batch::{SpriteBatch, SpriteBatchConfig};
 pub use camera::Camera;
 pub use renderer::RenderContext;
 pub use sprite::Sprite;
