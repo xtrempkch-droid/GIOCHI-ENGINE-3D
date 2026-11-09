@@ -57,6 +57,12 @@ pub struct RenderContext3D {
     /// failure as a refused mesh. `draw_instanced` falls back to one draw per instance
     /// so the scene still renders, and logs the reason once.
     instanced: Option<InstancedRenderer>,
+    /// Draw calls the last `draw_instanced` issued.
+    ///
+    /// Kept here rather than read from `InstancedRenderer`: the per-instance fallback
+    /// never calls into that type, so asking it would report 0 while the frame issued N
+    /// draws — the one number a caller uses to tell the two paths apart.
+    last_instanced_draw_calls: u32,
     #[cfg(feature = "profiling")]
     counters: FrameCounters,
 }
@@ -106,6 +112,7 @@ impl RenderContext3D {
             // degrades to "draw one at a time" (below) rather than turning every caller
             // into a `Result`. The fallback draws the correct picture, only slower.
             instanced,
+            last_instanced_draw_calls: 0,
             #[cfg(feature = "profiling")]
             counters: FrameCounters::new(),
         }
@@ -814,9 +821,11 @@ impl RenderContext3D {
         colour: Color3D,
     ) -> Result3D<u32> {
         if instances.is_empty() {
+            self.last_instanced_draw_calls = 0;
             return Ok(0);
         }
         if self.meshes.get(mesh).is_none() || self.shaders.get(shader).is_none() {
+            self.last_instanced_draw_calls = 0;
             return Ok(0);
         }
 
@@ -836,12 +845,13 @@ impl RenderContext3D {
             .clone();
 
         if !program.is_instanced() {
-            // A `Phong`/`Flat` program has no instance attributes, so the instanced
-            // path would draw every copy at whatever `u_model` holds. Report it: this
-            // is a caller mistake that produces a wrong picture, not a slow frame.
+            // A `Phong`/`Flat` program has no instance attributes, so the single-call
+            // path would draw every copy at whatever `u_model` happens to hold. The
+            // per-instance fallback below is correct for such a program, so use it and
+            // report the slower call rather than draw a wrong picture faster.
             log::warn!(
                 "draw_instanced needs an instanced shader (BuiltinShader::Instanced); \
-                 this program renders every copy at the same transform"
+                 drawing one call per instance instead"
             );
         }
 
@@ -849,10 +859,11 @@ impl RenderContext3D {
         self.bind_and_upload_shared(&program, camera)?;
         program.set_color(self.gl.glow(), "u_color", colour.clamped());
 
-        let available = self
-            .instanced
-            .as_ref()
-            .is_some_and(|instanced| instanced.support().is_available());
+        let available = program.is_instanced()
+            && self
+                .instanced
+                .as_ref()
+                .is_some_and(|instanced| instanced.support().is_available());
 
         if available {
             let gl = self.gl.glow();
@@ -862,6 +873,7 @@ impl RenderContext3D {
             // instance buffer belong to this context.
             let calls = unsafe { instanced.draw(gl, &geometry, instances) };
             self.instanced = Some(instanced);
+            self.last_instanced_draw_calls = calls;
 
             #[cfg(feature = "profiling")]
             self.counters.record_draw_calls(calls);
@@ -876,20 +888,42 @@ impl RenderContext3D {
             return Ok(calls);
         }
 
-        // Fallback: one ordinary draw per instance. The instance shader has no
-        // `u_model`, so a caller that picked it gets a scene of copies at the origin
-        // rather than a crash — say so once, because the picture is wrong in a way that
-        // a frame-rate number would not reveal.
+        // Fallback: one ordinary draw per instance, with the same picture.
+        //
+        // The instanced vertex shader deliberately has no `u_model`; it reads the matrix
+        // from attributes 3..6. `Mesh::draw` only knows about 0..2, so setting a uniform
+        // here would do nothing and the copies would be transformed by whatever generic
+        // attribute values the driver happened to hold — not the documented "same picture,
+        // more calls". With the arrays disabled, GLES uses the current generic value for
+        // that attribute, so writing the four columns before each draw is enough.
+        let gl = self.gl.glow();
         if program.is_instanced() {
-            log::warn!(
-                "instancing is unavailable on this driver but the program expects \
-                 per-instance attributes; the scene will not render correctly"
-            );
+            // A previous draw may have left these slots enabled on the default VAO.
+            for slot in
+                crate::shader::ATTRIB_INSTANCE_MODEL..crate::shader::ATTRIB_INSTANCE_MODEL + 4
+            {
+                // SAFETY: attribute state on the default VAO, core GLES 2.0.
+                unsafe { gl.disable_vertex_attrib_array(slot) };
+            }
         }
+
         for model in instances {
             self.bind_and_upload_matrix(&program, model, camera)?;
-            program.set_color(self.gl.glow(), "u_color", colour.clamped());
-            geometry.draw(self.gl.glow(), &program);
+            program.set_color(gl, "u_color", colour.clamped());
+            if program.is_instanced() {
+                for column in 0..4usize {
+                    // SAFETY: a generic vertex attribute is core GLES 2.0 (the array is
+                    // disabled above). `Mat4::data` is column-major, so each slice is one
+                    // column of the matrix the shader reassembles.
+                    unsafe {
+                        gl.vertex_attrib_4_f32_slice(
+                            crate::shader::ATTRIB_INSTANCE_MODEL + column as u32,
+                            &model.data[column * 4..column * 4 + 4],
+                        );
+                    }
+                }
+            }
+            geometry.draw(gl, &program);
         }
 
         #[cfg(feature = "profiling")]
@@ -901,6 +935,7 @@ impl RenderContext3D {
             u64::from(instances.len() as u32),
         );
 
+        self.last_instanced_draw_calls = instances.len() as u32;
         Ok(instances.len() as u32)
     }
 
@@ -920,9 +955,7 @@ impl RenderContext3D {
 
     /// Draw calls issued by the last [`RenderContext3D::draw_instanced`].
     pub fn last_instanced_draw_calls(&self) -> u32 {
-        self.instanced
-            .as_ref()
-            .map_or(0, |instanced| instanced.last_draw_calls())
+        self.last_instanced_draw_calls
     }
 }
 

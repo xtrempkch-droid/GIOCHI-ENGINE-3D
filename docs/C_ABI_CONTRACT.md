@@ -2,7 +2,7 @@
 
 **Contract version: `GIOCHI_ABI_VERSION 1` for part I (2D), `2` for part II (3D), `3` for
 part III (frame statistics).**
-**Engine version: `0.2.2`**
+**Engine version: `0.3.0`**
 **Status: authoritative.** This document is the law of the project. If a Rust type
 cannot be expressed in the C form below, the *type* is redesigned — the contract
 is never relaxed.
@@ -369,7 +369,7 @@ of `PROGRESS.md` that implemented it, kept as history; all of them are implement
 
 ```c
 /* Always available, safe to call before giochi_engine_init. */
-uint32_t    giochi_abi_version(void);      /* == GIOCHI_ABI_VERSION (1) */
+uint32_t    giochi_abi_version(void);      /* == GIOCHI_ABI_VERSION (3) */
 uint32_t    giochi_engine_version(void);   /* major<<16|minor<<8|patch */
 const char* giochi_get_last_error(void);   /* thread-local, never NULL */
 

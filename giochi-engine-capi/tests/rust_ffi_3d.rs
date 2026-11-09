@@ -59,9 +59,24 @@ fn color(r: f32, g: f32, b: f32, a: f32) -> GiochiColor3D {
 fn engine_or_skip() -> Option<*mut GiochiEngine3D> {
     std::env::set_var("SDL_VIDEODRIVER", "offscreen");
 
-    let engine = giochi_engine3d_create(&window_config());
-    if engine.is_null() {
+    // SDL2 allows one `EventPump` per *process*, not per thread. Cargo runs the tests of
+    // this binary in parallel threads, and a test's engine owns the pump until its
+    // thread ends, so the second test to call `create` used to fail — and was reported
+    // as "no GL driver", silently skipping a test that never ran. Wait for the pump
+    // instead: `create` failing for that reason is the one case that is not a skip.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let engine = giochi_engine3d_create(&window_config());
+        if !engine.is_null() {
+            return Some(engine);
+        }
+
         let message = last_error();
+        if message.contains("EventPump") && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            continue;
+        }
+
         assert!(
             !message.is_empty(),
             "create failed without saying why, so a consumer cannot report it"
@@ -69,7 +84,6 @@ fn engine_or_skip() -> Option<*mut GiochiEngine3D> {
         eprintln!("skipped: no OpenGL ES driver ({message})");
         return None;
     }
-    Some(engine)
 }
 
 /// Releases the engine if it was created, so a failing test does not leave it installed
@@ -78,6 +92,30 @@ fn release(engine: Option<*mut GiochiEngine3D>) {
     if let Some(engine) = engine {
         giochi_engine3d_destroy(engine);
     }
+}
+
+#[test]
+fn destroying_a_stale_engine_pointer_is_reported_not_freed_twice() {
+    let Some(engine) = engine_or_skip() else {
+        return;
+    };
+    giochi_engine3d_destroy(engine);
+
+    // The slot is empty now. A second call with the same pointer value must be rejected:
+    // the old code only checked a *non-NULL* mismatch, so this reconstructed the `Box`
+    // again and freed the allocation twice.
+    giochi_engine3d_destroy(engine);
+    let message = last_error();
+    assert!(
+        message.contains("already destroyed") || message.contains("not the live one"),
+        "a double destroy must explain itself, got: {message}"
+    );
+
+    // The rejection must not have left the thread wedged: a fresh engine still works.
+    let Some(fresh) = engine_or_skip() else {
+        panic!("the thread could not create an engine after a rejected double destroy");
+    };
+    giochi_engine3d_destroy(fresh);
 }
 
 #[test]

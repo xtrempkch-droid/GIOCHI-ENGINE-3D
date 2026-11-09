@@ -592,9 +592,14 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             .as_deref()
             .filter(|_| options.frames.is_some_and(|limit| frames + 1 >= limit));
         if let Some(path) = capture {
-            let pixels = render.read_pixels(width, height)?;
-            write_bmp(path, width, height, &pixels)?;
-            println!("quadro: {path} ({width}x{height})");
+            // `read_pixels` runs the upscale pass before reading, so the picture is the
+            // window-sized one even when `--scale` rendered into a smaller target. Ask
+            // for the window's size: passing `width`/`height` (the low-resolution size)
+            // returned the bottom-left corner of the upscaled frame.
+            let (capture_width, capture_height) = window.drawable_size();
+            let pixels = render.read_pixels(capture_width, capture_height)?;
+            write_bmp(path, capture_width, capture_height, &pixels)?;
+            println!("quadro: {path} ({capture_width}x{capture_height})");
         }
 
         render.end_frame(&window);

@@ -59,11 +59,16 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Major component of [`VERSION`].
 pub const VERSION_MAJOR: u32 = 0;
 /// Minor component of [`VERSION`].
-pub const VERSION_MINOR: u32 = 2;
+pub const VERSION_MINOR: u32 = 3;
 /// Patch component of [`VERSION`].
-pub const VERSION_PATCH: u32 = 2;
+pub const VERSION_PATCH: u32 = 0;
 
-/// Version of the C ABI described by `docs/C_ABI_CONTRACT.md`.
+/// Version of **part I** of the C ABI (the 2D surface), described by
+/// `docs/C_ABI_CONTRACT.md` §1–§7.
+///
+/// This is not the version of the whole C ABI: `GIOCHI_ABI_VERSION` in
+/// `giochi-engine-capi` is the number a C consumer checks, and it is 3 (parts I–III).
+/// Part I is frozen, so this constant stays 1.
 pub const ABI_VERSION: u32 = 1;
 
 /// Returns the engine version packed as `major << 16 | minor << 8 | patch`.
@@ -76,7 +81,7 @@ pub const fn version_packed() -> u32 {
 pub use crate::assets::{asset_size, read_asset, ResourceManager, MAX_ASSET_SIZE};
 pub use crate::audio::{AudioSystem, MusicHandle, MusicState, SoundHandle};
 pub use crate::core::engine::{Engine, EngineConfig, RunStats, DEFAULT_CLEAR_COLOR};
-pub use crate::core::game_loop::{GameLoop, FIXED_TIMESTEP, MAX_FRAME_TIME};
+pub use crate::core::game_loop::{GameLoop, FIXED_TIMESTEP, MAX_FRAME_TIME, MIN_FIXED_TIMESTEP};
 pub use crate::core::time::{FrameClock, Time};
 pub use crate::error::{codes, GiochiError, GiochiResult};
 pub use crate::input::{Input, KeyboardState, MouseState};
@@ -102,6 +107,6 @@ mod tests {
 
     #[test]
     fn version_is_packed_as_major_minor_patch() {
-        assert_eq!(version_packed(), 0x00_02_02);
+        assert_eq!(version_packed(), 0x00_03_00);
     }
 }

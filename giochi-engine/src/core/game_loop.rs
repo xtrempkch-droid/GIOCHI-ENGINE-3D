@@ -18,6 +18,15 @@ pub const FIXED_TIMESTEP: f32 = 1.0 / 60.0;
 /// Longest frame time the loop will integrate in one go, in seconds.
 pub const MAX_FRAME_TIME: f32 = 0.25;
 
+/// Smallest step [`GameLoop::with_fixed_timestep`] accepts: 1 ms, i.e. 1000 Hz.
+///
+/// `advance` loops `while accumulator >= fixed_timestep`, so a step of, say, 1e-9 s
+/// would make a single 0.25 s frame run 250 million iterations — a frozen process with
+/// no error and no frame, the same failure mode `BalanceConfig::sanitised` guards
+/// against. One kilohertz is already above anything the engine targets, and
+/// `Engine::new` never produces a smaller value (`target_fps < 1000`).
+pub const MIN_FIXED_TIMESTEP: f32 = 1.0e-3;
+
 /// Fixed-timestep accumulator.
 #[repr(C)]
 #[derive(Debug)]
@@ -42,12 +51,14 @@ impl GameLoop {
 
     /// Overrides the fixed step, in seconds.
     ///
-    /// Returns [`crate::error::GiochiError::InvalidArgument`] for non-finite or
-    /// non-positive values.
+    /// Returns [`crate::error::GiochiError::InvalidArgument`] for non-finite values and
+    /// for values below [`MIN_FIXED_TIMESTEP`]. The lower bound is not cosmetic: a step
+    /// that small never makes progress in a reasonable time, and `advance` would spend an
+    /// unbounded number of iterations catching up a single frame.
     pub fn with_fixed_timestep(mut self, fixed_timestep: f32) -> Result<Self, crate::GiochiError> {
-        if !fixed_timestep.is_finite() || fixed_timestep <= 0.0 {
+        if !fixed_timestep.is_finite() || fixed_timestep < MIN_FIXED_TIMESTEP {
             return Err(crate::error::GiochiError::InvalidArgument(
-                "fixed timestep must be a positive, finite number of seconds",
+                "fixed timestep must be finite and at least 1 ms (1000 Hz)",
             ));
         }
         self.fixed_timestep = fixed_timestep;
@@ -243,12 +254,26 @@ mod tests {
 
     #[test]
     fn invalid_fixed_timesteps_are_rejected() {
-        for bad in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+        // The tiny values are the ones that used to be accepted and then make `advance`
+        // loop hundreds of millions of times for one frame.
+        for bad in [
+            0.0,
+            -1.0,
+            f32::NAN,
+            f32::INFINITY,
+            1.0e-9,
+            MIN_FIXED_TIMESTEP / 2.0,
+        ] {
             assert!(
                 GameLoop::new().with_fixed_timestep(bad).is_err(),
                 "{bad} must be rejected"
             );
         }
+
+        // The documented floor is accepted, so the check cannot become "reject 1000 Hz".
+        assert!(GameLoop::new()
+            .with_fixed_timestep(MIN_FIXED_TIMESTEP)
+            .is_ok());
     }
 
     #[test]

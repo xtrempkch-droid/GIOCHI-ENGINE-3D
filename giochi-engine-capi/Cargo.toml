@@ -15,12 +15,13 @@ name = "giochi"
 crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
-giochi-engine = { path = "../giochi-engine", version = "0.2.2" }
-# Part II of the ABI (`GIOCHI_ABI_VERSION 2`). The 3D crate is the only thing here that
+giochi-engine = { path = "../giochi-engine", version = "0.3.0" }
+# Parts II and III of the ABI (`GIOCHI_ABI_VERSION 3`: 3D and frame statistics). The 3D
+# crate is the only thing here that
 # links GLES, so a 2D-only consumer of `libgiochi.so` still pulls it in — that is the
 # price of one shared library, and the alternative (a second .so) would make a C program
 # that wants both link two things and keep two versions in step.
-giochi-engine-3d = { path = "../giochi-engine-3d", version = "0.2.2" }
+giochi-engine-3d = { path = "../giochi-engine-3d", version = "0.3.0" }
 log = { workspace = true }
 
 [features]

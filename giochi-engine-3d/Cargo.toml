@@ -9,7 +9,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-giochi-engine = { path = "../giochi-engine", version = "0.2.2" }
+giochi-engine = { path = "../giochi-engine", version = "0.3.0" }
 glow = { workspace = true }
 bytemuck = { workspace = true }
 tobj = { workspace = true }

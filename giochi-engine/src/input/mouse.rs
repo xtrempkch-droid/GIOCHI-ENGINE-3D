@@ -77,9 +77,14 @@ impl MouseState {
     }
 
     /// Marks `button` as no longer held, registering a "released" edge.
+    ///
+    /// The "pressed" edge is deliberately **not** cleared, matching
+    /// [`KeyboardState::release`](crate::input::KeyboardState::release): a click that
+    /// goes down and up between two frames is a click, and a menu that only polls
+    /// `is_pressed_this_frame` must still see it. Dropping it made a fast mouse click
+    /// invisible while the same tap on the keyboard was reported.
     pub fn release(&mut self, button: MouseButton) {
         if self.buttons.remove(&button) {
-            self.pressed.remove(&button);
             self.released.insert(button);
         }
     }
@@ -211,6 +216,21 @@ mod tests {
 
         state.begin_frame();
         assert!(!state.is_released_this_frame(MOUSE_RIGHT));
+    }
+
+    #[test]
+    fn a_press_and_release_in_the_same_frame_reports_both_edges() {
+        let mut state = MouseState::new();
+
+        state.press(MOUSE_LEFT);
+        state.release(MOUSE_LEFT);
+
+        assert!(!state.is_down(MOUSE_LEFT));
+        assert!(
+            state.is_pressed_this_frame(MOUSE_LEFT),
+            "a fast click must stay visible to a menu that only polls presses"
+        );
+        assert!(state.is_released_this_frame(MOUSE_LEFT));
     }
 
     #[test]

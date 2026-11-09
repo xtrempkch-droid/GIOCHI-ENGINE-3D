@@ -176,6 +176,9 @@ fn batching_reduces_draw_calls_without_changing_pixels() {
     );
 
     render.clear(Color::BLACK);
+    // Reset the cumulative counters here so the assertion below is about this loop, not
+    // about every sprite the test has drawn since the renderer was created.
+    render.begin_frame_stats();
     for index in 0..100 {
         let x = (index % 10) as f32 * 6.0;
         let y = (index / 10) as f32 * 6.0;
@@ -195,8 +198,8 @@ fn batching_reduces_draw_calls_without_changing_pixels() {
     );
     assert_eq!(
         render.frame_counters().sprites_drawn,
-        0,
-        "this binary runs without the profiling feature"
+        if cfg!(feature = "profiling") { 100 } else { 0 },
+        "the counter exists exactly when the profiling feature does"
     );
 
     // The unknown region is empty and draws nothing; the known one draws pixels.

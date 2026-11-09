@@ -179,7 +179,11 @@ fn pack_matrices(instances: &[Mat4], scratch: &mut Vec<f32>) {
     scratch.clear();
     let floats = instances.len() * 16;
     if scratch.capacity() < floats {
-        scratch.reserve(floats - scratch.capacity());
+        // `reserve` is relative to `len`, which `clear` just set to zero. Reserving
+        // `floats - capacity` therefore asked for *less* than the buffer needed and let
+        // `extend_from_slice` grow it again — while the comment above promised this was
+        // the growth step.
+        scratch.reserve(floats);
     }
     for instance in instances {
         scratch.extend_from_slice(&instance.data);

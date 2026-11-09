@@ -10,14 +10,15 @@ language through a C ABI. **2D** through `sdl2::render`, and **3D** through Open
 over EGL in a separate crate. Primary target: `aarch64-unknown-linux-gnu` (Linux consoles
 with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 
-> **Status: 0.2.2 — every phase (0 to 14) complete.** The workspace, the SDL2 platform
+> **Status: 0.3.0 — every phase (0 to 18) complete.** The workspace, the SDL2 platform
 > layer, the fixed-timestep loop, the 2D renderer with opaque texture handles,
 > keyboard/mouse/gamepad input, the asset cache, the audio mixer, the scene stack, the
 > `Engine` facade, the **C ABI** (`libgiochi.so` / `libgiochi.a` + generated `giochi.h`,
-> version 3), the **Lua binding** (`giochi` module + a complete reference game), and the
-> **3D crate** — GLES/EGL context, mesh pipeline, Blinn-Phong lighting, `Camera3D` with a
-> controller, and the 3D half of the C ABI — with CI, release packaging and the guides.
-> Validated on a Rockchip PX30 (Mali-G31). See [PROGRESS.md](PROGRESS.md).
+> parts I–III, version 3), the **Lua binding** (`giochi` module + a complete reference
+> game), the **3D crate** — GLES/EGL context, mesh pipeline, Blinn-Phong lighting,
+> `Camera3D` with a controller, instancing, static batching and upscaling — and the
+> **profiler** (frame statistics, `F1` overlay, C ABI v3), with CI, release packaging and
+> the guides. Validated on a Rockchip PX30 (Mali-G31). See [PROGRESS.md](PROGRESS.md).
 
 
 ## Why "C-shaped" Rust?

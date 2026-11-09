@@ -49,6 +49,15 @@ jobs:
         # Every integration test uses SDL's `dummy` driver, so no display is needed.
         run: cargo test --workspace --target x86_64-unknown-linux-gnu
 
+      - name: Test with the profiling feature
+        # The default build compiles the profiler and every counter out, so a test that
+        # asserts the counting behaviour has to be given a build where counting exists.
+        # Without this step the feature is only compiled by the perf workflow, which runs
+        # one test binary.
+        run: |
+          cargo test -p giochi-engine --features profiling --target x86_64-unknown-linux-gnu
+          cargo test -p giochi-engine-3d --features profiling --target x86_64-unknown-linux-gnu
+
       - name: Docs
         run: cargo doc --workspace --no-deps --document-private-items
 
@@ -232,6 +241,29 @@ jobs:
         run: |
           cargo test -q -p giochi-engine-3d --test mesh_pipeline
           cargo run -q -p giochi-engine-3d --example cube_demo -- --frames 30
+
+      - name: 3D instancing, upscaling and static batches
+        # The upscale tests used to live outside every workflow, and the tests in a file
+        # used to skip after the first one because only one test may own SDL's
+        # `EventPump`; the helpers now serialise instead of interpreting that as
+        # "no GL driver". Both are why this step exists.
+        env:
+          SDL_VIDEODRIVER: offscreen
+        run: |
+          cargo test -q -p giochi-engine-3d --test instancing
+          cargo test -q -p giochi-engine-3d --test upscale
+          cargo test -q -p giochi-engine-3d --test static_batch
+
+      - name: 3D without instanced drawing
+        # Drivers that expose none of GLES 3.0 core, ANGLE or EXT take the per-instance
+        # path. It has to draw the same picture as one call, not merely report the same
+        # call count, so the forced run compares the frames.
+        env:
+          SDL_VIDEODRIVER: offscreen
+          GIOCHI_FORCE_NO_INSTANCING: "1"
+        run: |
+          cargo test -q -p giochi-engine-3d --test instancing
+          cargo run -q -p giochi-engine-3d --example mini_fps -- --frames 30 --loop
 
       - name: 3D first-person walker
         # `--auto` walks a scripted path: `Input`'s keyboard state is only populated by

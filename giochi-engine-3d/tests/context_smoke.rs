@@ -11,6 +11,10 @@
 //! SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d
 //! ```
 
+mod common;
+
+use std::sync::MutexGuard;
+
 use giochi_engine::platform::sdl::Platform;
 use giochi_engine::platform::window::{Window, WindowConfig};
 use giochi_engine_3d::context::{self, GlesVersion};
@@ -22,7 +26,13 @@ use giochi_engine_3d::shader::BuiltinShader;
 use giochi_engine_3d::RenderContext3D;
 
 /// Returns a headless GL context, or `None` when this machine has no GL driver.
-fn headless_context() -> Option<(Platform, Window)> {
+///
+/// The guard serialises the tests that need a `Platform`: SDL allows one `EventPump` per
+/// process, and a concurrent `Platform::new` fails in a way that is indistinguishable
+/// from "no GL driver" unless the tests hold it in turn.
+fn headless_context() -> Option<(MutexGuard<'static, ()>, Platform, Window)> {
+    let guard = common::platform_guard();
+
     // The offscreen driver is the only one that gives GL without a display. Setting it
     // here keeps the test independent of the developer's session, and `Platform::new`
     // respects an explicit `SDL_VIDEODRIVER`.
@@ -32,12 +42,12 @@ fn headless_context() -> Option<(Platform, Window)> {
     context::configure_attributes(&platform, GlesVersion::Gles2).ok()?;
 
     let window = Window::new_opengl(&platform, WindowConfig::new(320, 240), "test").ok()?;
-    Some((platform, window))
+    Some((guard, platform, window))
 }
 
 #[test]
 fn a_context_can_be_created_and_reports_a_driver() {
-    let Some((_platform, window)) = headless_context() else {
+    let Some((_guard, _platform, window)) = headless_context() else {
         eprintln!("skipped: no OpenGL ES driver available");
         return;
     };
@@ -56,7 +66,7 @@ fn a_context_can_be_created_and_reports_a_driver() {
 
 #[test]
 fn clearing_a_frame_raises_no_gl_error() {
-    let Some((_platform, window)) = headless_context() else {
+    let Some((_guard, _platform, window)) = headless_context() else {
         eprintln!("skipped: no OpenGL ES driver available");
         return;
     };
@@ -77,7 +87,7 @@ fn clearing_a_frame_raises_no_gl_error() {
 
 #[test]
 fn the_clear_color_is_actually_written_to_the_surface() {
-    let Some((_platform, window)) = headless_context() else {
+    let Some((_guard, _platform, window)) = headless_context() else {
         eprintln!("skipped: no OpenGL ES driver available");
         return;
     };
@@ -106,7 +116,7 @@ fn the_clear_color_is_actually_written_to_the_surface() {
 #[cfg(feature = "profiling")]
 #[test]
 fn the_renderer_counts_meshes_vertices_and_resets_per_frame() {
-    let Some((_platform, window)) = headless_context() else {
+    let Some((_guard, _platform, window)) = headless_context() else {
         eprintln!("skipped: no OpenGL ES driver available");
         return;
     };

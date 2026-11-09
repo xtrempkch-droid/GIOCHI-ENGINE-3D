@@ -60,9 +60,11 @@ struct Options {
     /// `--quadro <arquivo.bmp>`: capture the last rendered frame.
     ///
     /// Exists for the device: "abriu" and "desenhou" are different claims, and
-    /// without a capture there is no way to tell them apart over SSH. Works with
-    /// the software renderer; with GLES read-back returns the swapped buffer, so
-    /// the capture is taken before `present` (see `capture`).
+    /// without a capture there is no way to tell them apart over SSH. The manual
+    /// loop below reads the target after `Engine::step` has presented it; that is
+    /// reliable on the software renderer (the one the dummy/KMSDRM smoke runs use)
+    /// but a GLES back buffer is undefined after a swap, so a future change to read
+    /// before `present` would need a hook in the frame loop.
     quadro: Option<String>,
 }
 

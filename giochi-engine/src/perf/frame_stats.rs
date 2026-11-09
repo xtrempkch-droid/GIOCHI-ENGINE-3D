@@ -26,8 +26,9 @@ use std::time::Duration;
 ///
 /// # C ABI
 ///
-/// Not exposed in ABI v2. Phase 18c projects a subset of these fields as
-/// `GiochiFrameStats` (ABI v3) without changing the Rust type.
+/// Exposed as `GiochiFrameStats` in ABI v3 (part III): that struct is an explicit
+/// projection of the fields a C consumer can use, so adding a field here does not widen
+/// the ABI by accident.
 ///
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -212,7 +213,7 @@ impl FrameStats {
 ///
 /// # C ABI
 ///
-/// Not exposed in ABI v2; phase 18c can project it alongside `GiochiFrameStats`.
+/// Not exposed in ABI v3.
 ///
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -296,7 +297,7 @@ impl FrameTimeSummary {
 ///
 /// # C ABI
 ///
-/// Not exposed in ABI v2.
+/// Not exposed in ABI v3.
 ///
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

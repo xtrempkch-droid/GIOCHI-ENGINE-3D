@@ -235,9 +235,18 @@ impl Upscaler {
             0,
         );
 
-        let depth = gl.create_renderbuffer().map_err(|err| {
-            Error3D::GlObject(format!("glGenRenderbuffers (upscale depth): {err}"))
-        })?;
+        let depth = match gl.create_renderbuffer() {
+            Ok(depth) => depth,
+            Err(err) => {
+                // The colour texture is already allocated and attached; releasing it here
+                // keeps a refused renderbuffer from leaking a texture plus a framebuffer
+                // reference.
+                gl.delete_texture(colour);
+                return Err(Error3D::GlObject(format!(
+                    "glGenRenderbuffers (upscale depth): {err}"
+                )));
+            }
+        };
         gl.bind_renderbuffer(glow::RENDERBUFFER, Some(depth));
         // `DEPTH_COMPONENT16` is the only depth format GLES 2.0 core guarantees for a
         // renderbuffer. A scene that needs more precision (a huge far plane) would
@@ -357,6 +366,13 @@ impl Upscaler {
 
         gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
 
+        // Restore depth writes. `glDepthMask(false)` is *not* part of the renderer's
+        // state block, and leaving it off is not cosmetic: `glClear(GL_DEPTH_BUFFER_BIT)`
+        // is masked by it, so the next frame's clear would be a no-op and every fragment
+        // would be tested against the previous frame's depth. On the first scaled frame
+        // the picture looks right (the buffer is still clear), which is why this only
+        // shows as a scene that disappears or self-occludes from the second frame on.
+        gl.depth_mask(true);
         gl.disable_vertex_attrib_array(self.position_location);
         gl.disable_vertex_attrib_array(self.uv_location);
         gl.bind_buffer(glow::ARRAY_BUFFER, None);

@@ -4,7 +4,61 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-11-09
+
+### Fixed — release audit
+
+The audit behind this release covered the new 3D paths, the C ABI lifecycle and the tests
+themselves.
+
+- **The upscale pass left depth writes disabled.** `Upscaler::blit` called
+  `glDepthMask(GL_FALSE)` and never restored it. `glClear(GL_DEPTH_BUFFER_BIT)` is
+  masked by that flag, so from the second scaled frame on the depth buffer was neither
+  cleared nor written: geometry from the previous frame occluded the scene and anything
+  drawn behind it disappeared. The mask is restored after the blit and set
+  unconditionally in `GlState::apply`; `tests/upscale.rs` renders a second frame with
+  geometry behind the first and fails against the old code.
+- **The instancing fallback drew a different picture.** On a driver with no instance
+  extension, `draw_instanced` uploaded `u_model` per copy, but the instanced shader
+  deliberately has no `u_model`: the copies were transformed by stale generic attribute
+  values and mostly vanished. The fallback now sets the four per-instance matrix
+  attributes before each draw, and a non-instanced program is drawn one instance per call
+  instead of being forced through the single-call path. `GIOCHI_FORCE_NO_INSTANCING=1`
+  makes the path testable and CI compares it against the loop.
+- **`last_instanced_draw_calls` reported 0 on that fallback**, although the frame issued
+  N draws. The count now lives on the render context and is set on both paths.
+- **A double `giochi_engine3d_destroy` was a double free.** The guard only rejected a
+  non-NULL pointer that differed from the live one, so a second call with the stale
+  pointer skipped the check and ran `Box::from_raw` again. The pointer must now equal the
+  live one; a second call is rejected with `GIOCHI_ERROR_INVALID_HANDLE`.
+- **`--quadro` on `mini_fps --scale` captured the wrong region.** The read asked for the
+  low-resolution render size after `read_pixels` had already blitted the full frame to the
+  window, producing the bottom-left corner of the picture. It now uses the window's
+  drawable size.
+- **The GL integration tests were silently skipping.** SDL allows one `EventPump` per
+  process and Cargo runs each test binary's tests in parallel, so only the first test in
+  `context_smoke`, `instancing`, `lighting`, `mesh_pipeline`, `static_batch` and
+  `upscale` ever ran; the rest reported "no GL driver" and passed without executing. The
+  helpers now hold a per-binary lock, the `rust_ffi_3d` helper waits for the pump, and
+  every test runs. Making them run exposed two latent test bugs (a window dropped before
+  its framebuffer was read — a segfault — and the upscale helper presenting the frame
+  before drawing) and three wrong pixel thresholds, all fixed.
+- **A panic on absurd texture dimensions.** `width * height * 4` was computed with
+  unchecked `usize` arithmetic (and `width + 2` on the atlas packer), so a caller could
+  panic a debug build instead of getting `InvalidArgument`. Both now use checked
+  arithmetic and return an error/`None`.
+- **A 1 ns fixed timestep hung the loop.** `GameLoop::with_fixed_timestep` accepted any
+  positive finite value; a sub-microsecond step makes `advance` iterate hundreds of
+  millions of times for one frame. It now refuses anything below 1 ms (1000 Hz), the
+  documented ceiling of `EngineConfig::target_fps`.
+- **A fast mouse click could be invisible.** `MouseState::release` removed the same-frame
+  "pressed" edge that `KeyboardState::release` deliberately keeps, so a menu polling only
+  presses missed a click that went down and up between frames.
+
+Also fixed: a colour texture leaked when the upscale depth renderbuffer allocation
+failed, and stale documentation claiming the C ABI was version 1/2, that
+`giochi_engine::ABI_VERSION` was the whole C ABI version, or that `--quadro` captured
+before presentation in the 2D demo.
 
 ### Added — phase 15: profiler and debug overlay
 
@@ -1157,5 +1211,10 @@ examples, `mini_game.lua`).
 - `giochi-engine/tests/abi_layout.rs`: byte-size and alignment assertions for
   every `#[repr(C)]` type in the contract.
 
-[Unreleased]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/compare/v0.1.0...main
+[Unreleased]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/compare/v0.3.0...main
+[0.3.0]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/releases/tag/v0.3.0
+[0.2.2]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/releases/tag/v0.2.2
+[0.2.1]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/releases/tag/v0.2.1
+[0.2.0]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/releases/tag/v0.2.0
+[0.1.1]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/releases/tag/v0.1.1
 [0.1.0]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/releases/tag/v0.1.0

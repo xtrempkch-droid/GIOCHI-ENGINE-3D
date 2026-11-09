@@ -90,6 +90,12 @@ impl GlState {
             } else {
                 gl.disable(glow::BLEND);
             }
+
+            // Depth writes are on for every scene draw. Stating it here recovers from a
+            // path that turned them off (the upscale pass does, for one draw) even if it
+            // failed to restore them: with the mask off, `glClear` silently skips the
+            // depth buffer and every frame is tested against the previous frame's depth.
+            gl.depth_mask(true);
         }
     }
 

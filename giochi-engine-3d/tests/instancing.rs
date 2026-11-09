@@ -15,6 +15,10 @@
 //! SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --test instancing
 //! ```
 
+mod common;
+
+use std::sync::MutexGuard;
+
 use giochi_engine::platform::sdl::Platform;
 use giochi_engine::platform::window::{Window, WindowConfig};
 use giochi_engine_3d::context::{self, GlesVersion, InstancingSupport};
@@ -26,14 +30,17 @@ const WIDTH: u32 = 128;
 const HEIGHT: u32 = 96;
 
 /// A headless GL context, or `None` when this machine has no GL driver.
-fn headless_context() -> Option<(Platform, Window)> {
+fn headless_context() -> Option<(MutexGuard<'static, ()>, Platform, Window)> {
+    // Serialise the tests that need a Platform: SDL allows one EventPump per process and
+    // a concurrent `Platform::new` used to be mistaken for "no GL driver".
+    let guard = common::platform_guard();
     std::env::set_var("SDL_VIDEODRIVER", "offscreen");
 
     let platform = Platform::new().ok()?;
     context::configure_attributes(&platform, GlesVersion::Gles2).ok()?;
     let window =
         Window::new_opengl(&platform, WindowConfig::new(WIDTH, HEIGHT), "instancing").ok()?;
-    Some((platform, window))
+    Some((guard, platform, window))
 }
 
 struct Scene {
@@ -44,11 +51,12 @@ struct Scene {
     camera: Camera3D,
     window: Window,
     _platform: Platform,
+    _guard: MutexGuard<'static, ()>,
 }
 
 impl Scene {
     fn new() -> Option<Self> {
-        let (platform, window) = headless_context()?;
+        let (guard, platform, window) = headless_context()?;
         let mut render = RenderContext3D::new(context::create(&window).ok()?);
 
         let cube = render.create_cube_mesh(0.5).ok()?;
@@ -73,6 +81,7 @@ impl Scene {
             camera,
             window,
             _platform: platform,
+            _guard: guard,
         })
     }
 
@@ -131,13 +140,12 @@ fn instancing_draws_the_same_picture_as_a_loop_of_draws() {
         return;
     };
 
-    if !scene.render.supports_instancing() {
+    let supports_instancing = scene.render.supports_instancing();
+    if !supports_instancing {
         eprintln!(
-            "skipped: this driver has no instanced drawing ({}); the fallback's draw \
-             call count is asserted by `the_fallback_reports_one_call_per_instance`",
+            "this driver has no instanced drawing ({}); checking the per-instance fallback",
             scene.render.instancing_support().name()
         );
-        return;
     }
 
     let transforms = transforms();
@@ -160,9 +168,12 @@ fn instancing_draws_the_same_picture_as_a_loop_of_draws() {
 
     assert_eq!(
         calls,
-        1,
-        "instancing must be one draw call for {} instances",
-        matrices.len()
+        if supports_instancing {
+            1
+        } else {
+            matrices.len() as u32
+        },
+        "the reported call count must match the path actually taken"
     );
     assert!(
         lit_pixels(&instanced_pixels) > 200,
@@ -217,12 +228,9 @@ fn the_instance_matrix_is_column_major() {
         eprintln!("skipped: no GL driver (SDL_VIDEODRIVER=offscreen)");
         return;
     };
-    if !scene.render.supports_instancing() {
-        eprintln!("skipped: no instanced drawing on this driver");
-        return;
-    }
-
-    // Two identical cubes, one translated to the right. If the translation column were
+    // Two identical cubes, one translated to the right. This runs on both paths: on a
+    // driver without instancing the renderer sets the per-instance attributes itself, so
+    // a transposed matrix must still be visible there. If the translation column were
     // uploaded as a row, both would land on top of each other at the origin and the
     // lit-pixel count would match the single-cube frame instead of roughly doubling.
     let centred = Transform3D::IDENTITY.matrix();
@@ -295,7 +303,7 @@ fn an_unknown_handle_draws_nothing() {
 
 #[test]
 fn the_reported_support_matches_the_extension_string() {
-    let Some((_platform, window)) = headless_context() else {
+    let Some((_guard, _platform, window)) = headless_context() else {
         eprintln!("skipped: no GL driver (SDL_VIDEODRIVER=offscreen)");
         return;
     };

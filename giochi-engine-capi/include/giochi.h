@@ -64,7 +64,8 @@ typedef struct GiochiEngine3D GiochiEngine3D;
 // `texture2D` sampling with the same light term.
 #define GIOCHI_SHADER_TEXTURED 1
 
-// Directional Blinn-Phong. Reads the engine's light, which part II does not expose yet.
+// Directional Blinn-Phong. Reads the engine's light, set with
+// `giochi_renderer3d_set_light` (part II §10.6).
 #define GIOCHI_SHADER_PHONG 2
 
 // Success.
@@ -538,8 +539,8 @@ typedef struct GiochiCamera {
 typedef struct GiochiTime {
     // Duration of the last frame, in seconds.
     //
-    // Negative and non-finite inputs are treated as `0.0`, so `delta` is always
-    // a sane, non-decreasing measurement. It is *not* clamped to
+    // Negative and non-finite inputs are treated as `0.0`, so `delta` is always a
+    // finite, non-negative measurement of that frame. It is *not* clamped to
     // [`crate::core::game_loop::MAX_FRAME_TIME`]: the loop clamps what it feeds
     // to the simulation, while `delta` reports what actually happened.
     float delta;
@@ -1023,8 +1024,10 @@ GiochiEngine3D *giochi_engine3d_create(const struct GiochiWindowConfig *config);
 
 // Destroys the 3D engine, releasing every mesh, shader and the GL context.
 //
-// `NULL` is a no-op. Handles created by the engine become invalid; part II does not
-// track them after the engine is gone, exactly as part I does not.
+// `NULL` is a no-op, but a stale non-NULL pointer is not: once the engine is destroyed a
+// second call with the same pointer is rejected (with a message in
+// [`giochi_get_last_error`](crate::giochi_get_last_error)) instead of freeing the
+// allocation twice. Handles created by the engine become invalid.
 //
 // # C ABI
 //
@@ -1437,11 +1440,14 @@ uint32_t giochi_engine_scene_depth(void);
 
 // Returns the version of the C ABI implemented by this library.
 //
-// Must be `1` for this header. Consumers should check it at start-up:
+// Consumers should check it at start-up against the version they were built for and
+// accept anything newer, because every part of the ABI is additive:
 //
 // ```c
-// if (giochi_abi_version() != 1) { /* built against another ABI */ }
+// if (giochi_abi_version() < 1) { /* built against a newer library */ }
 // ```
+//
+// Part I is 1, part II (3D) added 2, and part III (frame statistics) made it 3.
 //
 // # C ABI
 //
@@ -1452,7 +1458,7 @@ uint32_t giochi_abi_version(void);
 
 // Returns the engine version packed as `major << 16 | minor << 8 | patch`.
 //
-// For version `0.2.2` this returns `0x0000_0202`.
+// For version `0.3.0` this returns `0x0003_0000`.
 //
 // # C ABI
 //

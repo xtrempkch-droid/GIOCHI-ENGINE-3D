@@ -1,12 +1,77 @@
 # Estado — GIOCHI-ENGINE
 
-## Última entrega: fase 15 — Profiler + Debug Overlay (extensão de performance)
-Data: 2026-11-08
+## Última entrega: release 0.3.0 — auditoria de release
+Data: 2026-11-09
 
-## Última fase concluída: 15 — Profiler + Debug Overlay
-Fase anterior: 14 — C ABI 3D (v2)
+## Última fase concluída: 18 — Flags ARM64 + CI de performance + C ABI v3
+Fases 15–18 concluídas (performance, batching, instancing/upscaling, C ABI v3).
 
-**Fases concluídas: 0–8 (2D), 9–14 (extensão 3D) e 15 (performance). Versão 0.2.2.**
+**Fases concluídas: 0–8 (2D), 9–14 (extensão 3D) e 15–18 (performance e ABI v3). Versão 0.3.0.**
+
+## Auditoria de release 0.3.0 — dez defeitos
+
+Pedido do utilizador: análise profunda do repositório, corrigir os erros encontrados e
+publicar a release. O método foi correr o que o CI **alega** correr, e não apenas o que
+compila: `cargo test --features profiling`, as variantes forçadas dos caminhos de
+fallback, e cada binário de teste com inspecção dos seus "skipped".
+
+### 1. O upscaler desligava a escrita de profundidade para sempre
+
+`Upscaler::blit` fazia `glDepthMask(GL_FALSE)` e nunca repunha. O `glClear` do *depth
+buffer* é mascarado por esse bit, portanto a partir do segundo frame com escala o depth
+não era limpo nem escrito: geometria do frame anterior ocluía a cena e objectos mais
+distantes desapareciam. O primeiro frame parecia correcto, que é o que tornava o bug
+difícil de ver. Corrigido no `blit` e no `GlState::apply`, com um teste que desenha um
+segundo frame com um cubo atrás do primeiro e **falha contra o código antigo**.
+
+### 2. O fallback de instancing desenhava outra imagem
+
+Num driver sem extensão de instancing, `draw_instanced` enviava `u_model` por cópia, mas
+o shader instanciado não tem `u_model` de propósito: as cópias usavam valores genéricos
+de atributo indefinidos e desapareciam. O fallback passou a definir as quatro colunas da
+matriz nos atributos 3–6 antes de cada draw. `GIOCHI_FORCE_NO_INSTANCING=1` torna o
+caminho testável; o CI compara-o com o loop de draws normais.
+
+### 3. `last_instanced_draw_calls` mentia no fallback
+
+Respondia 0 depois de o frame ter emitido N draws. O contador passou para o
+`RenderContext3D` e é escrito nos dois caminhos.
+
+### 4. Duplo `giochi_engine3d_destroy` era um duplo free
+
+A verificação só recusava um ponteiro **não nulo** diferente do actual. Com o slot já
+limpo, uma segunda chamada com o ponteiro obsoleto passava e reconstruía o `Box` outra
+vez. Agora o ponteiro tem de ser exactamente o vivo; a segunda chamada devolve
+`GIOCHI_ERROR_INVALID_HANDLE`.
+
+### 5. `--quadro` do `mini_fps` com `--scale` capturava o canto errado
+
+Pedia a dimensão de render (reduzida) depois de `read_pixels` já ter feito o blit do
+frame completo para a janela. Passou a pedir o tamanho do drawable da janela.
+
+### 6. Os testes GL estavam a ser saltados em silêncio
+
+O SDL permite **um `EventPump` por processo** e o Cargo corre os testes de cada binário
+em paralelo: só o primeiro teste de `context_smoke`, `instancing`, `lighting`,
+`mesh_pipeline`, `static_batch` e `upscale` corria; os restantes reportavam "no GL
+driver" e passavam sem executar. Os helpers passaram a deter um lock por binário e o
+`rust_ffi_3d` espera pelo pump. Fazer os testes correr revelou dois bugs latentes neles
+próprios — uma janela destruída antes de se ler o framebuffer (SIGSEGV) e o helper do
+upscale a apresentar o frame antes de desenhar — e três limiares de pixéis errados.
+
+### 7–10. Quatro correcções mais pequenas
+
+- overflow de `usize` em dimensões de textura/atlas absurdas passou a devolver erro;
+- um passo fixo de 1 ns (aceite antes) fazia `advance` iterar centenas de milhões de
+  vezes; o mínimo passou a 1 ms (1000 Hz);
+- um clique rápido podia ser invisível porque `MouseState::release` apagava a borda
+  "pressed" do mesmo frame, ao contrário do teclado;
+- uma textura de cor vazava quando a alocação do renderbuffer de profundidade do
+  upscaler falhava.
+
+Além disso, documentação desactualizada: o cabeçalho dizia ABI 1, o contrato dizia
+`GIOCHI_ABI_VERSION (1)`, `giochi-engine-capi/Cargo.toml` dizia 2, e o demo 2D dizia que
+`--quadro` capturava antes do `present`.
 
 ## Status 2D (Fases 0–8)
 

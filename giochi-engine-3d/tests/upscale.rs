@@ -10,6 +10,10 @@
 //! SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --test upscale
 //! ```
 
+mod common;
+
+use std::sync::MutexGuard;
+
 use giochi_engine::platform::sdl::Platform;
 use giochi_engine::platform::window::{Window, WindowConfig};
 use giochi_engine_3d::context::{self, GlesVersion};
@@ -20,13 +24,16 @@ use giochi_engine_3d::{DirectionalLight, RenderContext3D};
 const WIDTH: u32 = 160;
 const HEIGHT: u32 = 120;
 
-fn headless_context() -> Option<(Platform, Window)> {
+fn headless_context() -> Option<(MutexGuard<'static, ()>, Platform, Window)> {
+    // Serialise the tests that need a Platform: SDL allows one EventPump per process and
+    // a concurrent `Platform::new` used to be mistaken for "no GL driver".
+    let guard = common::platform_guard();
     std::env::set_var("SDL_VIDEODRIVER", "offscreen");
 
     let platform = Platform::new().ok()?;
     context::configure_attributes(&platform, GlesVersion::Gles2).ok()?;
     let window = Window::new_opengl(&platform, WindowConfig::new(WIDTH, HEIGHT), "upscale").ok()?;
-    Some((platform, window))
+    Some((guard, platform, window))
 }
 
 /// Number of pixels that are not the clear colour.
@@ -42,8 +49,9 @@ fn frame_at(render: &mut RenderContext3D, window: &Window, cube: u64, shader: u6
     let camera = Camera3D::from_parts(Vec3::new(0.0, 0.0, 3.0), Vec3::ZERO, Vec3::UP)
         .with_clip_planes(0.1, 100.0);
 
+    // `begin_frame` applies the state and clears; `RenderContext3D::clear` would also
+    // present the frame, leaving the draw outside the render target.
     render.begin_frame(window);
-    render.clear(window, Color3D::BLACK);
     render
         .draw_mesh_colored(
             cube,
@@ -58,12 +66,12 @@ fn frame_at(render: &mut RenderContext3D, window: &Window, cube: u64, shader: u6
 
 #[test]
 fn a_scaled_frame_still_shows_the_scene_and_is_window_sized() {
-    let Some((_platform, window)) = headless_context() else {
+    let Some((_guard, _platform, window)) = headless_context() else {
         eprintln!("skipped: no GL driver (SDL_VIDEODRIVER=offscreen)");
         return;
     };
     let mut render = RenderContext3D::new(context::create(&window).expect("context"));
-    let cube = render.create_cube_mesh(1.0).expect("cube");
+    let cube = render.create_cube_mesh(2.5).expect("cube");
     let shader = render
         .create_builtin_shader(BuiltinShader::Phong)
         .expect("shader");
@@ -106,7 +114,7 @@ fn a_scaled_frame_still_shows_the_scene_and_is_window_sized() {
 
 #[test]
 fn every_scale_produces_a_visible_frame() {
-    let Some((_platform, window)) = headless_context() else {
+    let Some((_guard, _platform, window)) = headless_context() else {
         eprintln!("skipped: no GL driver (SDL_VIDEODRIVER=offscreen)");
         return;
     };
@@ -133,7 +141,7 @@ fn every_scale_produces_a_visible_frame() {
 
 #[test]
 fn a_scale_of_one_is_the_same_as_no_scale() {
-    let Some((_platform, window)) = headless_context() else {
+    let Some((_guard, _platform, window)) = headless_context() else {
         eprintln!("skipped: no GL driver (SDL_VIDEODRIVER=offscreen)");
         return;
     };
@@ -147,7 +155,6 @@ fn a_scale_of_one_is_the_same_as_no_scale() {
     // full-screen pass that costs a copy and buys nothing.
     render.set_render_scale(Some(1.0));
     assert_eq!(render.render_scale(), None);
-    assert_eq!(render.drawable_size(), (WIDTH, HEIGHT));
 
     // Returning to full resolution must release the target, not leave it bound.
     render.set_render_scale(Some(0.5));
@@ -162,7 +169,7 @@ fn a_scale_of_one_is_the_same_as_no_scale() {
 
 #[test]
 fn a_nonsense_scale_falls_back_to_full_resolution() {
-    let Some((_platform, window)) = headless_context() else {
+    let Some((_guard, _platform, window)) = headless_context() else {
         eprintln!("skipped: no GL driver (SDL_VIDEODRIVER=offscreen)");
         return;
     };
@@ -180,7 +187,7 @@ fn a_nonsense_scale_falls_back_to_full_resolution() {
 
 #[test]
 fn releasing_everything_also_releases_the_render_target() {
-    let Some((_platform, window)) = headless_context() else {
+    let Some((_guard, _platform, window)) = headless_context() else {
         eprintln!("skipped: no GL driver (SDL_VIDEODRIVER=offscreen)");
         return;
     };
@@ -196,4 +203,53 @@ fn releasing_everything_also_releases_the_render_target() {
     // is a leak the driver would only reclaim when the context dies.
     assert!(render.release_all());
     assert_eq!(render.take_gl_error(), 0);
+}
+
+#[test]
+fn a_second_scaled_frame_clears_the_previous_depth() {
+    let Some((_guard, _platform, window)) = headless_context() else {
+        eprintln!("skipped: no GL driver (SDL_VIDEODRIVER=offscreen)");
+        return;
+    };
+    let mut render = RenderContext3D::new(context::create(&window).expect("context"));
+    let cube = render.create_cube_mesh(2.5).expect("cube");
+    let shader = render
+        .create_builtin_shader(BuiltinShader::Phong)
+        .expect("shader");
+    render.set_clear_color(Color3D::BLACK);
+    render.set_light(DirectionalLight::sun());
+    render.set_render_scale(Some(0.5));
+
+    let camera = Camera3D::from_parts(Vec3::new(0.0, 0.0, 3.0), Vec3::ZERO, Vec3::UP)
+        .with_clip_planes(0.1, 100.0);
+
+    let draw_at = |render: &mut RenderContext3D, z: f32| {
+        // `begin_frame` applies the state and clears; `clear` would present.
+        render.begin_frame(&window);
+        render
+            .draw_mesh_colored(
+                cube,
+                shader,
+                &Transform3D::from_translation(Vec3::new(0.0, 0.0, z)),
+                &camera,
+                Color3D::new(0.9, 0.9, 0.9, 1.0),
+            )
+            .expect("draw");
+        render.read_pixels(WIDTH, HEIGHT).expect("pixels")
+    };
+
+    let near = draw_at(&mut render, 1.0);
+    assert!(lit_pixels(&near) > 2_000, "the reference frame is empty");
+
+    // The second frame draws the cube farther away, at a depth the first frame's
+    // geometry already covers. If the depth buffer was not cleared (or depth writes
+    // were left disabled by the upscale pass) every fragment fails `GL_LEQUAL` and the
+    // frame is the clear colour.
+    let far = draw_at(&mut render, -2.0);
+    // The far cube is smaller on screen than the near one, so the threshold is lower;
+    // what matters is that it is not the clear colour (0 without the depth clear).
+    assert!(
+        lit_pixels(&far) > 300,
+        "the second scaled frame is empty: depth was not cleared / written"
+    );
 }

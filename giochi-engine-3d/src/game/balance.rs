@@ -72,7 +72,7 @@ impl BalanceConfig {
     ///   spelling of "respawn immediately") or a negative or `NaN` value never satisfies the
     ///   `fall_timer > 0.0` test that decrements it, so `respawn` is never reached: the ball
     ///   stays off the board and `falls` climbs once per *frame*, forever.
-    /// * `ball_radius` divides the rolling angle in [`Ball::step`]. Zero or `NaN` makes the
+    /// * `ball_radius` divides the rolling angle in `Ball::step`. Zero or `NaN` makes the
     ///   spin quaternion `NaN`, and a `NaN` model matrix draws an invisible ball.
     /// * `platform_size` divides the edge proximity. Zero makes it `NaN`; a negative one
     ///   makes the ball "fallen" while it is still at the centre, so the round never starts.

@@ -20,8 +20,8 @@ use std::time::Instant;
 pub struct Time {
     /// Duration of the last frame, in seconds.
     ///
-    /// Negative and non-finite inputs are treated as `0.0`, so `delta` is always
-    /// a sane, non-decreasing measurement. It is *not* clamped to
+    /// Negative and non-finite inputs are treated as `0.0`, so `delta` is always a
+    /// finite, non-negative measurement of that frame. It is *not* clamped to
     /// [`crate::core::game_loop::MAX_FRAME_TIME`]: the loop clamps what it feeds
     /// to the simulation, while `delta` reports what actually happened.
     pub delta: f32,

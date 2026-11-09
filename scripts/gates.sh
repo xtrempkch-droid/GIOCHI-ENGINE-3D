@@ -24,6 +24,13 @@ run cargo build --workspace --target x86_64-unknown-linux-gnu
 # failure on a headless builder.
 SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" \
     run cargo test --workspace --target x86_64-unknown-linux-gnu
+# The profiler and the per-frame counters are compiled out by default, so a test that
+# asserts the counting behaviour needs a build where counting exists. CI runs the same
+# two commands.
+SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" \
+    run cargo test -p giochi-engine --features profiling --target x86_64-unknown-linux-gnu
+SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" \
+    run cargo test -p giochi-engine-3d --features profiling --target x86_64-unknown-linux-gnu
 run cargo doc --workspace --no-deps --document-private-items
 
 if command -v cbindgen >/dev/null 2>&1; then

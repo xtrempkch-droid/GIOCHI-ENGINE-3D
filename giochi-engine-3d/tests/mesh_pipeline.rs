@@ -7,6 +7,10 @@
 //!
 //! Skipped cleanly when no GL driver is available (`docs/3D.md` §5).
 
+mod common;
+
+use std::sync::MutexGuard;
+
 use giochi_engine::platform::sdl::Platform;
 use giochi_engine::platform::window::{Window, WindowConfig};
 use giochi_engine_3d::context::{self, GlesVersion};
@@ -19,7 +23,15 @@ const BACKGROUND: Color3D = Color3D::new(0.0, 0.0, 0.0, 1.0);
 /// Colour the cube is drawn with.
 const FOREGROUND: Color3D = Color3D::new(1.0, 0.0, 0.0, 1.0);
 
-fn headless(size: u32) -> Option<(Platform, Window, RenderContext3D)> {
+fn headless(size: u32) -> Option<(MutexGuard<'static, ()>, Platform, Window, RenderContext3D)> {
+    // Serialise the tests that need a Platform: SDL allows one EventPump per process and
+    // a concurrent `Platform::new` used to be mistaken for "no GL driver".
+    let guard = common::platform_guard();
+    headless_unlocked(size).map(|(platform, window, render)| (guard, platform, window, render))
+}
+
+/// The body of [`headless`] without the lock, for a test that owns the lock itself.
+fn headless_unlocked(size: u32) -> Option<(Platform, Window, RenderContext3D)> {
     std::env::set_var("SDL_VIDEODRIVER", "offscreen");
     let platform = Platform::new().ok()?;
     context::configure_attributes(&platform, GlesVersion::Gles2).ok()?;
@@ -41,7 +53,7 @@ fn lit_pixels(render: &RenderContext3D, width: u32, height: u32) -> usize {
 
 #[test]
 fn the_builtin_shaders_compile_on_a_real_driver() {
-    let Some((_platform, _window, mut render)) = headless(64) else {
+    let Some((_guard, _platform, _window, mut render)) = headless(64) else {
         eprintln!("skipped: no OpenGL ES driver available");
         return;
     };
@@ -60,7 +72,7 @@ fn the_builtin_shaders_compile_on_a_real_driver() {
 
 #[test]
 fn an_invalid_shader_fails_with_the_driver_log() {
-    let Some((_platform, _window, mut render)) = headless(64) else {
+    let Some((_guard, _platform, _window, mut render)) = headless(64) else {
         eprintln!("skipped: no OpenGL ES driver available");
         return;
     };
@@ -90,7 +102,7 @@ fn an_invalid_shader_fails_with_the_driver_log() {
 #[test]
 fn a_cube_is_actually_rasterised() {
     let size = 64;
-    let Some((_platform, window, mut render)) = headless(size) else {
+    let Some((_guard, _platform, window, mut render)) = headless(size) else {
         eprintln!("skipped: no OpenGL ES driver available");
         return;
     };
@@ -132,7 +144,7 @@ fn a_cube_is_actually_rasterised() {
 #[test]
 fn a_cube_is_culled_when_it_is_behind_the_camera() {
     let size = 48;
-    let Some((_platform, window, mut render)) = headless(size) else {
+    let Some((_guard, _platform, window, mut render)) = headless(size) else {
         eprintln!("skipped: no OpenGL ES driver available");
         return;
     };
@@ -171,7 +183,7 @@ fn depth_testing_hides_the_back_faces() {
     // consequence instead: the centre pixel belongs to the front face, which is the only
     // face whose normal points at the camera.
     let size = 64;
-    let Some((_platform, window, mut render)) = headless(size) else {
+    let Some((_guard, _platform, window, mut render)) = headless(size) else {
         eprintln!("skipped: no OpenGL ES driver available");
         return;
     };
@@ -211,7 +223,7 @@ fn depth_testing_hides_the_back_faces() {
 #[test]
 fn destroying_a_mesh_twice_reports_false_and_does_not_crash() {
     let size = 32;
-    let Some((_platform, _window, mut render)) = headless(size) else {
+    let Some((_guard, _platform, _window, mut render)) = headless(size) else {
         eprintln!("skipped: no OpenGL ES driver available");
         return;
     };
@@ -227,7 +239,7 @@ fn destroying_a_mesh_twice_reports_false_and_does_not_crash() {
 #[test]
 fn release_all_leaves_nothing_behind() {
     let size = 32;
-    let Some((_platform, _window, mut render)) = headless(size) else {
+    let Some((_guard, _platform, _window, mut render)) = headless(size) else {
         eprintln!("skipped: no OpenGL ES driver available");
         return;
     };
@@ -252,26 +264,33 @@ fn the_no_vao_fallback_draws_the_same_pixels() {
     // and no development machine has that driver. `GIOCHI_FORCE_NO_VAO=1` makes both
     // paths runnable here: an untested fallback is a fallback that does not work.
     let size = 64;
+    // One lock for both runs; the first platform (and its EventPump) is dropped before
+    // the second is created, while its window and renderer stay alive for the read-back.
+    let _guard = common::platform_guard();
 
     let with_vao = {
         std::env::remove_var(giochi_engine_3d::mesh::FORCE_NO_VAO_ENV);
-        let Some((_platform, window, mut render)) = headless(size) else {
+        let Some((_platform, window, mut render)) = headless_unlocked(size) else {
             eprintln!("skipped: no OpenGL ES driver available");
             return;
         };
         let uses_vao = draw_cube_and_capture(&mut render, &window, size);
-        (uses_vao, render)
+        // Keep the window alive with the renderer: a `RenderContext3D` holds a GL
+        // context whose drawable belongs to the window, and reading pixels after the
+        // window was dropped is a segfault — which this test did, unnoticed, while every
+        // test in the binary but the first was being skipped.
+        (uses_vao, window, render)
     };
 
     let without_vao = {
         std::env::set_var(giochi_engine_3d::mesh::FORCE_NO_VAO_ENV, "1");
-        let Some((_platform, window, mut render)) = headless(size) else {
+        let Some((_platform, window, mut render)) = headless_unlocked(size) else {
             eprintln!("skipped: no OpenGL ES driver available");
             return;
         };
         let uses_vao = draw_cube_and_capture(&mut render, &window, size);
         std::env::remove_var(giochi_engine_3d::mesh::FORCE_NO_VAO_ENV);
-        (uses_vao, render)
+        (uses_vao, window, render)
     };
 
     assert!(
@@ -282,8 +301,8 @@ fn the_no_vao_fallback_draws_the_same_pixels() {
 
     // Both paths must light the same number of pixels: if the fallback mis-specified an
     // attribute offset the cube would be smaller, skewed or absent.
-    let a = lit_pixels(&with_vao.1, size, size);
-    let b = lit_pixels(&without_vao.1, size, size);
+    let a = lit_pixels(&with_vao.2, size, size);
+    let b = lit_pixels(&without_vao.2, size, size);
 
     assert!(a > 200, "the VAO path drew only {a} pixels");
     assert!(

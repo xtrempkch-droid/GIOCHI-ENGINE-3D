@@ -148,11 +148,13 @@ fn c_abi_end_to_end() {
     // shipped; the rule is "at least", never equality (docs/C_ABI_CONTRACT.md §7).
     assert!(giochi_abi_version() >= 1);
     assert_eq!(giochi_abi_version(), GIOCHI_ABI_VERSION);
-    assert_eq!(
-        giochi_engine_version() >> 8,
-        0x0002,
-        "the 0.2.x line packs to major 0, minor 2"
-    );
+    // Decompose instead of pinning a release: a hardcoded minor (this asserted "0.2.x"
+    // until the 0.3.0 bump) turns every version change into a red CI run that says
+    // nothing about the ABI.
+    let packed = giochi_engine_version();
+    assert_eq!(packed >> 16, giochi_engine::VERSION_MAJOR);
+    assert_eq!((packed >> 8) & 0xFF, giochi_engine::VERSION_MINOR);
+    assert_eq!(packed & 0xFF, giochi_engine::VERSION_PATCH);
     assert_eq!(message(), "");
 
     // ---- before init ------------------------------------------------------------

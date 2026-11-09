@@ -18,6 +18,10 @@
 //! SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --test lighting
 //! ```
 
+mod common;
+
+use std::sync::MutexGuard;
+
 use giochi_engine::platform::sdl::Platform;
 use giochi_engine::platform::window::{Window, WindowConfig};
 use giochi_engine_3d::context::{self, GlesVersion};
@@ -29,14 +33,17 @@ const WIDTH: u32 = 160;
 const HEIGHT: u32 = 120;
 
 /// A headless GL context sized for the probe, or `None` when there is no GL driver.
-fn headless_context() -> Option<(Platform, Window)> {
+fn headless_context() -> Option<(MutexGuard<'static, ()>, Platform, Window)> {
+    // Serialise the tests that need a Platform: SDL allows one EventPump per process and
+    // a concurrent `Platform::new` used to be mistaken for "no GL driver".
+    let guard = common::platform_guard();
     std::env::set_var("SDL_VIDEODRIVER", "offscreen");
 
     let platform = Platform::new().ok()?;
     context::configure_attributes(&platform, GlesVersion::Gles2).ok()?;
     let window =
         Window::new_opengl(&platform, WindowConfig::new(WIDTH, HEIGHT), "lighting").ok()?;
-    Some((platform, window))
+    Some((guard, platform, window))
 }
 
 /// Average luminance of a patch of the sphere, in `0.0..=255.0`.
@@ -99,11 +106,12 @@ struct Scene {
     camera: Camera3D,
     window: Window,
     _platform: Platform,
+    _guard: MutexGuard<'static, ()>,
 }
 
 impl Scene {
     fn new() -> Option<Self> {
-        let (platform, window) = headless_context()?;
+        let (guard, platform, window) = headless_context()?;
         let mut render = RenderContext3D::new(context::create(&window).ok()?);
 
         let sphere = render.create_sphere_mesh(1.0, 24, 24).ok()?;
@@ -120,6 +128,7 @@ impl Scene {
             camera,
             window,
             _platform: platform,
+            _guard: guard,
         })
     }
 
@@ -347,7 +356,7 @@ fn a_coloured_light_tints_the_surface() {
 
 #[test]
 fn a_cube_lit_from_above_shows_a_bright_top_face() {
-    let Some((_platform, window)) = headless_context() else {
+    let Some((_guard, _platform, window)) = headless_context() else {
         eprintln!("skipped: no OpenGL ES driver available");
         return;
     };
@@ -455,7 +464,7 @@ fn to_pixels(camera: &Camera3D, point: Vec3) -> (usize, usize) {
 
 #[test]
 fn a_crates_top_face_reads_brighter_than_its_side_the_phase_13_acceptance_check() {
-    let Some((_platform, window)) = headless_context() else {
+    let Some((_guard, _platform, window)) = headless_context() else {
         eprintln!("skipped: no OpenGL ES driver available");
         return;
     };

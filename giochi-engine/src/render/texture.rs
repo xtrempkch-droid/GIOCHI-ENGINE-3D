@@ -134,7 +134,11 @@ impl TextureRegistry {
             ));
         }
 
-        let expected = width as usize * height as usize * 4;
+        let Some(expected) = rgba_buffer_len(width, height) else {
+            return Err(GiochiError::InvalidArgument(
+                "texture dimensions overflow the address space",
+            ));
+        };
         if pixels.len() != expected {
             return Err(GiochiError::InvalidArgument(
                 "pixel buffer must be exactly width * height * 4 bytes",
@@ -220,7 +224,11 @@ impl TextureRegistry {
                 "texture width and height must be non-zero",
             ));
         }
-        let expected = width as usize * height as usize * 4;
+        let Some(expected) = rgba_buffer_len(width, height) else {
+            return Err(GiochiError::InvalidArgument(
+                "texture dimensions overflow the address space",
+            ));
+        };
         if pixels.len() != expected {
             return Err(GiochiError::InvalidArgument(
                 "pixel buffer must be exactly width * height * 4 bytes",
@@ -272,6 +280,13 @@ impl Drop for TextureRegistry {
     fn drop(&mut self) {
         self.registry.clear();
     }
+}
+
+/// `width * height * 4`, or `None` when that cannot be addressed in memory.
+fn rgba_buffer_len(width: u32, height: u32) -> Option<usize> {
+    (width as usize)
+        .checked_mul(height as usize)?
+        .checked_mul(4)
 }
 
 /// Initialises SDL_image exactly once per process.
@@ -330,6 +345,15 @@ fn ensure_image_subsystem() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn buffer_size_arithmetic_refuses_to_wrap() {
+        assert_eq!(rgba_buffer_len(2, 3), Some(24));
+        assert_eq!(rgba_buffer_len(0, 3), Some(0));
+        // `u32::MAX * u32::MAX * 4` does not fit a 64-bit address space, let alone a
+        // 32-bit one; a debug build must answer "no" instead of panicking on overflow.
+        assert_eq!(rgba_buffer_len(u32::MAX, u32::MAX), None);
+    }
 
     #[test]
     fn texture_size_zeroes_its_reserved_tail() {

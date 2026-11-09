@@ -281,8 +281,10 @@ pub extern "C" fn giochi_engine3d_create(config: *const WindowConfig) -> *mut Gi
 
 /// Destroys the 3D engine, releasing every mesh, shader and the GL context.
 ///
-/// `NULL` is a no-op. Handles created by the engine become invalid; part II does not
-/// track them after the engine is gone, exactly as part I does not.
+/// `NULL` is a no-op, but a stale non-NULL pointer is not: once the engine is destroyed a
+/// second call with the same pointer is rejected (with a message in
+/// [`giochi_get_last_error`](crate::giochi_get_last_error)) instead of freeing the
+/// allocation twice. Handles created by the engine become invalid.
 ///
 /// # C ABI
 ///
@@ -296,11 +298,15 @@ pub extern "C" fn giochi_engine3d_destroy(engine: *mut GiochiEngine3D) {
             return;
         }
 
+        // The slot must *equal* the pointer: a NULL slot means the engine was already
+        // destroyed (or never created), and reconstructing the `Box` again is a double
+        // free. The earlier check only rejected a non-NULL mismatch, so a second call
+        // with the stale pointer passed and freed the allocation twice.
         let current = CURRENT_3D.with(Cell::get);
-        if !current.is_null() && current != engine {
+        if current != engine {
             state::set_last_error(
-                "giochi_engine3d_destroy was given an engine that is not the one this \
-                 thread created",
+                "giochi_engine3d_destroy was given an engine that is not the live one on \
+                 this thread; it is either from another thread or already destroyed",
             );
             return;
         }
@@ -309,8 +315,8 @@ pub extern "C" fn giochi_engine3d_destroy(engine: *mut GiochiEngine3D) {
         // at freed memory.
         CURRENT_3D.with(|cell| cell.set(core::ptr::null_mut()));
 
-        // SAFETY: the pointer came from `Box::into_raw` in `create`, this is the only
-        // place it is reconstructed, and the slot above guarantees it happens once.
+        // SAFETY: the pointer came from `Box::into_raw` in `create`, the slot compared
+        // equal to it, and clearing the slot above makes a second call fail the check.
         let mut engine = unsafe { Box::from_raw(engine) };
         if !engine.render.release_all() {
             log::warn!("3D engine destroyed with GL objects still referenced elsewhere");

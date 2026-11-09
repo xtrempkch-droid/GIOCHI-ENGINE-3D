@@ -333,7 +333,11 @@ fn convert_rgba_images(
                 "an atlas region cannot have zero width or height",
             ));
         }
-        let expected = *width as usize * *height as usize * 4;
+        let Some(expected) = rgba_buffer_len(*width, *height) else {
+            return Err(GiochiError::InvalidArgument(
+                "an atlas region's dimensions overflow the address space",
+            ));
+        };
         if pixels.len() != expected {
             return Err(GiochiError::InvalidArgument(
                 "an atlas region needs exactly width * height * 4 bytes of RGBA8",
@@ -350,6 +354,13 @@ fn convert_rgba_images(
     }
 
     Ok(converted)
+}
+
+/// `width * height * 4`, or `None` when that cannot be addressed in memory.
+fn rgba_buffer_len(width: u32, height: u32) -> Option<usize> {
+    (width as usize)
+        .checked_mul(height as usize)?
+        .checked_mul(4)
 }
 
 /// Loads and converts one image to RGBA8.
@@ -407,6 +418,12 @@ fn pack(sizes: &[(u32, u32)], padding: u32, max_size: u32) -> Option<Layout> {
         return None;
     }
     if sizes.iter().any(|(w, h)| *w == 0 || *h == 0) {
+        return None;
+    }
+    if sizes.iter().any(|(w, h)| *w > max_size || *h > max_size) {
+        // Checked before the additions below: a caller can pass an image whose width is
+        // near `u32::MAX`, and `w + padding * 2` would panic in a debug build before the
+        // "does not fit" answer was reached.
         return None;
     }
 
@@ -516,6 +533,9 @@ mod tests {
     fn an_image_too_large_or_an_empty_list_cannot_be_packed() {
         assert!(pack(&[], ATLAS_PADDING, ATLAS_MAX_SIZE).is_none());
         assert!(pack(&[(ATLAS_MAX_SIZE + 1, 8)], ATLAS_PADDING, ATLAS_MAX_SIZE).is_none());
+        // Near `u32::MAX`, `width + padding * 2` used to overflow before the size check.
+        assert!(pack(&[(u32::MAX, 8)], ATLAS_PADDING, ATLAS_MAX_SIZE).is_none());
+        assert!(pack(&[(8, u32::MAX)], ATLAS_PADDING, ATLAS_MAX_SIZE).is_none());
         assert!(pack(&[(0, 8)], ATLAS_PADDING, ATLAS_MAX_SIZE).is_none());
         assert!(pack(&[(8, 0)], ATLAS_PADDING, ATLAS_MAX_SIZE).is_none());
     }

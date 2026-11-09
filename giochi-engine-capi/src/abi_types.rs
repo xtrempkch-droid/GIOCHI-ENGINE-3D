@@ -44,7 +44,8 @@ pub const GIOCHI_MAX_ASSET_SIZE: usize = 64 * 1024 * 1024;
 pub const GIOCHI_SHADER_FLAT: i32 = 0;
 /// `texture2D` sampling with the same light term.
 pub const GIOCHI_SHADER_TEXTURED: i32 = 1;
-/// Directional Blinn-Phong. Reads the engine's light, which part II does not expose yet.
+/// Directional Blinn-Phong. Reads the engine's light, set with
+/// `giochi_renderer3d_set_light` (part II §10.6).
 pub const GIOCHI_SHADER_PHONG: i32 = 2;
 
 // The numeric error codes are part of the ABI and must never be renumbered
@@ -77,7 +78,8 @@ pub const GIOCHI_ERROR_INTERNAL: i32 = -99;
 
 // `giochi_engine::ABI_VERSION` is the version of **part I** — the 2D surface — and part I
 // never changes. `GIOCHI_ABI_VERSION` is the version of the whole C ABI, which moved to 2
-// when part II (3D) shipped. So the invariant is "at least", not "equal": a consumer
+// when part II (3D) shipped and to 3 with part III (frame statistics). So the invariant
+// is "at least", not "equal": a consumer
 // checks `giochi_abi_version()` against the number it was built with, and part I callers
 // written against 1 keep working unchanged.
 const _: () = assert!(GIOCHI_ABI_VERSION >= giochi_engine::ABI_VERSION);

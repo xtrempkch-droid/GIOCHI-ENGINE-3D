@@ -29,6 +29,18 @@ use glow::HasContext;
 
 use super::gl_context::GlContext;
 
+/// Forces the one-draw-per-instance fallback when set to `1`.
+///
+/// The fallback is the code that runs on a driver without any instancing extension, and
+/// every machine this project owns has one. An untested fallback is a fallback that does
+/// not work, so this switch lets the test suite exercise the per-instance path — the
+/// same reason `GIOCHI_FORCE_NO_VAO` exists for vertex array objects.
+pub const FORCE_NO_INSTANCING_ENV: &str = "GIOCHI_FORCE_NO_INSTANCING";
+
+fn instancing_allowed() -> bool {
+    !matches!(std::env::var(FORCE_NO_INSTANCING_ENV).as_deref(), Ok("1"))
+}
+
 /// Where the instanced-draw entry points come from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstancingSupport {
@@ -111,6 +123,11 @@ impl InstancingBackend {
     /// practice. It is a parameter rather than an import so this module stays testable
     /// without a window: a test can hand in a stub.
     pub fn detect(gl: &GlContext, load: impl Fn(&str) -> *const c_void) -> Self {
+        if !instancing_allowed() {
+            log::warn!("{FORCE_NO_INSTANCING_ENV}=1: forcing the per-instance fallback");
+            return Self::NONE;
+        }
+
         if gl.supports_gles3() {
             return Self {
                 support: InstancingSupport::Core,

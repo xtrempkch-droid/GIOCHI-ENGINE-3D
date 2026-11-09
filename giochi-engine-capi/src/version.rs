@@ -11,11 +11,14 @@ use crate::state;
 
 /// Returns the version of the C ABI implemented by this library.
 ///
-/// Must be `1` for this header. Consumers should check it at start-up:
+/// Consumers should check it at start-up against the version they were built for and
+/// accept anything newer, because every part of the ABI is additive:
 ///
 /// ```c
-/// if (giochi_abi_version() != 1) { /* built against another ABI */ }
+/// if (giochi_abi_version() < 1) { /* built against a newer library */ }
 /// ```
+///
+/// Part I is 1, part II (3D) added 2, and part III (frame statistics) made it 3.
 ///
 /// # C ABI
 ///
@@ -29,7 +32,7 @@ pub extern "C" fn giochi_abi_version() -> u32 {
 
 /// Returns the engine version packed as `major << 16 | minor << 8 | patch`.
 ///
-/// For version `0.2.2` this returns `0x0000_0202`.
+/// For version `0.3.0` this returns `0x0003_0000`.
 ///
 /// # C ABI
 ///

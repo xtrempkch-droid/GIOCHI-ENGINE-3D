@@ -54,9 +54,10 @@ impl GlesVersion {
 
 /// A live GLES context plus the glow function table loaded from it.
 ///
-/// Drop order matters: the glow table must not outlive the GL context. The fields are
-/// declared with `sdl_gl` first so Rust drops it last... which is the opposite of what
-/// we need, so `Drop` below is explicit about it.
+/// Drop order is the declaration order, so `_sdl_gl` (the SDL GL context) is released
+/// first and `glow` (a plain table of function pointers with no destructor) after it.
+/// No GL call may run once the SDL context is gone, which is why the renderer is
+/// dropped before this type (it owns them together) and `Drop` only logs.
 pub struct GlContext {
     /// Kept alive for the lifetime of `glow`; SDL destroys the GL context when this
     /// is dropped. Never read directly -- the underscore is meaningful.
@@ -239,8 +240,8 @@ impl GlContext {
 
 impl Drop for GlContext {
     fn drop(&mut self) {
-        // The `GLContext` field is dropped after this body runs, which is the order we
-        // need: glow's function pointers become invalid once SDL destroys the context.
+        // The fields are dropped in declaration order after this body: `_sdl_gl` (the
+        // SDL context) first. `glow` holds no resources of its own.
         log::debug!("releasing GLES {} context", self.version.major());
     }
 }

@@ -9,6 +9,10 @@
 //! SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --test static_batch
 //! ```
 
+mod common;
+
+use std::sync::MutexGuard;
+
 use giochi_engine::platform::sdl::Platform;
 use giochi_engine::platform::window::{Window, WindowConfig};
 use giochi_engine_3d::context::{self, GlesVersion};
@@ -20,14 +24,17 @@ use giochi_engine_3d::{DirectionalLight, RenderContext3D};
 const WIDTH: u32 = 160;
 const HEIGHT: u32 = 120;
 
-fn headless_context() -> Option<(Platform, Window)> {
+fn headless_context() -> Option<(MutexGuard<'static, ()>, Platform, Window)> {
+    // Serialise the tests that need a Platform: SDL allows one EventPump per process and
+    // a concurrent `Platform::new` used to be mistaken for "no GL driver".
+    let guard = common::platform_guard();
     std::env::set_var("SDL_VIDEODRIVER", "offscreen");
 
     let platform = Platform::new().ok()?;
     context::configure_attributes(&platform, GlesVersion::Gles2).ok()?;
     let window =
         Window::new_opengl(&platform, WindowConfig::new(WIDTH, HEIGHT), "static_batch").ok()?;
-    Some((platform, window))
+    Some((guard, platform, window))
 }
 
 /// Number of pixels that are not the black background.
@@ -52,7 +59,7 @@ fn differing_pixels(a: &[u8], b: &[u8], tolerance: i32) -> usize {
 
 #[test]
 fn a_batch_draws_the_same_pixels_as_the_separate_meshes() {
-    let Some((_platform, window)) = headless_context() else {
+    let Some((_guard, _platform, window)) = headless_context() else {
         eprintln!("skipped: no GL driver (SDL_VIDEODRIVER=offscreen)");
         return;
     };
@@ -157,7 +164,7 @@ fn a_batch_draws_the_same_pixels_as_the_separate_meshes() {
 
 #[test]
 fn a_batch_that_replaces_fifty_meshes_is_one_draw() {
-    let Some((_platform, window)) = headless_context() else {
+    let Some((_guard, _platform, window)) = headless_context() else {
         eprintln!("skipped: no GL driver (SDL_VIDEODRIVER=offscreen)");
         return;
     };
@@ -198,7 +205,7 @@ fn a_batch_that_replaces_fifty_meshes_is_one_draw() {
 
 #[test]
 fn an_empty_batch_is_an_error_not_an_empty_mesh() {
-    let Some((_platform, window)) = headless_context() else {
+    let Some((_guard, _platform, window)) = headless_context() else {
         eprintln!("skipped: no GL driver (SDL_VIDEODRIVER=offscreen)");
         return;
     };
