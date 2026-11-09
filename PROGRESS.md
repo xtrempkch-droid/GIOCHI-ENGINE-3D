@@ -33,16 +33,18 @@ extensão v2.1). Gates 2D revalidados a cada fase 3D.
       `render2d` 0.403 → **0.131 ms** na cena da fase 15; PX30 `render2d` a 20000
       sprites 28.495 → **22.853 ms**, e 10 texturas intercaladas vs atlas a 5000
       sprites 10.8 → **58.6 FPS**)
-- [ ] Fase 17 — Instancing 3D + Upscaling
+- [x] Fase 17 — Instancing 3D + Static Batching + Upscaling (mini_fps 100 cubos:
+      **103 → 4 draw calls**, campo 100 → **1**; x86_64 **5.87x** de FPS e
+      **12.19x** no benchmark a 100 cubos; PX30 segura 60 FPS com 2000 cubos onde o
+      loop faz 21.9; upscaling a 0.75 no PX30 **+61.3 %**)
 - [ ] Fase 18 — Flags ARM64 + CI de performance + C ABI v3
 
-**Próxima fase: 17 — Instancing 3D + Upscaling.** A fase 16 mediu a baseline da fase
-15 e o resultado está em `docs/PERF_LOG.md`. Duas conclusões que a fase 17 herda: (a) a
-cena de 20000 sprites a 24x24 é *fill-bound* no Mali-G31, portanto não serve para
-medir redução de draw calls — usar sprites pequenos ou uma cena que caiba no ecrã; e
-(b) o renderer `software` do SDL não é substituto do console: o caminho
-`SDL_RenderGeometry` dele é um rasterizador de triângulos, não o blit rápido do
-`RenderCopy`.
+**Próxima fase: 18 — Flags ARM64 + Benchmark Suite + CI de Performance + C ABI v3.**
+Duas conclusões que a fase 18 herda: (a) o painel KMSDRM fixa tudo em 60 FPS, portanto
+os critérios de FPS no aparelho têm de ser medidos com uma cena pesada o suficiente para
+sair do vblank, ou em `render2d`/CPU; e (b) `GIOCHI_GL_VERSION=3` ainda não foi testado
+no PX30 — a fase 17 mediu tudo em GLES 2.0 com `GL_EXT_instanced_arrays`, que é o que o
+driver oferece por omissão.
 
 
 ## Gates validados
@@ -190,6 +192,86 @@ overlay visível, medido por CPU do processo (`/usr/bin/time`), dentro dos 2 %.
 - A overlay não aparece em `mini_fps` (o renderer 3D não tem caminho 2D para desenhar
   texto). Os contadores 3D estão medidos e expostos; a overlay 3D fica para quando
   houver um caminho de UI GLES.
+
+## Fase 17 — Instancing 3D + Static Batching + Upscaling
+Data: 2026-11-08
+
+**Escopo:** reduzir o custo por objeto no caminho 3D e permitir baixar a resolução de
+render. A API existente não muda (R12): tudo é aditivo.
+
+### Entregue
+
+- `giochi-engine-3d/src/context/instancing.rs` — deteção, uma vez na criação do
+  contexto, de três fornecedores: GLES 3.0 core, `GL_ANGLE_instanced_arrays` e
+  `GL_EXT_instanced_arrays`. Os dois últimos carregam as entry points por
+  `SDL_GL_GetProcAddress`. **A extensão que o plano nomeou (ANGLE) não existe em
+  nenhuma das duas máquinas** — ambas expõem `GL_EXT_instanced_arrays`; um detetor
+  escrito à letra do plano teria caído no fallback em 100 % do hardware disponível.
+- `GlContext` passou a guardar `GL_EXTENSIONS` (consultada na criação, porque a string
+  só é válida com o contexto corrente) e o backend de instancing já carregado.
+- `render3d/instanced.rs` — `InstancedRenderer`: VBO de matrizes por instância,
+  reempacotadas a cada draw (o `Mat4` tem 80 bytes e o driver quer 64; um `cast` leria
+  cada instância no offset errado e desenhava lixo em vez de falhar).
+- `RenderContext3D::draw_instanced(mesh, shader, &[Mat4], camera, cor) -> Result3D<u32>`
+  devolve o **número de draw calls emitidas** (1 com extensão, N sem, 0 vazio), para que
+  o fallback seja medível em vez de inferido pelo FPS.
+- `shaders/instanced.vert` + `BuiltinShader::Instanced`, com o **mesmo** `phong.frag`
+  para que as duas pernas do benchmark desenhem a mesma imagem. A matriz vem em quatro
+  `vec4` (slots 3..6), coluna-maior; o caminho instanciado não usa VAO, porque
+  `glVertexAttribDivisor` é estado do VAO e contaminaria o próximo draw normal da mesh.
+- `mesh/static_batch.rs` — `StaticBatchBuilder`/`StaticBatch`: transforma os vértices no
+  CPU, concatena VBO+EBO e devolve uma mesh normal no registry. Normais passam por
+  `normal_matrix` e são renormalizadas.
+- `render3d/upscale.rs` — `Upscaler`: FBO com cor + profundidade `DEPTH_COMPONENT16`,
+  upscale bilinear num quad full-screen. `RenderContext3D::set_render_scale(Option<f32>)`,
+  `render_scale()`, `render_size()`; `drawable_size()` reporta o tamanho **baixo** para a
+  câmara acertar o aspeto; `read_pixels` corre o upscale primeiro. `MIN_SCALE = 0.25`,
+  `MAX_SCALE = 1.0`, e `1.0` é tratado como "sem upscale".
+- `mini_fps`: cenário estático em dois batches (48 meshes → 2 draws, um por material),
+  campo de 100 cubos instanciados (F2 alterna com o loop, `--cubes N` muda o tamanho),
+  escala de render (F3 cicla 100/75/50 %, `--scale N`), `--bench` imprime uma linha
+  legível por máquina e `--width/--height`.
+- `benches/meshes_3d.rs` — 1/10/100/1000 cubos instanciados vs loop e 50 tiles estáticos
+  com vs sem batch, uma frame completa por iteração.
+- `tests/instancing.rs` (6), `tests/static_batch.rs` (3), `tests/upscale.rs` (5) — todos
+  ao nível do framebuffer.
+- ADR-044; `docs/PERF_LOG.md` com a secção "After Phase 17"; `docs/3D.md` §6.1
+  "Upscaling".
+
+### Resultados (detalhe e método em `docs/PERF_LOG.md`)
+
+| | Antes | Depois | Ganho |
+|---|---:|---:|---:|
+| mini_fps draw calls (100 cubos + cenário) | 103 | **4** | 25.8x menos chamadas |
+| mini_fps campo instanciado | 100 | **1** | — |
+| x86_64 mini_fps, 100 cubos | 4391.7 FPS | **25776.0 FPS** | **5.87x** |
+| criterion, 100 cubos | 109.81 µs | 9.01 µs | **12.19x** |
+| criterion, 1000 cubos | 1023.5 µs | 57.07 µs | **17.94x** |
+| criterion, 50 tiles estáticos | 65.08 µs | 9.73 µs | **6.69x** |
+| PX30, 2000 cubos | 21.9 FPS (loop) | 59.0 FPS (instanciado) | capacidade |
+| PX30, upscale 0.75 a 5000 cubos | 30.0 FPS | **48.4 FPS** | **+61.3 %** |
+
+### O que falhou e ficou registado
+
+O **upscaling não ajuda no x86_64**: 25776 → 18156 FPS a 75 % (−29.6 %). A frame a
+25 000 FPS é limitada pela submissão, não pelo preenchimento, portanto um segundo
+render target mais um blit é custo puro. Medido também a 2560x1440 (20995 → 14932) para
+descartar a resolução como explicação. É o oposto do PX30, onde a mesma otimização dá
++61 % por a frame ser *fill-bound*. Está no `PERF_LOG` em vez de escondido.
+
+### Gates da fase
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo clippy -p giochi-engine -p giochi-engine-3d -p giochi-demo --all-targets --features profiling -- -D warnings`
+- [x] `scripts/gates.sh`
+- [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --test instancing` — 6 testes
+- [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --test static_batch` — 3 testes
+- [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --test upscale` — 5 testes
+- [x] `cargo bench -p giochi-engine-3d --no-run` e `-- --quick`
+- [x] `CROSS_SYSROOT=/tmp/r35s-sysroot scripts/build-aarch64.sh --release -p giochi-engine-3d --example mini_fps`
+      — corrido no PX30
+- [x] `scripts/gen-header.sh --check` — `giochi.h` inalterado; a ABI v3 só chega na fase 18c
 
 ## Fase 16 — Batching 2D + Atlas
 Data: 2026-11-08

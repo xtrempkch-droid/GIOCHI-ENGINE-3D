@@ -1264,3 +1264,101 @@ non-overlap and padding, power-of-two sizing, in-memory validation), the
 immediate path, submission order preserved, culling, auto-flush at the limit, file and
 in-memory atlas → 1 call, no texture leak) and the criterion benchmark
 `benches/sprites_2d.rs`.
+
+## ADR-044 — Instancing is detected at runtime for three providers, and upscaling is bilinear
+
+**Context.** Phase 17 asks for instanced rendering, static mesh batching and optional
+resolution scaling. Three facts decided the design, and two of them contradict what the
+plan expected.
+
+1. **The extension the plan named is not the one the hardware has.** The extension
+   suggested `GL_ANGLE_instanced_arrays` and warned that "not every ARM64 driver exposes
+   it". Measured, *neither* target exposes it: the PX30 (Mali-G31/Mesa 24.0.0 Panfrost)
+   and the x86_64 development machine (RX 580/Mesa 26.0.8 radeonsi) both report
+   `GL_EXT_instanced_arrays` + `GL_EXT_draw_instanced` and no ANGLE, and no
+   `GL_OES_draw_instanced` either. Detection is not a nicety here — a detector written to
+   the plan would have fallen back on 100 % of the available hardware, and the phase would
+   have "shipped" at 1.0x with every test passing.
+2. **GLES 2.0 guarantees only eight vertex attributes.** A `mat4` per instance consumes
+   four slots and the mesh uses three, which is seven — one spare. The plan warned this
+   could overflow and suggested packing a quaternion plus a position (7 floats) and
+   rebuilding the matrix in the shader. At eight slots it fits, and reconstructing a
+   matrix per vertex would cost more than the slot it saved.
+3. **FSR is out of reach, not merely optional.** FSR 1.0 is a compute-shader pair and
+   GLES 2.0 has no compute; FSR 2.x needs motion vectors and temporal accumulation. The
+   plan already said this; the ADR records *what was done instead*, because "FSR-like"
+   is a claim a reader will test against the code.
+
+**Decision.**
+
+- **Three providers, detected once at context creation.** `InstancingSupport` is
+  `Core` (GLES 3.0, through glow), `Angle` or `Ext` (both loaded with
+  `SDL_GL_GetProcAddress`), or `None`. `GlContext` queries `GL_EXTENSIONS` eagerly —
+  the string is only valid while the context is current — and loads the entry points
+  while the SDL window is still in scope. Checking `supports_gles3()` first means a
+  GLES 3.0 context never needs a symbol lookup.
+- **A fourth state is deliberate: advertised extension, null entry point.** The detection
+  logs a warning and moves to the next provider rather than trusting the string. A driver
+  bug there would otherwise turn into a call through a null pointer.
+- **The model matrix arrives as four `vec4` attributes (3..6), column-major.** They are
+  bound by name before linking, like the mesh attributes, so the numbering is one table
+  rather than two. `Program::is_instanced` is answered by `glGetAttribLocation` **after
+  linking**, not by reading the source: a shader that declares an attribute and never
+  reads it is optimised away, and the question is "will this program accept it".
+- **The instanced path binds no VAO.** `glVertexAttribDivisor` is vertex-array state;
+  setting it on a mesh's VAO would leave the divisor on for that mesh's next ordinary
+  draw, where attributes 3..6 would read from a buffer that is not bound. Seven
+  `vertexAttribPointer` calls per instanced draw is nothing beside the N draws it
+  replaces, and the code resets the divisors and disables the slots afterwards because
+  `bind_vertex_array(None)` does not.
+- **`draw_instanced` returns the number of backend draw calls it issued** — 1 with a
+  provider, `instances.len()` without, 0 for an empty batch. The fallback is not an
+  error; it draws the same picture through the ordinary path. Returning the count is
+  what lets a caller (and a test) tell the two apart instead of inferring it from the
+  frame rate.
+- **`StaticBatch` bakes transforms and lives in the ordinary mesh registry.** The result
+  is drawn with `draw_mesh_colored`, so nothing downstream learns that a batch exists,
+  and it is destroyed, counted and released like any other mesh. Normals go through
+  `Mat4::normal_matrix` and are renormalised on the CPU, because the inverse-transpose
+  changes their length under a non-uniform scale.
+- **Upscaling is a bilinear full-screen quad, not a shader effect.** `GL_LINEAR` on the
+  colour attachment does the filtering in the texture unit; the pass is four lines of
+  GLSL and one `draw_arrays`. The renderer reports the **low-resolution** size from
+  `drawable_size` while a scale is set, so the camera's aspect ratio follows
+  automatically — the same "the real surface is not what you asked for" rule KMSDRM
+  forced in phase 9, reused rather than special-cased. `read_pixels` runs the upscale
+  first, so a capture is the picture the player sees.
+
+**Why not sort the scene into batches automatically.** Deciding what is static is a
+question about the game's future, not about the geometry: an obstacle that will be
+knocked over next frame is indistinguishable from a wall today. Baking the wrong thing
+does not slow the frame down, it freezes the object in place. The API therefore makes
+the caller say it, and the demo shows the split: 48 immobile obstacles and crates in two
+batches, 100 cubes that exist to be instanced left out.
+
+**Consequences.**
+
+- No instancing on a driver with only `GL_EXT_draw_instanced`: it supplies an instance
+  count but no per-instance attributes, which is the entire mechanism. Such a driver gets
+  the loop, at the loop's speed, and `draw_instanced` says so in its return value.
+- A batch cannot animate, cannot change shader, and is expensive to rebuild. That is the
+  documented contract, not a limitation to work around later.
+- The batch has one colour. A scene with two materials becomes two batches — still a
+  large win, and the honest description of what "50 meshes → 1 draw call" means.
+- `Mat4` is 80 bytes on the wire and the driver wants 64, so the instance buffer is
+  repacked every draw instead of cast. A stride mismatch would read every instance from a
+  wrong offset and draw garbage rather than failing, so the repack is asserted by a test
+  that checks the translation column lands at `data[12..15]`.
+- Upscaling only helps a **fill-bound** frame. Measured: +61.3 % at 0.75 on the PX30
+  (5000 cubes, 30.0 → 48.4 FPS) and **−29.6 %** on the x86_64 discrete GPU at 100 cubes,
+  where the frame is submission-bound and the extra pass is pure cost. A host that turns
+  it on unconditionally is choosing to be slower on a fast machine.
+
+**Verified by.** 6 pixel-level tests in `tests/instancing.rs` (instanced frame identical
+to the loop within 2 % of pixels, the translation column landing where column-major puts
+it, empty and unknown handles, the reported support matching the extension string), 3 in
+`tests/static_batch.rs` (batch identical to 5 separate draws, 50 → 1 mesh, empty batch
+rejected), 5 in `tests/upscale.rs` (visible frame at 1.0/0.75/0.5/0.25, window-sized
+output, no GL error, target released), 11 unit tests in `mesh/static_batch.rs`, 5 in
+`render3d/instanced.rs`, 5 in `render3d/upscale.rs`, 5 in `context/instancing.rs`, and
+`benches/meshes_3d.rs`.

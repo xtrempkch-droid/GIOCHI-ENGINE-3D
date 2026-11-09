@@ -510,6 +510,8 @@ typedef struct GiochiSceneCallbacks {
     uint32_t _reserved[4];
 } GiochiSceneCallbacks;
 
+
+
 // Writes the size of `path` in bytes into `out_size`.
 //
 // # C ABI

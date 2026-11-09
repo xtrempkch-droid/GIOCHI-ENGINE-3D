@@ -53,13 +53,18 @@ typedef struct GiochiEngine3D GiochiEngine3D;"""
 [parse]
 parse_deps = true
 include = ["giochi-engine", "giochi-engine-3d"]
+# The instancing entry-point table holds raw GL function pointers. It is `pub(crate)`,
+# but cbindgen still walks private items while resolving dependencies, so it is named
+# in `[export] exclude` as well; leaving it out puts a `typedef struct
+# InstancingBackend InstancingBackend;` in the header for a type no `giochi_*` function
+# mentions.
 
 [export]
 prefix = ""
 # `GiochiEngine3D` is declared by hand in the header above: it holds a `glow::Context`, a
 # `Window` and a `Platform`, so emitting a struct body would be a lie that changes shape
 # between releases (ADR-039).
-exclude = ["GiochiEngine3D"]
+exclude = ["GiochiEngine3D", "InstancingBackend"]
 
 [export.rename]
 "Vec2" = "GiochiVec2"

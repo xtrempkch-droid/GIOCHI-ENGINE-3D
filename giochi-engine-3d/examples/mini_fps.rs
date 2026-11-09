@@ -13,10 +13,25 @@
 //! non-interactively with a scripted path, which is how CI and the console exercise the
 //! same code the manual check uses.
 //!
+//! # Phase 17 toggles
+//!
+//! - **F2** switches the 100-cube field between instanced (one draw call) and a loop
+//!   (one draw call per cube). The scene, the camera and the colours are identical, so
+//!   the frame rate difference is the batching and nothing else.
+//! - **F3** cycles the render scale 100 % → 75 % → 50 %, upscaling a smaller framebuffer
+//!   over the window.
+//! - The static scenery is always drawn from one [`StaticBatch`], so the walls, pillars
+//!   and floor are a single draw call instead of ~30.
+//!
+//! `--instanced`/`--loop` and `--scale N` set the same things from the command line,
+//! which is how the benchmark runs without a keyboard.
+//!
 //! ```text
 //! cargo run -p giochi-engine-3d --example mini_fps
 //! cargo run -p giochi-engine-3d --example mini_fps -- --frames 300 --auto
 //! cargo run -p giochi-engine-3d --example mini_fps -- --frames 3 --quadro out.bmp
+//! cargo run --release -p giochi-engine-3d --example mini_fps -- \
+//!     --frames 600 --auto --bench --instanced
 //! ```
 
 use std::process::ExitCode;
@@ -26,7 +41,10 @@ use giochi_engine::platform::sdl::{quit_signal, QuitSignal};
 use giochi_engine::platform::window::{Window, WindowConfig};
 use giochi_engine::platform::Platform;
 use giochi_engine_3d::context::{self, GlesVersion};
-use giochi_engine_3d::math3d::{AxisInput, CameraController, Color3D, Quat, Transform3D, Vec3};
+use giochi_engine_3d::math3d::{
+    AxisInput, CameraController, Color3D, Mat4, Quat, Transform3D, Vec3,
+};
+use giochi_engine_3d::mesh::{StaticBatch, StaticBatchBuilder};
 use giochi_engine_3d::shader::BuiltinShader;
 use giochi_engine_3d::{DirectionalLight, RenderContext3D};
 use sdl2::keyboard::Keycode;
@@ -41,6 +59,27 @@ const SPACING: f32 = 6.0;
 const OBSTACLE_SIZE: f32 = 2.0;
 /// Eye height above the floor.
 const EYE_HEIGHT: f32 = 1.7;
+/// Spacing of the instanced cube field.
+const CUBE_FIELD_SPACING: f32 = 1.4;
+/// Edge length of one cube in the instanced field.
+const CUBE_FIELD_SIZE: f32 = 0.8;
+/// The render scales F3 cycles through.
+const SCALE_STEPS: [f32; 3] = [1.0, 0.75, 0.5];
+
+/// Index in [`SCALE_STEPS`] closest to `scale`, so `--scale 0.75` and two presses of F3
+/// agree about where the cycle is.
+fn scale_index_for(scale: f32) -> usize {
+    let mut best = 0;
+    let mut best_distance = f32::INFINITY;
+    for (index, step) in SCALE_STEPS.iter().enumerate() {
+        let distance = (step - scale).abs();
+        if distance < best_distance {
+            best_distance = distance;
+            best = index;
+        }
+    }
+    best
+}
 /// Edge length of the low crates.
 ///
 /// Deliberately **below** the eye. The phase-13 acceptance criterion is that a cube's top
@@ -49,7 +88,7 @@ const EYE_HEIGHT: f32 = 1.7;
 /// the lighting can be judged rather than merely trusted.
 const CRATE_SIZE: f32 = 0.6;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Options {
     /// Stop after this many frames.
     frames: Option<u64>,
@@ -57,6 +96,41 @@ struct Options {
     auto: bool,
     /// Capture the last frame to this BMP.
     quadro: Option<String>,
+    /// Draw the cube field with instancing instead of a loop.
+    instanced: bool,
+    /// Render scale, `1.0` for full resolution.
+    scale: f32,
+    /// Print one machine-readable line at the end, for `docs/PERF_LOG.md`.
+    bench: bool,
+    /// Window size. KMSDRM ignores it (the panel is the panel); a desktop or the
+    /// `offscreen` driver honours it, which is how the fill-bound case is measured.
+    width: u32,
+    height: u32,
+    /// Cubes in the instanced field.
+    ///
+    /// The default 100 is the phase-17 acceptance scene. A console holds 60 FPS by
+    /// vsync down to workloads far heavier than that, so the device measurement raises
+    /// it until the loop arm actually misses frames — otherwise both arms report 60.0
+    /// and the comparison measures the panel.
+    cubes: usize,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            frames: None,
+            auto: false,
+            quadro: None,
+            // Instancing is the fast path and the reason the field exists, so it is the
+            // default; `--loop` and F2 switch to the comparison arm.
+            instanced: true,
+            scale: 1.0,
+            bench: false,
+            width: 1280,
+            height: 720,
+            cubes: 100,
+        }
+    }
 }
 
 impl Options {
@@ -84,11 +158,45 @@ impl Options {
                 options.quadro = Some(next_value(&mut args, "--quadro")?.to_string());
             } else if let Some(value) = arg.strip_prefix("--quadro=") {
                 options.quadro = Some(value.to_string());
+            } else if arg == "--bench" {
+                options.bench = true;
+            } else if let Some(value) = arg.strip_prefix("--cubes=") {
+                options.cubes = parse_number(value, "--cubes")?;
+            } else if arg == "--cubes" {
+                options.cubes = parse_number(next_value(&mut args, "--cubes")?, "--cubes")?;
+            } else if let Some(value) = arg.strip_prefix("--width=") {
+                options.width = parse_number(value, "--width")?;
+            } else if arg == "--width" {
+                options.width = parse_number(next_value(&mut args, "--width")?, "--width")?;
+            } else if let Some(value) = arg.strip_prefix("--height=") {
+                options.height = parse_number(value, "--height")?;
+            } else if arg == "--height" {
+                options.height = parse_number(next_value(&mut args, "--height")?, "--height")?;
+            } else if arg == "--instanced" {
+                options.instanced = true;
+            } else if arg == "--loop" {
+                options.instanced = false;
+            } else if let Some(value) = arg.strip_prefix("--scale=") {
+                options.scale = parse_number(value, "--scale")?;
+            } else if arg == "--scale" {
+                options.scale = parse_number(next_value(&mut args, "--scale")?, "--scale")?;
             } else {
                 return Err(format!(
-                    "unknown argument '{arg}'; accepted: --frames N, --auto, --quadro PATH"
+                    "unknown argument '{arg}'; accepted: --frames N, --auto, --quadro PATH, \
+                     --instanced, --loop, --scale N, --bench, --width N, --height N, \
+                     --cubes N"
                 ));
             }
+        }
+
+        if !(options.scale.is_finite() && options.scale > 0.0) {
+            return Err("--scale must be a positive number".to_owned());
+        }
+        if options.width == 0 || options.height == 0 {
+            return Err("--width and --height must be non-zero".to_owned());
+        }
+        if options.cubes == 0 {
+            return Err("--cubes must be greater than zero".to_owned());
         }
 
         Ok(options)
@@ -133,7 +241,11 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     let requested = GlesVersion::from_env();
     context::configure_attributes(&platform, requested)?;
 
-    let window = Window::new_opengl(&platform, WindowConfig::new(1280, 720), "giochi mini_fps")?;
+    let window = Window::new_opengl(
+        &platform,
+        WindowConfig::new(options.width, options.height),
+        "giochi mini_fps",
+    )?;
     let mut render = RenderContext3D::new(context::create(&window)?);
     println!(
         "GLES {} on {}",
@@ -171,6 +283,109 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         light.shininess
     );
 
+    // ---- phase 17: static batching, instancing and upscaling -------------
+
+    // The obstacles and the low crates never move, so they are assembled into one mesh
+    // each at load time. Two batches rather than one because a batch has a single
+    // colour: the obstacles are tan and the crates are blue, and losing that distinction
+    // would make the phase-13 "top face is visible" check harder to read.
+    let (cube_vertices, cube_indices) = giochi_engine_3d::mesh::cube(OBSTACLE_SIZE);
+    let (crate_vertices, crate_indices) = giochi_engine_3d::mesh::cube(CRATE_SIZE);
+    let mut obstacles =
+        StaticBatchBuilder::with_capacity(cube_vertices.len() * 32, cube_indices.len() * 32);
+    let mut crates =
+        StaticBatchBuilder::with_capacity(cube_vertices.len() * 32, cube_indices.len() * 32);
+    let mut obstacle_count = 0usize;
+    let mut crate_count = 0usize;
+
+    for row in 0..OBSTACLES {
+        for column in 0..OBSTACLES {
+            let x = (column - OBSTACLES / 2) as f32 * SPACING;
+            let z = (row - OBSTACLES / 2) as f32 * SPACING - 6.0;
+            if x.abs() < 1.0 && (z - 8.0).abs() < 3.0 {
+                continue;
+            }
+
+            let tilt = Quat::from_axis_angle(Vec3::UP, (row * OBSTACLES + column) as f32 * 0.37);
+            let model = Transform3D::from_translation(Vec3::new(x, OBSTACLE_SIZE * 0.5, z))
+                .with_rotation(tilt)
+                .matrix();
+            obstacles = obstacles.add_mesh(&cube_vertices, &cube_indices, &model)?;
+            obstacle_count += 1;
+
+            let crate_x = x + SPACING * 0.5;
+            if crate_x.abs() < FLOOR_SIZE * 0.45 {
+                let crate_model =
+                    Transform3D::from_translation(Vec3::new(crate_x, CRATE_SIZE * 0.5, z))
+                        .with_rotation(Quat::from_axis_angle(
+                            Vec3::UP,
+                            (row * OBSTACLES + column) as f32 * 0.61,
+                        ))
+                        .matrix();
+                crates = crates.add_mesh(&crate_vertices, &crate_indices, &crate_model)?;
+                crate_count += 1;
+            }
+        }
+    }
+
+    let obstacle_batch = StaticBatch::build(&mut render, obstacles)?;
+    let crate_batch = StaticBatch::build(&mut render, crates)?;
+    println!(
+        "static batches: {obstacle_count} obstacles -> 1 draw ({} verts), \
+         {crate_count} crates -> 1 draw ({} verts)",
+        obstacle_batch.vertex_count(),
+        crate_batch.vertex_count(),
+    );
+
+    // The instanced cube field: one mesh, 100 matrices. Drawn with one call when the
+    // driver has the extension, 100 when it does not.
+    let field_cube = render.create_cube_mesh(CUBE_FIELD_SIZE)?;
+    let instanced_shader = render.create_builtin_shader(BuiltinShader::Instanced)?;
+    // A square-ish grid, laid out from the count so `--cubes` alone decides the scene.
+    let side = (options.cubes as f64).sqrt().ceil() as i32;
+    let field: Vec<Mat4> = (0..options.cubes)
+        .map(|index| {
+            let row = (index as i32) / side;
+            let column = (index as i32) % side;
+            let position = Vec3::new(
+                (column - side / 2) as f32 * CUBE_FIELD_SPACING,
+                CUBE_FIELD_SIZE * 0.5 + 0.2,
+                (row - side / 2) as f32 * CUBE_FIELD_SPACING - 16.0,
+            );
+            Transform3D::from_translation(position)
+                .with_rotation(Quat::from_axis_angle(Vec3::UP, index as f32 * 0.4))
+                .matrix()
+        })
+        .collect();
+    println!(
+        "instanced field: {} cubes, instancing {} ({:?}); toggled with F2",
+        field.len(),
+        if render.supports_instancing() {
+            "available"
+        } else {
+            "UNAVAILABLE — the fallback draws one at a time"
+        },
+        render.instancing_support().extension(),
+    );
+
+    let mut instanced = options.instanced;
+    render.set_render_scale(Some(options.scale));
+    let mut scale_index = scale_index_for(options.scale);
+    // `render.drawable_size()` is still the placeholder until the first `begin_frame`
+    // learns the real surface (KMSDRM ignores the requested size), so the expected
+    // render size is derived from the window rather than from the renderer.
+    let (window_width, window_height) = window.drawable_size();
+    let (render_width, render_height) = giochi_engine_3d::scaled_size(
+        window_width,
+        window_height,
+        render.render_scale().unwrap_or(1.0),
+    );
+    println!(
+        "window {window_width}x{window_height}, render scale {:.0}% -> {render_width}x{render_height} \
+         (toggled with F3)",
+        render.render_scale().unwrap_or(1.0) * 100.0,
+    );
+
     let mut controller = CameraController::new(Vec3::new(0.0, EYE_HEIGHT, 8.0), 0.0, -0.15);
     let mut input = Input::new(&platform);
     // Mouse capture is on by default: a walker without it cannot look around. ESC
@@ -183,9 +398,13 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     // acceptance criterion observable at all, and "zero crates drawn" would mean the
     // criterion is being asserted on geometry the player never sees.
     let mut crates_drawn: u64 = 0;
+    // Draw calls the instanced field cost on the last frame: 1 with the extension, one
+    // per cube without it. Printed by `--bench` so the claim is measured, not assumed.
+    let mut field_calls: u32 = 0;
     let mut frames: u64 = 0;
     let mut fps_timer: f32 = 0.0;
     let mut fps_frames: u32 = 0;
+    let started_at = std::time::Instant::now();
 
     let frame_ms = if options.frames.is_some() {
         0
@@ -201,12 +420,37 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             if quit_signal(event) != QuitSignal::None {
                 finish(
                     &mut render,
-                    [floor, cube],
-                    shader,
+                    &[
+                        floor,
+                        cube,
+                        field_cube,
+                        obstacle_batch.mesh(),
+                        crate_batch.mesh(),
+                    ],
+                    &[shader, instanced_shader],
                     frames,
                     wireframe,
                     crates_drawn,
                 );
+                if options.bench {
+                    let wall = started_at.elapsed().as_secs_f32().max(f32::EPSILON);
+                    let (render_width, render_height) = render.render_size();
+                    // Counted here rather than read from the profiler: the counter only
+                    // exists with the `profiling` feature, and the acceptance criterion
+                    // has to hold in a plain release build.
+                    let draw_calls = 3 + u64::from(field_calls);
+                    println!(
+                        "mini_fps: frames={frames} wall={wall:.3}s fps={:.1} \
+                         draw_calls={draw_calls} field_calls={field_calls} \
+                         instanced={} cubes={} scale={:.2} render={render_width}x{render_height} \
+                         support={}",
+                        frames as f32 / wall,
+                        u8::from(instanced),
+                        field.len(),
+                        render.render_scale().unwrap_or(1.0),
+                        render.instancing_support().name(),
+                    );
+                }
                 return Ok(());
             }
             // TAB toggles wireframe: the fastest way to see whether a face is missing
@@ -219,6 +463,41 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             {
                 wireframe = !wireframe;
                 println!("wireframe: {wireframe}");
+            }
+            // F2 toggles instancing so the two arms can be compared on the same scene
+            // by eye as well as by number.
+            if let sdl2::event::Event::KeyDown {
+                keycode: Some(Keycode::F2),
+                repeat: false,
+                ..
+            } = event
+            {
+                instanced = !instanced;
+                println!(
+                    "instanced cube field: {instanced}{}",
+                    if instanced && !render.supports_instancing() {
+                        " (no extension here: this is the one-per-instance fallback)"
+                    } else {
+                        ""
+                    }
+                );
+            }
+            // F3 cycles the render scale. `SCALE_STEPS` is shared with `--scale` so the
+            // command-line and the key reach the same values.
+            if let sdl2::event::Event::KeyDown {
+                keycode: Some(Keycode::F3),
+                repeat: false,
+                ..
+            } = event
+            {
+                scale_index = (scale_index + 1) % SCALE_STEPS.len();
+                render.set_render_scale(Some(SCALE_STEPS[scale_index]));
+                println!(
+                    "render scale {:.0}% -> {}x{}",
+                    SCALE_STEPS[scale_index] * 100.0,
+                    render.render_size().0,
+                    render.render_size().1
+                );
             }
         }
 
@@ -246,12 +525,12 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         let (width, height) = render.drawable_size();
         let camera = controller.camera().with_drawable_size(width, height);
 
-        crates_drawn = 0;
         render.begin_frame(&window);
         if wireframe {
             render.set_wireframe(true);
         }
 
+        // One draw for the floor, one for every obstacle, one for every crate.
         render.draw_mesh_colored(
             floor,
             shader,
@@ -259,55 +538,50 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             &camera,
             Color3D::new(0.32, 0.42, 0.30, 1.0),
         )?;
+        render.draw_mesh_colored(
+            obstacle_batch.mesh(),
+            shader,
+            &Transform3D::IDENTITY,
+            &camera,
+            Color3D::new(0.85, 0.62, 0.35, 1.0),
+        )?;
+        render.draw_mesh_colored(
+            crate_batch.mesh(),
+            shader,
+            &Transform3D::IDENTITY,
+            &camera,
+            Color3D::new(0.62, 0.70, 0.82, 1.0),
+        )?;
+        crates_drawn = crate_count as u64;
 
-        for row in 0..OBSTACLES {
-            for column in 0..OBSTACLES {
-                // Skip the spawn area so the player does not start inside a cube.
-                let x = (column - OBSTACLES / 2) as f32 * SPACING;
-                let z = (row - OBSTACLES / 2) as f32 * SPACING - 6.0;
-                if x.abs() < 1.0 && (z - 8.0).abs() < 3.0 {
-                    continue;
-                }
-
-                // A fixed tilt per position: identical cubes would hide a broken normal,
-                // because every face would be lit the same way.
-                let tilt =
-                    Quat::from_axis_angle(Vec3::UP, (row * OBSTACLES + column) as f32 * 0.37);
-                let model = Transform3D::from_translation(Vec3::new(x, OBSTACLE_SIZE * 0.5, z))
-                    .with_rotation(tilt);
-
+        // The instanced field: one call, or one per cube on a driver without the
+        // extension — which is exactly the comparison F2 switches between.
+        field_calls = if instanced {
+            render.draw_instanced(
+                field_cube,
+                instanced_shader,
+                &field,
+                &camera,
+                Color3D::new(0.55, 0.80, 0.55, 1.0),
+            )?
+        } else {
+            let mut calls = 0;
+            for model in &field {
                 render.draw_mesh_colored(
-                    cube,
+                    field_cube,
                     shader,
-                    &model,
+                    &Transform3D::from_translation(Vec3::new(
+                        model.data[12],
+                        model.data[13],
+                        model.data[14],
+                    )),
                     &camera,
-                    Color3D::new(0.85, 0.62, 0.35, 1.0),
+                    Color3D::new(0.55, 0.80, 0.55, 1.0),
                 )?;
-
-                // A crate between this obstacle and the next one along X. Low enough that
-                // the camera looks down on it, which is the only way a top face is ever on
-                // screen, and a slightly different colour so the two are distinguishable in
-                // a capture.
-                let crate_x = x + SPACING * 0.5;
-                if crate_x.abs() < FLOOR_SIZE * 0.45 {
-                    crates_drawn += 1;
-                    let crate_model =
-                        Transform3D::from_translation(Vec3::new(crate_x, CRATE_SIZE * 0.5, z))
-                            .with_rotation(Quat::from_axis_angle(
-                                Vec3::UP,
-                                (row * OBSTACLES + column) as f32 * 0.61,
-                            ));
-
-                    render.draw_mesh_colored(
-                        cube,
-                        shader,
-                        &crate_model,
-                        &camera,
-                        Color3D::new(0.62, 0.70, 0.82, 1.0),
-                    )?;
-                }
+                calls += 1;
             }
-        }
+            calls
+        };
 
         if wireframe {
             render.set_wireframe(false);
@@ -351,12 +625,37 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             if frames >= limit {
                 finish(
                     &mut render,
-                    [floor, cube],
-                    shader,
+                    &[
+                        floor,
+                        cube,
+                        field_cube,
+                        obstacle_batch.mesh(),
+                        crate_batch.mesh(),
+                    ],
+                    &[shader, instanced_shader],
                     frames,
                     wireframe,
                     crates_drawn,
                 );
+                if options.bench {
+                    let wall = started_at.elapsed().as_secs_f32().max(f32::EPSILON);
+                    let (render_width, render_height) = render.render_size();
+                    // Counted here rather than read from the profiler: the counter only
+                    // exists with the `profiling` feature, and the acceptance criterion
+                    // has to hold in a plain release build.
+                    let draw_calls = 3 + u64::from(field_calls);
+                    println!(
+                        "mini_fps: frames={frames} wall={wall:.3}s fps={:.1} \
+                         draw_calls={draw_calls} field_calls={field_calls} \
+                         instanced={} cubes={} scale={:.2} render={render_width}x{render_height} \
+                         support={}",
+                        frames as f32 / wall,
+                        u8::from(instanced),
+                        field.len(),
+                        render.render_scale().unwrap_or(1.0),
+                        render.instancing_support().name(),
+                    );
+                }
                 return Ok(());
             }
             continue;
@@ -377,8 +676,8 @@ fn mouse_delta(input: &Input) -> (f32, f32) {
 
 fn finish(
     render: &mut RenderContext3D,
-    meshes: [u64; 2],
-    shader: u64,
+    meshes: &[u64],
+    shaders: &[u64],
     frames: u64,
     wireframe: bool,
     crates_drawn: u64,
@@ -389,9 +688,11 @@ fn finish(
     );
 
     for mesh in meshes {
-        render.destroy_mesh(mesh);
+        render.destroy_mesh(*mesh);
     }
-    render.destroy_shader(shader);
+    for shader in shaders {
+        render.destroy_shader(*shader);
+    }
     println!(
         "released: {} meshes and {} shaders left",
         render.mesh_count(),

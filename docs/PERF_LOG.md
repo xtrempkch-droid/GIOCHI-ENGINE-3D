@@ -323,7 +323,137 @@ from an atlas) and is a 10-20 % `render2d` reduction in the single-texture scene
 
 ## After Phase 17 (Instancing 3D + Static Batching + Upscaling)
 
-To be filled when phase 17 lands.
+Date: 2026-11-08 | Build: release | vsync: off (the console is still panel-paced)
+
+Method:
+
+```bash
+cargo build --release -p giochi-engine-3d --example mini_fps
+
+# x86_64 (a real EGL/GLES context with no display)
+SDL_VIDEODRIVER=offscreen taskset -c 2 \
+    target/release/examples/mini_fps --frames 600 --auto --bench --instanced
+
+# PX30 (console released, binary in /tmp)
+SDL_VIDEODRIVER=kmsdrm /tmp/mini_fps17 --frames 200 --auto --bench --cubes 2000
+```
+
+`--bench` prints one machine-readable line, including the draw-call count **counted by
+the example** rather than read from the profiler, so the acceptance criteria hold in a
+plain release build without the `profiling` feature. `--cubes N` sets the size of the
+instanced field; `--scale S`, `--instanced`/`--loop` and `--width/--height` select the
+other arms, and `F2`/`F3` do the same from the keyboard.
+
+### What the drivers actually provide
+
+The phase plan predicted `GL_ANGLE_instanced_arrays` and made runtime detection
+mandatory. Detection was indeed necessary, and the prediction was wrong in a way that
+would have silently disabled the whole feature:
+
+| Machine | GLES | `GL_ANGLE_instanced_arrays` | `GL_EXT_instanced_arrays` | Detected |
+|---|---|---:|---:|---|
+| x86_64 RX 580, Mesa 26.0.8 radeonsi | 2.0 | ✗ | ✓ | `ext` |
+| PX30 Mali-G31, Mesa 24.0.0 Panfrost | 2.0 | ✗ | ✓ | `ext` |
+
+Neither machine lists ANGLE. A detector that looked only for ANGLE would have taken the
+one-draw-per-cube fallback on 100 % of the hardware this project owns, and every number
+below would have been 1.0x. `docs/DECISIONS.md` ADR-044 records the decision and the
+`GLES 3.0 core` path that is used when `GIOCHI_GL_VERSION=3` is granted.
+
+### x86_64 — `mini_fps`, 100 cubes, 1280x720
+
+| Scenario | Draw calls | Field calls | FPS (median of 5) | Render size |
+|---|---:|---:|---:|---|
+| instanced, 100 % | 4 | 1 | 25776.0 | 1280x720 |
+| loop, 100 % | 103 | 100 | 4391.7 | 1280x720 |
+| instanced, 75 % | 4 | 1 | 18155.6 | 960x540 |
+| instanced, 50 % | 4 | 1 | 18878.3 | 640x360 |
+
+**Instancing: 4391.7 → 25776.0 FPS, 5.87x**, draw calls 103 → 4 (100 → 1 for the field;
+the other three are the floor and the two static batches). That meets the acceptance
+criterion — 100 cubes, ≥ 5x — on the development machine.
+
+**Upscaling is a loss here: −29.6 % at 75 %** (25776.0 → 18155.6). That is not a bug
+and it is not hidden. At 25 000 FPS the frame is submission-bound, not fill-bound: the
+GPU finishes 921 600 pixels long before the CPU has finished telling it to. Adding a
+second target and a full-screen blit therefore adds work to the half of the frame that
+was already the bottleneck. Scaling cannot help a frame that is not fill-bound, and on
+a discrete GPU this scene never is — measured at 2560x1440 as well (20995.4 FPS
+instanced at 100 %, 14932.4 at 75 %), so a bigger window does not change the conclusion.
+
+### Criterion benchmarks — `benches/meshes_3d.rs`
+
+One complete frame per iteration (begin, clear, submit, present), 1280x720, `offscreen`
++ `opengl`:
+
+| Scenario | Instanced | Loop | Ratio |
+|---|---:|---:|---:|
+| 1 cube | 2.87 µs | 7.36 µs | 2.56x |
+| 10 cubes | 8.03 µs | 32.34 µs | 4.03x |
+| 100 cubes | 9.01 µs | 109.81 µs | **12.19x** |
+| 1000 cubes | 57.07 µs | 1023.5 µs | **17.94x** |
+| 50 static tiles, batched vs separate | 9.73 µs | 65.08 µs | **6.69x** |
+
+The `1 cube` row is the honest floor: with one instance there is nothing to batch, and
+what is left is the extra instance-buffer upload, so the instanced path is still faster
+only because it skips one `u_model`/`u_normal_matrix` pair per draw. The ratio grows with
+the count, which is what "removes per-draw cost" means.
+
+### ARM64 PX30 — KMSDRM 640x480, `opengles2` (Mali-G31)
+
+The panel pins the run at 60 FPS, so a 100-cube scene reports 60.0 for every arm:
+
+| Cubes | Instanced | Loop | Draw calls (instanced → loop) |
+|---:|---:|---:|---|
+| 100 | 60.0 FPS | 59.8 FPS | 4 → 103 |
+| 1000 | 59.6 FPS | 39.4 FPS | 4 → 1003 |
+| 2000 | 59.0 FPS | 21.9 FPS | 4 → 2003 |
+| 5000 | 30.0 FPS | 9.0 FPS | 4 → 5003 |
+
+Read as a **capacity** result rather than a ratio: the loop arm stops holding 60 FPS
+somewhere between 100 and 1000 cubes, while the instanced arm still holds it at 2000 and
+only breaks at 5000. At 5000 both arms are past the frame budget, and the ratio there
+(3.33x) is compressed by the instanced arm becoming fill-bound — 5000 cubes is 5000
+filled boxes, and the Mali is doing pixel work, not call work, in that arm.
+
+**Upscaling on the device, 5000 cubes:**
+
+| Scale | Render size | FPS | Gain over 100 % |
+|---|---|---:|---:|
+| 100 % | 640x480 | 30.0 | — |
+| 75 % | 480x360 | **48.4** | **+61.3 %** |
+| 50 % | 320x240 | **57.2** | **+90.7 %** |
+
+This meets the ≥ 40 % criterion at 0.75. The mechanism is exactly the one the x86_64
+result lacked: on the Mali the frame at 5000 cubes is **fill-bound**, so removing 44 % of
+the pixels buys 61 % more frames, and the upscale pass that adds a full-screen blit costs
+far less than the pixels it saved. 0.75 gives more than 25 %/44 %-of-pixels would suggest
+because the frame also crosses back under the 16.7 ms vblank budget, where the panel
+stops adding latency of its own.
+
+### Where phase 17 stands against its acceptance criteria
+
+| Criterion | Result |
+|---|---|
+| `mini_fps` with 100 instanced cubes: draw calls ~100 → 1 | **Met.** `field_calls=1`, frame total 103 → 4 (floor + 2 batches + 1 field) |
+| FPS with 100 cubes: ≥ 5x vs the loop | **Met on x86_64 (5.87x) and in the criterion bench (12.19x).** Not measurable on the PX30 at 100 cubes: both arms sit at the 60 FPS vblank. The device result is reported as capacity (59.0 vs 21.9 FPS at 2000 cubes) |
+| Static batch: ~50 → 1 draw call | **Met in structure, 48 → 2 in the demo.** A batch carries one colour, and the scene has two (tan obstacles, blue crates); one batch per material is the correct semantics, not a shortfall. `tests/static_batch.rs` asserts the 50 → 1 case directly |
+| Upscaling at 0.75: ≥ 40 % FPS | **Met on the PX30: +61.3 %** (5000 cubes, 30.0 → 48.4). Not met on x86_64, where the frame is submission-bound and the pass is pure overhead — recorded above with the measurement that rules out resolution as the explanation |
+| `PERF_LOG.md` updated | This section |
+| Public API unchanged (R12) | Yes — additive only: `draw_instanced`, `set_render_scale`, `StaticBatch`, `InstancedRenderer`, `Upscaler`, `InstancingSupport`. No existing signature changed, no `giochi.h` change |
+| Gates + no regression > 10 % | See `PROGRESS.md` phase 17. The 2D benchmark is untouched by this phase |
+
+### Two design choices worth knowing when reading the numbers
+
+1. **One run of one quad is a `RenderCopy`, not geometry** was phase 16's rule for 2D.
+   Phase 17's equivalent is that `draw_instanced` with one instance still uploads the
+   instance buffer and issues one instanced call. For a single object the ordinary
+   `draw_mesh` is faster; instancing earns its keep from the second instance onwards,
+   and the 1-cube row above quantifies the crossover.
+2. **The static batch bakes the transform at build time.** That is what makes it one
+   buffer, and it is also why the demo cannot move its obstacles: anything that moves
+   has to stay out of the batch. The scene is split accordingly — the 48 immobile
+   obstacles and crates are batched, the 100 cubes that exist to be instanced are not.
 
 ## After Phase 18 (ARM64 flags + benchmark CI)
 

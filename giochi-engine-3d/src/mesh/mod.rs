@@ -7,9 +7,11 @@
 mod gpu_mesh;
 mod obj_loader;
 mod primitives;
+mod static_batch;
 mod vertex;
 
 pub use gpu_mesh::{Mesh, FORCE_NO_VAO_ENV};
 pub use obj_loader::load_obj;
 pub use primitives::{cube, plane, sphere};
+pub use static_batch::{supports_u32_indices, StaticBatch, StaticBatchBuilder};
 pub use vertex::Vertex;

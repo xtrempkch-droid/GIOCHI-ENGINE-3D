@@ -15,8 +15,12 @@
 use glow::HasContext;
 
 use super::Vertex;
+use crate::context::InstancingBackend;
 use crate::error::{Error3D, Result3D};
-use crate::shader::{Program, ATTRIB_NORMAL, ATTRIB_POSITION, ATTRIB_UV};
+use crate::shader::{Program, ATTRIB_INSTANCE_MODEL, ATTRIB_NORMAL, ATTRIB_POSITION, ATTRIB_UV};
+
+/// Bytes per instance matrix: four `vec4` columns, which is one `Mat4`.
+pub const INSTANCE_STRIDE: i32 = 16 * core::mem::size_of::<f32>() as i32;
 
 /// Bytes per vertex, used as the attribute stride.
 const STRIDE: i32 = core::mem::size_of::<Vertex>() as i32;
@@ -189,6 +193,77 @@ impl Mesh {
                 gl.bind_vertex_array(None);
             }
         }
+    }
+
+    /// Draws `instance_count` copies of this mesh in one call.
+    ///
+    /// `instance_vbo` holds `instance_count` column-major `mat4` values, uploaded by
+    /// the caller; attributes 3..6 read one four-float column each, advancing once per
+    /// instance.
+    ///
+    /// # The mesh VAO is deliberately not used here
+    ///
+    /// `glVertexAttribDivisor` is *vertex array state*. Enabling it on a mesh's VAO
+    /// would leave the divisor set for that mesh's next non-instanced draw, where
+    /// attributes 3..6 would then be read from a buffer that is not bound — undefined
+    /// values, or an immediate GL error. So the instanced path binds no VAO and
+    /// re-specifies every attribute for the duration of the call. Seven
+    /// `vertexAttribPointer` calls per instanced draw is nothing next to the N draws
+    /// it replaces.
+    ///
+    /// # Safety
+    ///
+    /// The caller must have `program` bound, the GL context current, and
+    /// `instance_vbo` filled with at least `instance_count` matrices.
+    pub(crate) unsafe fn draw_instanced(
+        &self,
+        gl: &glow::Context,
+        backend: InstancingBackend,
+        instance_vbo: glow::Buffer,
+        instance_count: i32,
+    ) {
+        gl.bind_vertex_array(None);
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
+        self.specify_attributes(gl);
+        // The divisor default is the only sensible one for mesh attributes, but a
+        // previous instanced draw may have left 1 on these slots — `bind_vertex_array(None)`
+        // does not reset it, because with no VAO bound the state is per-attribute global.
+        for slot in [ATTRIB_POSITION, ATTRIB_NORMAL, ATTRIB_UV] {
+            backend.vertex_attrib_divisor(gl, slot, 0);
+        }
+
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(instance_vbo));
+        for column in 0..4u32 {
+            let slot = ATTRIB_INSTANCE_MODEL + column;
+            gl.enable_vertex_attrib_array(slot);
+            gl.vertex_attrib_pointer_f32(
+                slot,
+                4,
+                glow::FLOAT,
+                false,
+                INSTANCE_STRIDE,
+                (column as i32) * 4 * core::mem::size_of::<f32>() as i32,
+            );
+            backend.vertex_attrib_divisor(gl, slot, 1);
+        }
+
+        gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.ebo));
+        backend.draw_elements_instanced(
+            gl,
+            glow::TRIANGLES,
+            self.index_count,
+            glow::UNSIGNED_INT,
+            0,
+            instance_count,
+        );
+
+        // Leave nothing enabled that a following non-instanced draw would inherit.
+        for slot in [3, 4, 5, 6] {
+            backend.vertex_attrib_divisor(gl, slot, 0);
+            gl.disable_vertex_attrib_array(slot);
+        }
+        gl.bind_buffer(glow::ARRAY_BUFFER, None);
+        gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, None);
     }
 
     /// Number of indices, i.e. three per triangle.

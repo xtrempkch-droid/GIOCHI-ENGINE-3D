@@ -71,6 +71,38 @@ camera is now pinned to the viewport centre; the old default centred the world o
 and left three quarters of the sprite field off-screen, which the earlier baseline
 silently measured.
 
+### Added — phase 17: 3D instancing, static batching and upscaling
+
+**A 3D scene of identical objects is now one draw call.** `RenderContext3D::draw_instanced`
+takes a mesh, an instance shader and a slice of matrices, and issues a single
+`glDrawElementsInstanced`-class call instead of one per object. It returns the number of
+backend draw calls it actually made — 1 when the driver can instance, `instances.len()`
+when it cannot — so the fallback is measurable rather than inferred.
+
+The detection covers three providers and runs once at context creation: GLES 3.0 core,
+`GL_ANGLE_instanced_arrays`, and `GL_EXT_instanced_arrays`. **The phase plan named ANGLE;
+neither the PX30 nor the x86_64 development machine exposes it** — both have
+`GL_EXT_instanced_arrays`, so a detector written to the plan would have silently fallen
+back on every machine available.
+
+`StaticBatch`/`StaticBatchBuilder` combine meshes that share a shader into one buffer by
+baking their transforms, for scenery that never moves. `set_render_scale(Some(0.75))` renders into a smaller framebuffer and stretches the
+result over the window with a bilinear pass; it is bounds-checked, falls back to full
+resolution on a bad value or a refused framebuffer, and reports the low-resolution size
+through `drawable_size()` so the camera's aspect ratio follows.
+
+Measured (`docs/PERF_LOG.md`): `mini_fps` goes from 103 draw calls to 4 with 100
+instanced cubes (the field itself 100 → 1), 4391.7 → 25776.0 FPS on x86_64 (**5.87x**)
+and 12.19x in the criterion benchmark at 100 cubes. On the PX30 the loop arm stops
+holding 60 FPS between 100 and 1000 cubes while the instanced arm still holds it at 2000.
+Upscaling gives **+61 %** at 0.75 on the PX30 (5000 cubes, 30.0 → 48.4 FPS) and **−30 %**
+on a discrete GPU, where the frame is submission-bound and the extra pass is pure cost;
+both are recorded. See ADR-044.
+
+`mini_fps` gained F2 (instancing on/off), F3 (100/75/50 % scale), a statically batched
+scene, and `--instanced`/`--loop`/`--scale`/`--cubes`/`--width`/`--height`/`--bench` for
+unattended runs.
+
 ## [0.2.2] - 2026-11-08
 
 ### Fixed — a sixth audit found one more

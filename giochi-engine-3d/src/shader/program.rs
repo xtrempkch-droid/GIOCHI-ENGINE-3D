@@ -24,6 +24,13 @@ pub const ATTRIB_NORMAL: u32 = 1;
 /// Attribute slot for `a_uv`.
 pub const ATTRIB_UV: u32 = 2;
 
+/// First of the four attribute slots that carry a per-instance matrix.
+///
+/// Slots 3, 4, 5 and 6 are the columns of one `mat4`. They live in the same fixed
+/// numbering as the mesh attributes so an instanced program gets the same matrix
+/// columns on every driver, and so a VAO can be reasoned about by inspection.
+pub const ATTRIB_INSTANCE_MODEL: u32 = 3;
+
 /// A compiled, linked GLSL program with cached uniform locations.
 pub struct Program {
     handle: glow::Program,
@@ -35,6 +42,13 @@ pub struct Program {
     /// source is what a human needs to see.
     vertex_source: String,
     fragment_source: String,
+    /// Whether the vertex shader declares the per-instance matrix attributes.
+    ///
+    /// Asked of the driver after linking rather than inferred from the source text: a
+    /// shader that declares `a_model_0` but never reads it is optimised away, and the
+    /// answer we need is "will this program accept the attributes", not "does the file
+    /// mention them".
+    instanced: bool,
 }
 
 impl std::fmt::Debug for Program {
@@ -60,11 +74,19 @@ impl Program {
     ) -> Result3D<Self> {
         let program = Self::compile(gl, vertex_source, fragment_source)?;
 
+        // SAFETY: the program is linked and current-context; `get_attrib_location`
+        // returns -1 for a name the program does not use.
+        let instanced = unsafe {
+            gl.get_attrib_location(program, "a_model_0").is_some()
+                && gl.get_attrib_location(program, "a_model_3").is_some()
+        };
+
         Ok(Self {
             handle: program,
             uniforms: RefCell::new(HashMap::new()),
             vertex_source: vertex_source.to_owned(),
             fragment_source: fragment_source.to_owned(),
+            instanced,
         })
     }
 
@@ -106,6 +128,15 @@ impl Program {
             gl.bind_attrib_location(program, ATTRIB_POSITION, "a_position");
             gl.bind_attrib_location(program, ATTRIB_NORMAL, "a_normal");
             gl.bind_attrib_location(program, ATTRIB_UV, "a_uv");
+            // Only the instanced shader declares these. Binding a name a program does
+            // not have is a no-op in GLES, so the binding is unconditional and the
+            // attribute numbering stays one table rather than two.
+            for (offset, name) in ["a_model_0", "a_model_1", "a_model_2", "a_model_3"]
+                .iter()
+                .enumerate()
+            {
+                gl.bind_attrib_location(program, ATTRIB_INSTANCE_MODEL + offset as u32, name);
+            }
 
             gl.link_program(program);
 
@@ -130,6 +161,19 @@ impl Program {
 
             Ok(program)
         }
+    }
+
+    /// Whether this program takes its model matrix from per-instance attributes.
+    pub fn is_instanced(&self) -> bool {
+        self.instanced
+    }
+
+    /// Whether this program has a `u_model` uniform.
+    ///
+    /// The instanced shader deliberately does not, so that forgetting the instance
+    /// matrix is a link-time error rather than a scene drawn at the origin.
+    pub fn has_model_uniform(&self, gl: &glow::Context) -> bool {
+        self.location(gl, "u_model").is_some()
     }
 
     /// Makes this program current.
@@ -212,11 +256,11 @@ impl Program {
         }
     }
 
-    /// The raw GL program name, for tests that must prove it was deleted.
+    /// The raw GL program name.
     ///
-    /// Exists only for the regression test: the registry leak it catches was invisible
-    /// because nothing could ask the driver "is this program still alive after `destroy`".
-    #[cfg(test)]
+    /// Crate-internal: used by the regression test that proves the program was deleted,
+    /// and by the upscale pass, which resolves its own attribute locations by name
+    /// because it shares no attribute numbering with the mesh pipeline.
     pub(crate) fn gl_name(&self) -> glow::Program {
         self.handle
     }

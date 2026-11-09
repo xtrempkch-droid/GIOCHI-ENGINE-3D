@@ -11,4 +11,4 @@ mod builtin;
 mod program;
 
 pub use builtin::BuiltinShader;
-pub use program::{Program, ATTRIB_NORMAL, ATTRIB_POSITION, ATTRIB_UV};
+pub use program::{Program, ATTRIB_INSTANCE_MODEL, ATTRIB_NORMAL, ATTRIB_POSITION, ATTRIB_UV};

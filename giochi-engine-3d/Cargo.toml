@@ -22,7 +22,12 @@ log = { workspace = true }
 sdl2 = { workspace = true }
 
 [dev-dependencies]
+criterion = { workspace = true }
 env_logger = { workspace = true }
+
+[[bench]]
+name = "meshes_3d"
+harness = false
 
 [[example]]
 name = "cube_demo"

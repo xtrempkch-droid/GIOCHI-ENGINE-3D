@@ -17,14 +17,22 @@ pub enum BuiltinShader {
     /// addition; nothing else in the crate depends on it, so `flat` keeps working
     /// unchanged on a driver with a tight uniform budget.
     Phong,
+    /// [`BuiltinShader::Phong`] with a per-instance model matrix, for
+    /// [`RenderContext3D::draw_instanced`](crate::RenderContext3D::draw_instanced).
+    ///
+    /// Same fragment shader as `Phong`, so an instanced cube and a `Phong` cube lit by
+    /// the same sun are pixel-identical. The vertex shader reads the model matrix from
+    /// attributes 3..6 instead of `u_model`.
+    Instanced,
 }
 
 impl BuiltinShader {
     /// Every built-in, for tests and for `--help` output.
-    pub const ALL: [BuiltinShader; 3] = [
+    pub const ALL: [BuiltinShader; 4] = [
         BuiltinShader::Flat,
         BuiltinShader::Textured,
         BuiltinShader::Phong,
+        BuiltinShader::Instanced,
     ];
 
     /// A stable name, used in logs and errors.
@@ -33,6 +41,7 @@ impl BuiltinShader {
             Self::Flat => "flat",
             Self::Textured => "textured",
             Self::Phong => "phong",
+            Self::Instanced => "instanced",
         }
     }
 
@@ -42,6 +51,7 @@ impl BuiltinShader {
             Self::Flat => include_str!("../../shaders/flat.vert"),
             Self::Textured => include_str!("../../shaders/textured.vert"),
             Self::Phong => include_str!("../../shaders/phong.vert"),
+            Self::Instanced => include_str!("../../shaders/instanced.vert"),
         }
     }
 
@@ -50,7 +60,10 @@ impl BuiltinShader {
         match self {
             Self::Flat => include_str!("../../shaders/flat.frag"),
             Self::Textured => include_str!("../../shaders/textured.frag"),
-            Self::Phong => include_str!("../../shaders/phong.frag"),
+            // Deliberately the same fragment source: an instanced scene must shade
+            // exactly like the non-instanced one, or the two arms of the phase-17
+            // benchmark would not be drawing the same picture.
+            Self::Phong | Self::Instanced => include_str!("../../shaders/phong.frag"),
         }
     }
 
@@ -60,7 +73,15 @@ impl BuiltinShader {
     /// uniforms to `flat` is not an error (an unknown uniform is skipped) but is
     /// silently nothing, so it is worth being able to ask.
     pub fn reads_lighting(self) -> bool {
-        matches!(self, Self::Phong)
+        matches!(self, Self::Phong | Self::Instanced)
+    }
+
+    /// Whether the shader takes its model matrix from per-instance attributes.
+    ///
+    /// `draw_instanced` requires it and the plain `draw_mesh` paths refuse it, so a
+    /// mismatch is reported instead of producing N copies stacked at the origin.
+    pub fn is_instanced(self) -> bool {
+        matches!(self, Self::Instanced)
     }
 }
 

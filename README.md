@@ -146,6 +146,40 @@ atlas. On SDL's `software` renderer batching costs 3 % at 1000 sprites — that 
 rasterises triangles instead of using its fast blit — so a host there can set a batch
 of 1 or call `draw_texture_immediate`. Details in `docs/PERF_LOG.md` and ADR-043.
 
+### 3D: instancing, static batching and upscaling
+
+Three optimisations from phase 17, all additive:
+
+```rust
+// Many copies of one mesh, one draw call.
+let matrices: Vec<Mat4> = crates.iter().map(Transform3D::matrix).collect();
+let calls = render.draw_instanced(
+    crate_mesh, instanced_shader, &matrices, &camera, Color3D::new(0.9, 0.7, 0.4, 1.0),
+)?;                       // 1 with the driver's extension, matrices.len() without
+
+// Scenery that never moves, assembled once.
+let batch = StaticBatch::build(&mut render, StaticBatchBuilder::new()
+    .add_mesh(&vertices, &indices, &Transform3D::from_translation(Vec3::new(3.0, 0.0, 0.0)).matrix())?
+    .add_mesh(&vertices, &indices, &Transform3D::IDENTITY.matrix())?)?;
+render.draw_mesh_colored(batch.mesh(), shader, &Transform3D::IDENTITY, &camera, colour)?;
+
+// Fewer pixels when the frame is fill-bound.
+render.set_render_scale(Some(0.75));
+```
+
+Instancing is detected at runtime across GLES 3.0 core, `GL_ANGLE_instanced_arrays` and
+`GL_EXT_instanced_arrays`. Neither the PX30 nor the x86_64 dev machine exposes ANGLE —
+both have `GL_EXT_instanced_arrays` — which is why the detection covers all three rather
+than trusting the name in the plan.
+
+`mini_fps` demonstrates all of it: **F2** toggles instancing, **F3** cycles the render
+scale, and the static scenery is one batch per material.
+
+Measured: 100 instanced cubes take the frame from 103 draw calls to 4 and from 4391.7 to
+25776.0 FPS on x86_64 (**5.87x**); 12.19x in the criterion benchmark. Upscaling at 0.75
+gives **+61 %** on the PX30 (fill-bound) and **−30 %** on a discrete GPU (submission-bound),
+so measure before turning it on. See `docs/PERF_LOG.md` and ADR-044.
+
 ### Cross build for ARM64
 
 ```bash

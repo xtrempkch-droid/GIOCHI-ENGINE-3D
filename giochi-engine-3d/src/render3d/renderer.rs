@@ -9,12 +9,12 @@ use giochi_engine::platform::window::Window;
 
 use glow::HasContext;
 
-use crate::context::{GlContext, GlState};
+use crate::context::{GlContext, GlState, InstancingSupport};
 use crate::error::{Error3D, Result3D};
-use crate::math3d::{Camera3D, Color3D, Transform3D};
+use crate::math3d::{Camera3D, Color3D, Mat4, Transform3D};
 use crate::mesh::{Mesh, Vertex};
 use crate::registry::HandleRegistry;
-use crate::render3d::DirectionalLight;
+use crate::render3d::{DirectionalLight, InstancedRenderer, Upscaler};
 use crate::shader::{BuiltinShader, Program};
 
 /// Opaque handle to a mesh. `0` is invalid.
@@ -44,6 +44,19 @@ pub struct RenderContext3D {
     light: DirectionalLight,
     meshes: HandleRegistry<Mesh>,
     shaders: HandleRegistry<Program>,
+    /// Set when the frame renders below the window size; `None` is full resolution.
+    ///
+    /// Stored as the requested scale rather than as a `bool` so a resize can rebuild the
+    /// target at the same ratio instead of silently dropping back to 1.0.
+    render_scale: Option<f32>,
+    /// Rebuilt on demand by `begin_frame`; `None` when no scale is set.
+    upscaler: Option<Upscaler>,
+    /// The per-instance buffer, created with the context.
+    ///
+    /// `None` only when the driver refused the buffer, which is the same class of
+    /// failure as a refused mesh. `draw_instanced` falls back to one draw per instance
+    /// so the scene still renders, and logs the reason once.
+    instanced: Option<InstancedRenderer>,
     #[cfg(feature = "profiling")]
     counters: FrameCounters,
 }
@@ -70,6 +83,16 @@ impl RenderContext3D {
         // driver's default state happens to be.
         state.apply(gl.glow());
 
+        // Built before the struct takes ownership of `gl`; the buffer belongs to this
+        // context either way, and a refusal is handled here rather than in every caller.
+        let instanced = match InstancedRenderer::new(gl.glow(), gl.instancing()) {
+            Ok(instanced) => Some(instanced),
+            Err(err) => {
+                log::warn!("instanced drawing is unavailable: {err}");
+                None
+            }
+        };
+
         Self {
             gl,
             state,
@@ -77,6 +100,12 @@ impl RenderContext3D {
             light: DirectionalLight::sun(),
             meshes: HandleRegistry::new(),
             shaders: HandleRegistry::new(),
+            render_scale: None,
+            upscaler: None,
+            // `RenderContext3D::new` is infallible by contract, so a refused buffer
+            // degrades to "draw one at a time" (below) rather than turning every caller
+            // into a `Result`. The fallback draws the correct picture, only slower.
+            instanced,
             #[cfg(feature = "profiling")]
             counters: FrameCounters::new(),
         }
@@ -176,12 +205,106 @@ impl RenderContext3D {
         let width = width.max(1);
         let height = height.max(1);
 
-        // SAFETY: `viewport` is core GLES 2.0 and the context is current.
-        unsafe {
-            self.gl.glow().viewport(0, 0, width as i32, height as i32);
+        let Some(scale) = self.render_scale else {
+            self.destroy_upscaler();
+            // SAFETY: `viewport` and `bind_framebuffer` are core GLES 2.0, context current.
+            unsafe {
+                let gl = self.gl.glow();
+                gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+                gl.viewport(0, 0, width as i32, height as i32);
+            }
+            self.drawable_size = (width, height);
+            return;
+        };
+
+        let stale = self
+            .upscaler
+            .as_ref()
+            .is_none_or(|upscaler| upscaler.target_size() != (width, height));
+        if stale {
+            self.destroy_upscaler();
+            match Upscaler::new(self.gl.glow(), width, height, scale) {
+                Ok(upscaler) => {
+                    log::info!(
+                        "rendering at {:?} and upscaling to {width}x{height} (scale {scale})",
+                        upscaler.render_size()
+                    );
+                    self.upscaler = Some(upscaler);
+                }
+                Err(error) => {
+                    // Falling back to full resolution is the right degradation: a
+                    // refused framebuffer must not turn into a black screen.
+                    log::warn!(
+                        "could not create the {scale} render target ({error}); \
+                         rendering at full resolution"
+                    );
+                    self.render_scale = None;
+                    // SAFETY: as above.
+                    unsafe {
+                        let gl = self.gl.glow();
+                        gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+                        gl.viewport(0, 0, width as i32, height as i32);
+                    }
+                    self.drawable_size = (width, height);
+                    return;
+                }
+            }
         }
 
-        self.drawable_size = (width, height);
+        self.drawable_size = self
+            .upscaler
+            .as_ref()
+            .map_or((width, height), Upscaler::render_size);
+
+        // SAFETY: the upscaler's buffers belong to this context, which is current.
+        unsafe {
+            let gl = self.gl.glow();
+            if let Some(upscaler) = self.upscaler.as_ref() {
+                upscaler.bind(gl);
+            }
+        }
+    }
+
+    /// Renders the next frames at `scale` of the window resolution.
+    ///
+    /// `None` (the default) renders at full resolution. A scale below `1.0` renders into
+    /// a smaller framebuffer and stretches the result over the window with bilinear
+    /// filtering; see [`Upscaler`]. [`MIN_SCALE`](crate::render3d::upscale::MIN_SCALE)
+    /// and [`MAX_SCALE`](crate::render3d::upscale::MAX_SCALE) bound the value, and a
+    /// `scale` of `1.0` is treated as `None`.
+    ///
+    /// Takes effect on the next [`RenderContext3D::begin_frame`].
+    pub fn set_render_scale(&mut self, scale: Option<f32>) {
+        let scale = scale.map(crate::render3d::upscale::sanitise_scale);
+        let scale = scale.filter(|value| *value < crate::render3d::upscale::MAX_SCALE);
+        if scale == self.render_scale {
+            return;
+        }
+        self.render_scale = scale;
+        // The target is rebuilt by the next `begin_frame` → `resize`, which is also the
+        // only place that learns the real window size (KMSDRM ignores the requested one).
+        self.destroy_upscaler();
+    }
+
+    /// The requested render scale, or `None` for full resolution.
+    pub fn render_scale(&self) -> Option<f32> {
+        self.render_scale
+    }
+
+    /// The size the scene is actually rendering at, which is smaller than
+    /// [`RenderContext3D::drawable_size`] only if something is wrong.
+    pub fn render_size(&self) -> (u32, u32) {
+        self.upscaler
+            .as_ref()
+            .map_or(self.drawable_size, Upscaler::render_size)
+    }
+
+    fn destroy_upscaler(&mut self) {
+        if let Some(upscaler) = self.upscaler.take() {
+            // SAFETY: the upscaler's objects belong to this context, which is current,
+            // and it is not used again.
+            unsafe { upscaler.destroy(self.gl.glow()) };
+        }
     }
 
     /// The viewport size last set, in physical pixels.
@@ -199,8 +322,12 @@ impl RenderContext3D {
         width as f32 / height as f32
     }
 
-    /// Presents the back buffer.
+    /// Presents the back buffer, upscaling it first when a scale is set.
     pub fn end_frame(&self, window: &Window) {
+        if let Some(upscaler) = self.upscaler.as_ref() {
+            // SAFETY: the low-resolution frame is complete and the context is current.
+            unsafe { upscaler.blit(self.gl.glow()) };
+        }
         crate::context::swap(window);
     }
 
@@ -268,6 +395,16 @@ impl RenderContext3D {
         }
 
         let mut buffer = vec![0u8; width as usize * height as usize * 4];
+
+        // With a scale set the scene lived in an off-screen target, and `glReadPixels`
+        // reads whatever is bound. The caller asking for "the frame" means the presented
+        // picture, so the upscale pass runs here if it has not already: a capture of the
+        // low-resolution buffer would be a smaller image than the caller asked for and
+        // would look like a bug in the caller.
+        if let Some(upscaler) = self.upscaler.as_ref() {
+            // SAFETY: the low-resolution frame is complete and the context is current.
+            unsafe { upscaler.blit(self.gl.glow()) };
+        }
 
         // SAFETY: `buffer` is exactly `width * height * 4` bytes, which is what
         // `glReadPixels` writes for RGBA/UNSIGNED_BYTE. The context is current.
@@ -472,6 +609,20 @@ impl RenderContext3D {
             self.destroy_shader(handle);
         }
 
+        // Not a handle either: the render target is rebuilt on demand, so dropping it
+        // here releases the framebuffer, its attachments and the upscale program.
+        self.destroy_upscaler();
+
+        // The instance buffer is not a handle, so nothing can hold a clone of it: after
+        // this the renderer has no GL objects at all. It is safe because `meshes` is
+        // empty, and `draw_instanced` returns `Ok(0)` for an unknown mesh before it can
+        // reach the buffer.
+        if let Some(instanced) = self.instanced.take() {
+            // SAFETY: the context is current (this is the same requirement every other
+            // `destroy_*` here has) and the buffer is not used again.
+            unsafe { instanced.destroy(self.gl.glow()) };
+        }
+
         if leaked > 0 {
             log::warn!("{leaked} resource(s) were still referenced elsewhere and leaked");
         }
@@ -492,6 +643,21 @@ impl RenderContext3D {
         model: &Transform3D,
         camera: &Camera3D,
     ) -> Result3D<()> {
+        self.bind_and_upload_matrix(program, &model.matrix(), camera)
+    }
+
+    /// [`RenderContext3D::bind_and_upload`] for a precomputed model matrix.
+    ///
+    /// `draw_instanced`'s fallback already holds matrices, and converting one back into
+    /// a `Transform3D` (extracting a rotation from a matrix) would cost more than the
+    /// uniform it sets — and could disagree with the instanced path's picture, which is
+    /// the one thing an A/B cannot tolerate.
+    fn bind_and_upload_matrix(
+        &self,
+        program: &Program,
+        model_matrix: &Mat4,
+        camera: &Camera3D,
+    ) -> Result3D<()> {
         // The camera may legitimately be unresolved (aspect 0.0), and silently drawing
         // with a stale projection is how a frame ends up subtly wrong on a console.
         let resolved = camera.with_drawable_size(self.drawable_size.0, self.drawable_size.1);
@@ -503,12 +669,34 @@ impl RenderContext3D {
         program.bind(gl);
         program.set_mat4(gl, "u_view_proj", &view_proj);
 
-        let model_matrix = model.matrix();
-        program.set_mat4(gl, "u_model", &model_matrix);
+        program.set_mat4(gl, "u_model", model_matrix);
         // Phong reads normals through this; the flat and textured shaders do not have
         // the uniform, and `set_mat4` skips an unknown name.
         program.set_mat4(gl, "u_normal_matrix", &model_matrix.normal_matrix());
 
+        self.upload_light_and_camera(program, &resolved);
+        Ok(())
+    }
+
+    /// Binds `program` and uploads everything that does not depend on the model matrix.
+    ///
+    /// Used directly by [`RenderContext3D::draw_instanced`], where there is no single
+    /// model matrix: the shader takes it from the per-instance attributes.
+    fn bind_and_upload_shared(&self, program: &Program, camera: &Camera3D) -> Result3D<()> {
+        let resolved = camera.with_drawable_size(self.drawable_size.0, self.drawable_size.1);
+        let view_proj = resolved
+            .view_projection()
+            .map_err(|reason| Error3D::InvalidArgument(reason.to_owned()))?;
+
+        let gl = self.gl.glow();
+        program.bind(gl);
+        program.set_mat4(gl, "u_view_proj", &view_proj);
+        self.upload_light_and_camera(program, &resolved);
+        Ok(())
+    }
+
+    fn upload_light_and_camera(&self, program: &Program, resolved: &Camera3D) {
+        let gl = self.gl.glow();
         // Lighting. `u_light_color` is a `vec3`, so it goes through `set_vec3` and not
         // `set_color`: `glUniform4fv` on a `vec3` uniform is GL_INVALID_OPERATION, and
         // the scene would render black with the error only surfacing in `take_gl_error`.
@@ -523,8 +711,6 @@ impl RenderContext3D {
         program.set_f32(gl, "u_specular_strength", light.specular);
         program.set_f32(gl, "u_shininess", light.shininess);
         program.set_vec3(gl, "u_camera_position", resolved.position);
-
-        Ok(())
     }
 
     /// Draws `mesh` with `shader` at `model`, seen through `camera`.
@@ -601,6 +787,142 @@ impl RenderContext3D {
         );
 
         Ok(true)
+    }
+
+    /// Draws `instances` copies of `mesh` with one call when the driver can.
+    ///
+    /// `shader` must be [`BuiltinShader::Instanced`] (or a user program that reads the
+    /// model matrix from attributes 3..6). Shading is otherwise identical to
+    /// [`RenderContext3D::draw_mesh_colored`], because the fragment shader is the same
+    /// source — that is what makes an A/B of the two arms a fair comparison.
+    ///
+    /// Returns the number of backend draw calls issued: **1** when instancing is
+    /// available, **`instances.len()`** on a driver without it, **0** for an empty
+    /// slice. A caller that wants a specific draw-call count can assert on this instead
+    /// of inferring it from the frame rate.
+    ///
+    /// The fallback is not an error state. It draws the same picture through the
+    /// ordinary path, which is what keeps a game running on a driver that lacks the
+    /// extension; the cost is exactly what phase 17 removes, so it is reported rather
+    /// than hidden.
+    pub fn draw_instanced(
+        &mut self,
+        mesh: MeshHandle,
+        shader: ShaderHandle,
+        instances: &[Mat4],
+        camera: &Camera3D,
+        colour: Color3D,
+    ) -> Result3D<u32> {
+        if instances.is_empty() {
+            return Ok(0);
+        }
+        if self.meshes.get(mesh).is_none() || self.shaders.get(shader).is_none() {
+            return Ok(0);
+        }
+
+        // Split the borrow: the program and the mesh come out of different registries,
+        // and the instance buffer is a third field. Borrowing `self` wholesale would
+        // make `bind_and_upload` (which needs `&self`) and `instanced` (which needs
+        // `&mut`) conflict.
+        let program = self
+            .shaders
+            .get(shader)
+            .expect("checked immediately above")
+            .clone();
+        let geometry = self
+            .meshes
+            .get(mesh)
+            .expect("checked immediately above")
+            .clone();
+
+        if !program.is_instanced() {
+            // A `Phong`/`Flat` program has no instance attributes, so the instanced
+            // path would draw every copy at whatever `u_model` holds. Report it: this
+            // is a caller mistake that produces a wrong picture, not a slow frame.
+            log::warn!(
+                "draw_instanced needs an instanced shader (BuiltinShader::Instanced); \
+                 this program renders every copy at the same transform"
+            );
+        }
+
+        // View-projection and the light are identical for every instance.
+        self.bind_and_upload_shared(&program, camera)?;
+        program.set_color(self.gl.glow(), "u_color", colour.clamped());
+
+        let available = self
+            .instanced
+            .as_ref()
+            .is_some_and(|instanced| instanced.support().is_available());
+
+        if available {
+            let gl = self.gl.glow();
+            let backend = self.instanced.as_ref().expect("checked above").backend();
+            let mut instanced = self.instanced.take().expect("checked above");
+            // SAFETY: the program is bound and the uniforms uploaded; the mesh and the
+            // instance buffer belong to this context.
+            let calls = unsafe { instanced.draw(gl, &geometry, instances) };
+            self.instanced = Some(instanced);
+
+            #[cfg(feature = "profiling")]
+            self.counters.record_draw_calls(calls);
+            #[cfg(feature = "profiling")]
+            self.counters.record_mesh_instanced(
+                u64::from(geometry.vertex_count()),
+                u64::from(geometry.vertex_count()) * std::mem::size_of::<Vertex>() as u64,
+                u64::from(instances.len() as u32),
+            );
+
+            let _ = backend;
+            return Ok(calls);
+        }
+
+        // Fallback: one ordinary draw per instance. The instance shader has no
+        // `u_model`, so a caller that picked it gets a scene of copies at the origin
+        // rather than a crash — say so once, because the picture is wrong in a way that
+        // a frame-rate number would not reveal.
+        if program.is_instanced() {
+            log::warn!(
+                "instancing is unavailable on this driver but the program expects \
+                 per-instance attributes; the scene will not render correctly"
+            );
+        }
+        for model in instances {
+            self.bind_and_upload_matrix(&program, model, camera)?;
+            program.set_color(self.gl.glow(), "u_color", colour.clamped());
+            geometry.draw(self.gl.glow(), &program);
+        }
+
+        #[cfg(feature = "profiling")]
+        self.counters.record_draw_calls(instances.len() as u32);
+        #[cfg(feature = "profiling")]
+        self.counters.record_mesh_instanced(
+            u64::from(geometry.vertex_count()),
+            u64::from(geometry.vertex_count()) * std::mem::size_of::<Vertex>() as u64,
+            u64::from(instances.len() as u32),
+        );
+
+        Ok(instances.len() as u32)
+    }
+
+    /// Whether instanced drawing will use a single call on this driver.
+    pub fn supports_instancing(&self) -> bool {
+        self.instanced
+            .as_ref()
+            .is_some_and(|instanced| instanced.support().is_available())
+    }
+
+    /// Which instanced-drawing provider was detected, for logs and the overlay.
+    pub fn instancing_support(&self) -> InstancingSupport {
+        self.instanced
+            .as_ref()
+            .map_or(InstancingSupport::None, |instanced| instanced.support())
+    }
+
+    /// Draw calls issued by the last [`RenderContext3D::draw_instanced`].
+    pub fn last_instanced_draw_calls(&self) -> u32 {
+        self.instanced
+            .as_ref()
+            .map_or(0, |instanced| instanced.last_draw_calls())
     }
 }
 

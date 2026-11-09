@@ -424,6 +424,7 @@ version = "0.2.2"
 dependencies = [
  "anyhow",
  "bytemuck",
+ "criterion",
  "env_logger",
  "giochi-engine",
  "glam",

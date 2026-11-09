@@ -11,6 +11,7 @@
 
 use std::ffi::c_void;
 
+use crate::context::instancing::InstancingBackend;
 use crate::error::{Error3D, Result3D};
 use giochi_engine::platform::window::Window;
 use giochi_engine::platform::Platform;
@@ -63,6 +64,15 @@ pub struct GlContext {
     glow: glow::Context,
     version: GlesVersion,
     adapter: String,
+    /// The loaded instanced-drawing entry points, decided once at creation.
+    instancing: InstancingBackend,
+    /// `GL_EXTENSIONS`, split once at creation.
+    ///
+    /// Queried eagerly because the string is only valid while the context is current,
+    /// and a later caller (instancing detection, most obviously) may be running while
+    /// another context is bound. It is also the one piece of driver capability that
+    /// decides whether a whole code path exists, so it belongs next to the version.
+    extensions: Vec<String>,
 }
 
 impl std::fmt::Debug for GlContext {
@@ -70,6 +80,8 @@ impl std::fmt::Debug for GlContext {
         f.debug_struct("GlContext")
             .field("version", &self.version)
             .field("adapter", &self.adapter)
+            .field("extensions", &self.extensions.len())
+            .field("instancing", &self.instancing)
             .finish_non_exhaustive()
     }
 }
@@ -103,6 +115,7 @@ pub fn create(window: &Window) -> Result3D<GlContext> {
 
     let adapter = describe_adapter(&glow);
     let version = detect_version(&glow, requested);
+    let extensions = query_extensions(&glow);
 
     if requested == GlesVersion::Gles3 && version == GlesVersion::Gles2 {
         // Not an error: the driver answered with what it has. Silently degrading
@@ -113,14 +126,32 @@ pub fn create(window: &Window) -> Result3D<GlContext> {
         );
     }
 
-    log::info!("GLES {} context on {adapter}", version.major());
-
-    Ok(GlContext {
+    let mut context = GlContext {
         _sdl_gl: sdl_gl,
         glow,
         version,
-        adapter,
-    })
+        adapter: adapter.clone(),
+        extensions,
+        instancing: InstancingBackend::NONE,
+    };
+
+    // Loaded here rather than lazily because the SDL window is the only thing that can
+    // resolve a GL symbol, and this is the last point where it is still in scope.
+    context.instancing = {
+        let video = window.sdl_window().subsystem();
+        super::instancing::InstancingBackend::detect(&context, |symbol| {
+            video.gl_get_proc_address(symbol) as *const c_void
+        })
+    };
+
+    log::info!(
+        "GLES {} context on {adapter}, {} extensions, instancing: {}",
+        context.version.major(),
+        context.extensions.len(),
+        context.instancing.support().name()
+    );
+
+    Ok(context)
 }
 
 /// Applies the `SDL_GL_*` attributes. Must run before the window is created.
@@ -180,6 +211,30 @@ impl GlContext {
     pub fn supports_gles3(&self) -> bool {
         self.version == GlesVersion::Gles3
     }
+
+    /// Whether the driver advertises `name` in `GL_EXTENSIONS`.
+    ///
+    /// A GLES 3.0 context also accepts an extension whose functionality became core
+    /// when the caller asks for the extension name only — drivers vary, so callers
+    /// that need a *capability* should test [`GlContext::supports_gles3`] first and
+    /// fall back to this.
+    pub fn supports_extension(&self, name: &str) -> bool {
+        self.extensions.iter().any(|extension| extension == name)
+    }
+
+    /// Every extension the driver reported, sorted.
+    pub fn extensions(&self) -> &[String] {
+        &self.extensions
+    }
+
+    /// The instanced-drawing entry points.
+    ///
+    /// Crate-internal: callers outside the crate ask
+    /// [`RenderContext3D::instancing_support`](crate::RenderContext3D::instancing_support)
+    /// instead.
+    pub(crate) fn instancing(&self) -> InstancingBackend {
+        self.instancing
+    }
 }
 
 impl Drop for GlContext {
@@ -188,6 +243,25 @@ impl Drop for GlContext {
         // need: glow's function pointers become invalid once SDL destroys the context.
         log::debug!("releasing GLES {} context", self.version.major());
     }
+}
+
+/// Reads and splits `GL_EXTENSIONS`.
+///
+/// `glGetString(GL_EXTENSIONS)` is core in GLES 2.0 and deprecated in 3.0, where it
+/// still works on every driver measured here; the alternative (`glGetStringi`) is 3.0
+/// only and would need a branch for no benefit. An empty list is a valid answer and
+/// only means "no optional path".
+fn query_extensions(gl: &glow::Context) -> Vec<String> {
+    // SAFETY: `gl` is current for the lifetime of the query.
+    let raw = unsafe { gl.get_parameter_string(glow::EXTENSIONS) };
+    let mut extensions: Vec<String> = raw
+        .split_whitespace()
+        .map(str::to_owned)
+        .filter(|name| !name.is_empty())
+        .collect();
+    extensions.sort_unstable();
+    extensions.dedup();
+    extensions
 }
 
 fn describe_adapter(gl: &glow::Context) -> String {

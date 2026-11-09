@@ -366,6 +366,30 @@ impl FrameCounters {
         self.bytes_uploaded = self.bytes_uploaded.saturating_add(bytes);
     }
 
+    /// Records `calls` mesh draw calls that between them drew `instances` copies of
+    /// `vertices` vertices each.
+    ///
+    /// An instanced call is one draw call that shades many objects, so the vertex figure
+    /// is the **per-instance** geometry multiplied by the instance count: that is the
+    /// number of vertices the GPU actually processed, which is what `vertices_uploaded`
+    /// means everywhere else. Counting only the upload would report 1000 cubes of
+    /// instancing as 24 vertices and make the counter useless for judging overdraw.
+    /// The draw calls are recorded by
+    /// [`FrameCounters::record_draw_calls`], which the caller already has to make because
+    /// the number depends on whether the driver could instance at all.
+    pub fn record_mesh_instanced(&mut self, vertices: u64, bytes: u64, instances: u64) {
+        let instances = instances.max(1);
+        self.meshes_drawn = self
+            .meshes_drawn
+            .saturating_add(u32::try_from(instances).unwrap_or(u32::MAX));
+        self.vertices_uploaded = self
+            .vertices_uploaded
+            .saturating_add(vertices.saturating_mul(instances));
+        self.bytes_uploaded = self
+            .bytes_uploaded
+            .saturating_add(bytes.saturating_mul(instances));
+    }
+
     /// Adds `other` into this set.
     pub fn merge(&mut self, other: &FrameCounters) {
         self.draw_calls = self.draw_calls.saturating_add(other.draw_calls);
