@@ -22,7 +22,9 @@ sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 ```
 
 Because SDL2 is built from source (`sdl2` feature `bundled`), a C toolchain and
-CMake are required in addition to the Rust target.
+CMake are required in addition to the Rust target. A build that links the SDL2
+already in the target image instead needs neither — see
+[Linking the SDL2 already in the image](#linking-the-sdl2-already-in-the-image-sdl2-system).
 
 ### The ARM64 SDL2 satellite libraries
 
@@ -153,6 +155,45 @@ collect2: error: ld returned 1 exit status
 ```
 
 Only the host build ignores that entry; `x86_64` behaviour is unchanged.
+
+## Linking the SDL2 already in the image (`sdl2-system`)
+
+`bundled` compiles SDL2 from source through CMake, which is what the CI cross jobs do
+and what every command above assumes. The alternative is to link the SDL2 the target
+image already ships:
+
+```bash
+PKG_CONFIG_ALLOW_CROSS=1 \
+PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig \
+    scripts/build-aarch64.sh --release \
+        --no-default-features --features sdl2-system
+```
+
+Three things have to be true, and each of them fails differently:
+
+- **`--no-default-features`.** `sdl2-bundled` is the default, and it does not replace
+  `sdl2-system` — cargo unions features, so asking for both enables both. `sdl2-sys`
+  gives `bundled` priority and runs CMake anyway.
+- **`PKG_CONFIG_ALLOW_CROSS=1`.** Without it pkg-config refuses to answer for a
+  foreign target: `... is for a different platform; use PKG_CONFIG_ALLOW_CROSS=1`.
+- **`PKG_CONFIG_LIBDIR`, not `PKG_CONFIG_PATH`.** The latter *adds* to the host's
+  search path, so pkg-config finds `/usr/lib/x86_64-linux-gnu/pkgconfig/sdl2.pc` first
+  and the link resolves to host sonames.
+
+The env plumbing above is not wired into `scripts/build-aarch64.sh` because the CMake
+path is the one the cross workflow exercises; when this path is promoted to the default
+it should move into the script, behind the same feature detection.
+
+**The feature has to be reachable from every crate that a game depends on.** Cargo
+unions features across the whole graph, so a crate that depends on `giochi-engine`
+without `default-features = false` re-enables `sdl2-bundled` for everybody downstream,
+and the caller has no way to opt out — the manifests look correct and only the
+resolution is wrong. That happened to `giochi-engine-3d`, which made the cross-compile
+feature unusable from a 3D game: the build silently went to CMake and failed without a
+toolchain. `scripts/check-features.sh` now asserts the resolution for every
+consumer-facing crate (default → `bundled`, `sdl2-system` → `pkg-config` and never both),
+and CI compiles `giochi-engine-capi` against the system SDL2 so the pkg-config path is
+executed rather than merely resolved.
 
 ## The CMake toolchain file
 

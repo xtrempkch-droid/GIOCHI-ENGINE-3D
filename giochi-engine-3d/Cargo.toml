@@ -9,7 +9,15 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-giochi-engine = { path = "../giochi-engine", version = "0.3.0" }
+# `default-features = false` is not an optimisation, it is what makes `sdl2-system`
+# reachable from a consumer. Cargo unions features across the whole graph, so a plain
+# `giochi-engine` dependency here silently re-enabled `giochi-engine`'s default
+# `sdl2-bundled` even when the caller asked for `--features sdl2-system`: `sdl2` ended
+# up with both `bundled` and `use-pkgconfig`, and `sdl2-sys` gives `bundled` priority,
+# so the build ran CMake and the cross-compile path died. The two SDL2 features are
+# forwarded below instead, and `default = ["sdl2-bundled"]` keeps the old behaviour for
+# callers who ask for nothing.
+giochi-engine = { path = "../giochi-engine", version = "0.3.1", default-features = false }
 glow = { workspace = true }
 bytemuck = { workspace = true }
 tobj = { workspace = true }
@@ -44,11 +52,12 @@ path = "examples/ball_balance.rs"
 [features]
 # Compila o SDL2 do código-fonte — o padrão, e o que o CI usa em x86_64.
 default = ["sdl2-bundled"]
-sdl2-bundled = ["sdl2/bundled"]
+sdl2-bundled = ["sdl2/bundled", "giochi-engine/sdl2-bundled"]
 # Usa o SDL2 do sistema via pkg-config. É o caminho para embarcado, cuja imagem
 # já traz o SDL2 com KMSDRM — e é o que permite cross-compilar para aarch64 sem
-# compilar uma segunda cópia da biblioteca.
-sdl2-system = ["sdl2/use-pkgconfig"]
+# compilar uma segunda cópia da biblioteca. Precisa de
+# `--no-default-features`, senão `sdl2-bundled` viaja junto e vence.
+sdl2-system = ["sdl2/use-pkgconfig", "giochi-engine/sdl2-system"]
 # Fase 15: contadores de draw calls/vértices no renderer 3D. Encaminha para a
 # feature homónima do core, que também liga o profiler e o overlay.
 profiling = ["giochi-engine/profiling"]

@@ -9,12 +9,17 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-giochi-engine = { path = "../giochi-engine", version = "0.3.0" }
-giochi-engine-lua = { path = "../giochi-engine-lua", version = "0.3.0" }
+giochi-engine = { path = "../giochi-engine", version = "0.3.1", default-features = false }
+giochi-engine-lua = { path = "../giochi-engine-lua", version = "0.3.1", default-features = false }
 env_logger = { workspace = true }
 log = { workspace = true }
 
 [features]
+# O binário é o que `scripts/build-aarch64.sh` compila, então ele também precisa
+# conseguir escolher o SDL2: `--no-default-features --features sdl2-system`.
+default = ["sdl2-bundled"]
+sdl2-bundled = ["giochi-engine/sdl2-bundled", "giochi-engine-lua/sdl2-bundled"]
+sdl2-system = ["giochi-engine/sdl2-system", "giochi-engine-lua/sdl2-system"]
 # Encaminha a feature de profiling do core para que o exemplo possa usá-la.
 profiling = ["giochi-engine/profiling"]
 

@@ -4,10 +4,25 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.1] - 2026-11-09
 
 ### Fixed
 
+- **`sdl2-system` did not work from a 3D consumer, and the caller could not fix it.**
+  `giochi-engine-3d` depended on `giochi-engine` without `default-features = false`, so
+  cargo's feature union re-enabled the core crate's default `sdl2-bundled` no matter
+  what was requested. `sdl2-sys` gives `bundled` priority over `use-pkgconfig`: the
+  build ran CMake and ignored pkg-config even with `--features sdl2-system`, which
+  broke the cross-compile path (no CMake on a consumer, no toolchain) and defeated the
+  point of linking the SDL2 that the console image already ships. The fix is
+  `default-features = false` plus explicit forwarding, applied to every consumer-facing
+  crate — `giochi-engine-3d`, `giochi-engine-capi` (the one that ships to the console),
+  `giochi-engine-lua` and `giochi-demo` — with `default = ["sdl2-bundled"]` so nothing
+  changes for callers that ask for nothing. `scripts/check-features.sh` asserts the
+  actual resolution from `cargo tree` (default → `bundled`, `sdl2-system` → pkg-config,
+  never both), CI runs it and also compiles `giochi-engine-capi` against the system
+  SDL2, and `docs/CROSS_COMPILE.md` documents the invocation including the
+  `PKG_CONFIG_ALLOW_CROSS`/`PKG_CONFIG_LIBDIR` requirements.
 - **The performance gate never reached the comparison.** `cargo bench -p giochi-engine`
   also runs the libtest bench target generated from `src/lib.rs`; libtest rejects
   criterion's `--warm-up-time`, `--measurement-time` and `--sample-size`, so the job
@@ -1222,7 +1237,8 @@ examples, `mini_game.lua`).
 - `giochi-engine/tests/abi_layout.rs`: byte-size and alignment assertions for
   every `#[repr(C)]` type in the contract.
 
-[Unreleased]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/compare/v0.3.0...main
+[Unreleased]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/compare/v0.3.1...main
+[0.3.1]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/releases/tag/v0.3.1
 [0.3.0]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/releases/tag/v0.3.0
 [0.2.2]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/releases/tag/v0.2.2
 [0.2.1]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/releases/tag/v0.2.1

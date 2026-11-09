@@ -15,16 +15,28 @@ name = "giochi"
 crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
-giochi-engine = { path = "../giochi-engine", version = "0.3.0" }
+# `default-features = false` on both: the SDL2 choice is forwarded explicitly in
+# `[features]` below. Left implicit, `giochi-engine`'s default `sdl2-bundled` won the
+# feature union and `--features sdl2-system` built SDL2 from source through CMake —
+# which is the one thing the console cross-compile cannot do.
+giochi-engine = { path = "../giochi-engine", version = "0.3.1", default-features = false }
 # Parts II and III of the ABI (`GIOCHI_ABI_VERSION 3`: 3D and frame statistics). The 3D
 # crate is the only thing here that
 # links GLES, so a 2D-only consumer of `libgiochi.so` still pulls it in — that is the
 # price of one shared library, and the alternative (a second .so) would make a C program
 # that wants both link two things and keep two versions in step.
-giochi-engine-3d = { path = "../giochi-engine-3d", version = "0.3.0" }
+giochi-engine-3d = { path = "../giochi-engine-3d", version = "0.3.1", default-features = false }
 log = { workspace = true }
 
 [features]
+# Present so that `default` keeps meaning what it meant when the SDL2 choice was still
+# implied by the dependency: bundled unless the caller says otherwise.
+default = ["sdl2-bundled"]
+sdl2-bundled = ["giochi-engine/sdl2-bundled", "giochi-engine-3d/sdl2-bundled"]
+# System SDL2, for the console image and for cross-compiling without CMake:
+#
+#   cargo build -p giochi-engine-capi --no-default-features --features sdl2-system
+sdl2-system = ["giochi-engine/sdl2-system", "giochi-engine-3d/sdl2-system"]
 # Phase 18c: makes `giochi_engine_frame_stats` report real measurements instead of
 # zeros. Off by default for the same reason it is off in `giochi-engine` (ADR-042) --
 # the counters cost a little in the hot path and most hosts do not read them.

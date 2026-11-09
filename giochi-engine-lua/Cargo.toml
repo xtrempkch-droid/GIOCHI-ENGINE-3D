@@ -9,5 +9,12 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-giochi-engine = { path = "../giochi-engine", version = "0.3.0" }
+# Same forwarding as the 3D crate: the SDL2 choice belongs to the caller, and an
+# implicit default here would win the feature union for every Lua host.
+giochi-engine = { path = "../giochi-engine", version = "0.3.1", default-features = false }
 mlua = { workspace = true }
+
+[features]
+default = ["sdl2-bundled"]
+sdl2-bundled = ["giochi-engine/sdl2-bundled"]
+sdl2-system = ["giochi-engine/sdl2-system"]

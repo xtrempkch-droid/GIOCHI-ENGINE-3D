@@ -46,6 +46,11 @@ fi
 # CONTRIBUTING, "Releasing").
 run scripts/check-version.sh
 
+# Manifests that look right can still resolve to the wrong SDL2: cargo unions features
+# across the graph, so one dependency without `default-features = false` re-enables
+# `sdl2/bundled` and silently disables `sdl2-system` for every consumer downstream.
+run scripts/check-features.sh
+
 # The BMP twins exist so a target without a PNG decoder can still load the assets
 # (ADR-036). Byte comparison, because a same-size twin with different pixels would
 # pass every other gate.

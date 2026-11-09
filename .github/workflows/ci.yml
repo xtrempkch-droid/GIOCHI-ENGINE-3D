@@ -74,6 +74,21 @@ jobs:
         # dependency pins must agree with it or a release misreports what it is.
         run: ./scripts/check-version.sh
 
+      - name: SDL2 feature forwarding
+        # A manifest can look correct and still resolve `sdl2-system` to a bundled
+        # CMake build, because cargo unions features across the graph. Only the
+        # resolution shows it, so this inspects `cargo tree`.
+        run: ./scripts/check-features.sh
+
+      - name: Build against the system SDL2
+        # The one path the default build never takes: `sdl2-system` is what the console
+        # image and the cross-compile use, and until now nothing compiled it. If a
+        # feature ever leaks `bundled` back in, this is where it surfaces as a CMake
+        # build instead of a pkg-config link.
+        run: |
+          cargo build -p giochi-engine-capi --target x86_64-unknown-linux-gnu \
+            --no-default-features --features sdl2-system
+
       - name: Lint the workflow files
         # Every job here runs shell that `shellcheck` never sees, and a YAML mistake
         # only surfaces as a red X after the push that was supposed to prove the

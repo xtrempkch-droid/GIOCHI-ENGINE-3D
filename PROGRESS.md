@@ -1,12 +1,31 @@
 # Estado — GIOCHI-ENGINE
 
-## Última entrega: release 0.3.0 — auditoria de release
+## Última entrega: release 0.3.1 — `sdl2-system` alcançável a partir de um consumidor 3D
 Data: 2026-11-09
 
 ## Última fase concluída: 18 — Flags ARM64 + CI de performance + C ABI v3
 Fases 15–18 concluídas (performance, batching, instancing/upscaling, C ABI v3).
 
-**Fases concluídas: 0–8 (2D), 9–14 (extensão 3D) e 15–18 (performance e ABI v3). Versão 0.3.0.**
+**Fases concluídas: 0–8 (2D), 9–14 (extensão 3D) e 15–18 (performance e ABI v3). Versão 0.3.1.**
+
+## Correção 0.3.1 — feature de cross-compile inalcançável
+
+Reportado por um consumidor: `giochi-engine-3d` declarava `giochi-engine` sem
+`default-features = false`, e a união de features do cargo voltava a ligar o
+`sdl2-bundled` — o padrão do core — mesmo com `--features sdl2-system`. O `sdl2-sys` dá
+prioridade a `bundled`, portanto o build corria CMake e ignorava o pkg-config. O defeito
+não era corrigível do lado de quem consome: o manifesto do consumidor não tem como
+desligar um default que vem de uma dependência interna.
+
+O mesmo defeito existia em `giochi-engine-capi` (o que é cross-compilado para o
+consola), `giochi-engine-lua` e `giochi-demo`. Os quatro passaram a declarar
+`default-features = false` e a encaminhar as duas features de SDL2 explicitamente, com
+`default = ["sdl2-bundled"]` para que quem não pede nada não mude de comportamento.
+
+O que impede a reincidência: `scripts/check-features.sh` lê a resolução real do
+`cargo tree` (padrão → `bundled`; `sdl2-system` → `pkg-config`, nunca as duas) e corre
+em `scripts/gates.sh` e no CI, que também compila `giochi-engine-capi` contra o SDL2 do
+sistema — o caminho que nenhum build padrão executa.
 
 ## Auditoria de release 0.3.0 — dez defeitos
 
