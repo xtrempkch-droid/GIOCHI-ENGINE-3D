@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The performance gate never reached the comparison.** `cargo bench -p giochi-engine`
+  also runs the libtest bench target generated from `src/lib.rs`; libtest rejects
+  criterion's `--warm-up-time`, `--measurement-time` and `--sample-size`, so the job
+  failed with `error: Unrecognized option: 'warm-up-time'` on every push. Both the
+  branch and the base-branch runs now name the `sprites_2d` and `engine_overhead`
+  targets explicitly.
+
 ## [0.3.0] - 2026-11-09
 
 ### Fixed — release audit

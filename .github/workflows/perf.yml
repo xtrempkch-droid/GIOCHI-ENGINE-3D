@@ -90,9 +90,15 @@ jobs:
       # take twenty minutes across the two packages. These are the same settings
       # `docs/PERF_LOG.md` uses for a quick pass: enough samples for a stable median on
       # sub-millisecond benchmarks, short enough to gate a push.
+      #
+      # The bench targets are named explicitly: a bare `cargo bench -p giochi-engine`
+      # also runs the libtest bench target generated from `src/lib.rs`, and libtest
+      # rejects criterion's `--warm-up-time`/`--measurement-time`/`--sample-size`.
       - name: Benchmark this branch
         run: |
-          cargo bench -p giochi-engine --target x86_64-unknown-linux-gnu -- \
+          cargo bench -p giochi-engine \
+            --bench sprites_2d --bench engine_overhead \
+            --target x86_64-unknown-linux-gnu -- \
             --warm-up-time 0.5 --measurement-time 2 --sample-size 30
 
       - name: Keep this branch's estimates
@@ -108,7 +114,9 @@ jobs:
       - name: Benchmark the base branch
         working-directory: ${{ runner.temp }}/main
         run: |
-          cargo bench -p giochi-engine --target x86_64-unknown-linux-gnu -- \
+          cargo bench -p giochi-engine \
+            --bench sprites_2d --bench engine_overhead \
+            --target x86_64-unknown-linux-gnu -- \
             --warm-up-time 0.5 --measurement-time 2 --sample-size 30
 
       - name: Compare against the base branch
