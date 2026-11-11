@@ -30,4 +30,13 @@ if ! command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then
 fi
 
 export CMAKE_TOOLCHAIN_FILE_aarch64_unknown_linux_gnu="$repo_root/cmake/aarch64-linux-toolchain.cmake"
-exec cargo check --workspace --target aarch64-unknown-linux-gnu "$@"
+
+cargo check --workspace --target aarch64-unknown-linux-gnu "$@"
+
+# As features opcionais ficam de fora do `--workspace` acima, então um crate que
+# só compila com elas passaria sem ser visto. `giochi-net/laminar` é exatamente
+# esse caso: o transporte padrão tem zero dependência, e a feature puxa 12
+# crates que precisam cross-compilar para o aparelho. Verificado à parte, de
+# propósito — `--all-features` no workspace ligaria também `profiling` e o
+# `tester` do laminar, que não são o que o aparelho usa.
+cargo check -p giochi-net --features laminar --target aarch64-unknown-linux-gnu "$@"
