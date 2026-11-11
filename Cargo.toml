@@ -42,7 +42,7 @@ cbindgen = "0.27"
 criterion = { version = "0.8", features = ["html_reports"] }
 # 3D (phases 9–14). `glow` is a thin GL/GLES binding: it declares the functions and
 # lets the loader supply the pointers, without tying us to a windowing library.
-glow = "0.14"
+glow = "0.18"
 bytemuck = { version = "1", features = ["derive"] }
 tobj = "4"
 
