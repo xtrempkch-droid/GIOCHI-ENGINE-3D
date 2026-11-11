@@ -37,6 +37,8 @@
 pub mod aoi;
 pub mod client;
 pub mod host;
+#[cfg(feature = "laminar")]
+pub mod laminar_backend;
 pub mod peer;
 pub mod wire;
 

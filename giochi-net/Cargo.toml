@@ -22,8 +22,20 @@ repository.workspace = true
 # interface. Não é bloqueio de arquitetura; é coisa para medir compilando, e
 # aqui **não há toolchain Rust** para medir.
 [dependencies]
+# Opcional, atrás da feature `laminar` (ver `src/laminar_backend.rs`).
+#
+# O laminar é a camada de rede do Amethyst: canais confiáveis-ordenados,
+# sequenciados e fragmentação sobre UDP, **sem runtime assíncrono**. É o que
+# falta ao transporte próprio, que não garante entrega nenhuma.
+#
+# Fica opcional para o alvo aarch64 poder continuar sem dependência alguma
+# quando isso importar mais que a garantia de entrega.
+laminar = { version = "0.5", optional = true }
 
 [dev-dependencies]
 
 [features]
 default = []
+# Transporte alternativo com garantias de entrega. Não muda o protocolo: os
+# mesmos bytes de `wire` viajam por baixo.
+laminar = ["dep:laminar"]

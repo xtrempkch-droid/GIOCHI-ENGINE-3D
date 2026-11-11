@@ -5,11 +5,10 @@ Implementação do **Relatório 2** do
 rede P2P host-autoritativa com *Interest Management*, para o GIOCHI-OS em Linux
 ARM64.
 
-> **Estado: escrito, NÃO compilado.** Não há `rustc` nem `cargo` na máquina onde
-> este crate foi escrito. Nada abaixo foi executado — nem `cargo build`, nem
-> `cargo test`. Trate como código a compilar, não como código a funcionar. O que
-> o repositório tem de verdade são os testes escritos, que só valem depois de
-> rodarem.
+> **Estado: compilado e testado.** `cargo test -p giochi-net` dá **34/34**, e
+> **38/38** com `--features laminar`; `clippy -D warnings` e `fmt --check`
+> passam. O que **não** foi feito está na §3: a ABI C, o teste com dois
+> processos e a validação de cross-compile no CI.
 
 ---
 
@@ -28,7 +27,7 @@ ARM64.
 
 ---
 
-## 2. As três decisões que divergem do relatório
+## 2. As quatro decisões que divergem do relatório
 
 ### 2.1 Serialização escrita à mão, não `postcard`/`bincode`
 
@@ -58,8 +57,53 @@ design — a engine não pode saber.
 jogo informar. `AreaDeInteresse::da_tela(...)` existe como atalho para quem quiser
 a fórmula do relatório, mas é opção, não padrão.
 
-### 2.3 `mdns-sd` não entrou — e é decisão em aberto, não esquecimento
+### 2.3 Dois transportes: o próprio e o `laminar`
 
+O transporte próprio (`src/peer.rs`) é um `UdpSocket` **sem garantia nenhuma**.
+Datagrama perdido é perdido. Isso serve para snapshot de posição — o próximo
+tick corrige — e **não** serve para handshake, compra na loja ou estado global:
+perder um `ShopBuy` é uma compra que o jogador fez e não aconteceu.
+
+Por isso entrou o **`laminar` 0.5** (a camada de rede do Amethyst, usada em
+jogos), como **feature opcional** `laminar`:
+
+| | transporte próprio | `laminar` |
+| --- | --- | --- |
+| dependências | **zero** | 12 crates |
+| entrega garantida | não | sim (canais) |
+| ordenação | não | sim, por canal |
+| fragmentação | não (limite 1200 B) | sim |
+| runtime assíncrono | não | não |
+| aarch64 sem dependência | **sim** | não |
+
+**O protocolo não muda.** Os mesmos bytes de `wire.rs` viajam por baixo; o que
+muda é a garantia por variante, decidida em `laminar_backend::garantia_de`:
+
+| Variante | Garantia | Por quê |
+| --- | --- | --- |
+| Handshake, HandshakeOk, Recusado | confiável | perder = não entrar na partida |
+| ShopBuy | confiável | compra perdida com ouro já gasto |
+| Global (onda, torre, chefe) | confiável | HUD mentiria sobre o HP da torre |
+| Input | sequenciada | input atrasado não serve; ordem importa |
+| Jogador | sequenciada | fora de ordem faz o jogador "voltar" |
+| Inimigos | descartável | o próximo tick substitui |
+| Ping, Pong | descartável | perder só atrasa a medição |
+
+Confiar no `laminar` troca "escrevi 200 linhas de protocolo" por "dependo de um
+crate de 2021". É uma troca defensável — o que ele faz (reliability, ordering,
+fragmentação) é notoriamente difícil de acertar à mão —, mas é uma troca, e o
+padrão continua sendo o transporte próprio para o alvo aarch64 poder ficar sem
+dependência alguma.
+
+### Um detalhe do `laminar` que custa uma sessão de depuração
+
+`Socket::send` **só enfileira**. Quem transmite é o `manual_poll`, que roda
+dentro do nosso `drenar`. Consequência: **os dois lados precisam chamar
+`drenar` a cada frame**, inclusive quem só envia. Um host que só recebe e um
+cliente que só envia — arranjo natural — faz o cliente nunca transmitir nada, e
+o sintoma é "a rede não funciona" sem erro nenhum.
+
+### 2.4 `mdns-sd` não entrou — e é decisão em aberto, não esquecimento
 O relatório pede descoberta automática por mDNS. O `mdns-sd` é puro Rust, mas
 puxa `if-addrs` e `socket2`, que enumeram interfaces por syscall. Pode passar em
 `aarch64-unknown-linux-gnu` sem problema — **não há como saber sem compilar**, e
@@ -105,9 +149,9 @@ a ponte C é o próximo passo**, e é o que destrava o jogo de verdade.
 
 ---
 
-## 4. O que os testes cobrem (quando rodarem)
+## 4. O que os testes cobrem
 
-`cargo test -p giochi-net` — **34 testes escritos**:
+`cargo test -p giochi-net` — **34 testes**, e **38** com `--features laminar`. Todos executados e verdes:
 
 | Arquivo | Testes | O que fixa |
 | --- | --- | --- |
@@ -146,8 +190,10 @@ não existia no enum. Compilar teria falhado na primeira linha útil.
 
 ## 6. O que fazer na próxima sessão, em ordem
 
-1. **`cargo test -p giochi-net`** — é o primeiro comando. Os 34 testes nunca
-   rodaram, e o crate nunca compilou.
+1. **`cargo test -p giochi-net`** e **`--features laminar`** — já rodam, 34 e 38.
+   Rodar de novo depois de qualquer mudança é obrigatório: o crate tem dois bugs
+   que só apareceram aqui (tamanho de inimigo no datagrama e `0.0.0.0` como
+   endereço de destino).
 2. **`cargo build --workspace`** — garantir que entrar no workspace não quebrou
    os outros cinco crates.
 3. **`scripts/check-aarch64.sh`** — o repo já tem o script de cross-compile; ele
@@ -155,7 +201,7 @@ não existia no enum. Compilar teria falhado na primeira linha útil.
 4. **ABI C** — `net_host_create`, `net_client_join`, `net_send_input`,
    `net_set_camera_pos`, `net_poll_snapshot`, `net_poll_snapshot_filtered`.
    Definir a struct de snapshot com tamanho fixo e regenerar header + contrato.
-5. **Decidir mDNS** com o compilador na mão (§2.3).
+5. **Decidir mDNS** com o compilador na mão (§2.4).
 
 ## 7. O que o GIOCHI-OS precisa, e ainda não tem
 
