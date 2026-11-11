@@ -100,7 +100,11 @@ impl FiltroAoi {
     }
 
     /// Filtra e devolve a lista já no buffer interno do filtro.
-    pub fn filtrar(&mut self, inimigos: &[SnapshotInimigo], area: AreaDeInteresse) -> &[SnapshotInimigo] {
+    pub fn filtrar(
+        &mut self,
+        inimigos: &[SnapshotInimigo],
+        area: AreaDeInteresse,
+    ) -> &[SnapshotInimigo] {
         filtrar(inimigos, area, &mut self.buffer);
         &self.buffer
     }

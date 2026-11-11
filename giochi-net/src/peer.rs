@@ -109,6 +109,23 @@ impl Net {
         }
     }
 
+    /// Envia bytes crus, sem cabeçalho de versão.
+    ///
+    /// Existe porque **testar o caminho de erro exige produzir erro**: um
+    /// datagrama com versão trocada ou tag inválida não pode ser montado por
+    /// [`Mensagem::codificar`], que sempre escreve o formato correto. Sem esta
+    /// porta, os testes que provam "pacote ruim não derruba o host" teriam de
+    /// acessar o campo privado — e um teste que fura o encapsulamento para
+    /// funcionar está testando outra coisa.
+    ///
+    /// Não use em produção para mandar [`Mensagem`]; para isso existe
+    /// [`Self::enviar`], que carimba a versão.
+    pub fn enviar_bruto(&mut self, para: SocketAddr, bytes: &[u8]) -> io::Result<usize> {
+        let n = self.socket.send_to(bytes, para)?;
+        self.enviados += 1;
+        Ok(n)
+    }
+
     /// Drena até `orcamento` pacotes. Devolve os eventos na ordem em que
     /// chegaram.
     ///

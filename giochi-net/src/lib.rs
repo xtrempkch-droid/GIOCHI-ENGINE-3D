@@ -72,6 +72,19 @@ pub const SNAPSHOT_HZ: u32 = 15;
 /// 8080/8088 (painel e loja), para não colidir num aparelho já ocupado.
 pub const PORTA_PADRAO: u16 = 47721;
 
+/// O limite de datagrama tem de caber no MTU mínimo de IPv6.
+///
+/// Garantia de **compilação**, não de teste: se alguém subir `DATAGRAMA_MAX`
+/// acima de 1232, o crate não compila. Um `assert!` dentro de `#[test]`
+/// dependeria de alguém rodar os testes; aqui o build já barra — e clippy
+/// reprova `assert!` sobre constante justamente por isso.
+///
+/// A conta: MTU mínimo IPv6 = 1280, menos 40 do cabeçalho IPv6 e 8 do UDP.
+const _: () = assert!(
+    DATAGRAMA_MAX <= 1232,
+    "DATAGRAMA_MAX fragmentaria em rede padrão"
+);
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -88,8 +101,12 @@ mod testes {
 
     #[test]
     fn datagrama_cabe_no_mtu_minimo_de_ipv6() {
-        // 1280 é o MTU mínimo que todo host IPv6 é obrigado a suportar; tirando
-        // 40 (IPv6) + 8 (UDP) sobram 1232.
-        assert!(DATAGRAMA_MAX <= 1232, "datagrama fragmentaria em rede padrão");
+        // O valor em si é garantido em tempo de compilação (const assert no
+        // topo do módulo). Aqui só se documenta a conta e se prende o número,
+        // para uma mudança de MTU alvo não passar silenciosa.
+        assert_eq!(DATAGRAMA_MAX, 1200);
+        let mtu_minimo_ipv6 = 1280;
+        let cabecalhos = 40 + 8;
+        assert!(DATAGRAMA_MAX + cabecalhos <= mtu_minimo_ipv6);
     }
 }

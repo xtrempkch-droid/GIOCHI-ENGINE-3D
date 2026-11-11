@@ -461,6 +461,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "giochi-net"
+version = "0.3.1"
+
+[[package]]
 name = "glam"
 version = "0.34.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

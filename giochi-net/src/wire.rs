@@ -494,7 +494,11 @@ mod testes {
 
     fn ida_volta(m: Mensagem) {
         let bytes = m.codificar();
-        assert!(bytes.len() <= crate::DATAGRAMA_MAX, "estourou: {}", bytes.len());
+        assert!(
+            bytes.len() <= crate::DATAGRAMA_MAX,
+            "estourou: {}",
+            bytes.len()
+        );
         let lido = Mensagem::decodificar(&bytes).expect("devia decodificar");
         assert_eq!(m, lido);
     }

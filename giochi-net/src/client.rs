@@ -66,10 +66,9 @@ impl Cliente {
     ///
     /// `endereco` aceita `"192.168.1.10:47721"` ou `("ip", porta)`.
     pub fn entrar(endereco: impl std::net::ToSocketAddrs) -> std::io::Result<Self> {
-        let host = endereco
-            .to_socket_addrs()?
-            .next()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "endereço vazio"))?;
+        let host = endereco.to_socket_addrs()?.next().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "endereço vazio")
+        })?;
 
         let mut net = Net::abrir("0.0.0.0:0", Modo::Cliente)?;
         let agora = Instant::now();
@@ -191,7 +190,9 @@ impl Cliente {
         if agora.duration_since(self.ultimo_ping) >= INTERVALO_PING {
             self.ultimo_ping = agora;
             let ms = self.inicio.elapsed().as_millis() as u32;
-            let _ = self.net.enviar(self.host, &Mensagem::Ping { enviado_ms: ms });
+            let _ = self
+                .net
+                .enviar(self.host, &Mensagem::Ping { enviado_ms: ms });
         }
 
         if agora.duration_since(self.ultimo_pacote) > TIMEOUT_HOST
@@ -338,7 +339,7 @@ mod testes {
 
     #[test]
     fn enviar_input_recusa_mensagem_que_nao_e_do_cliente() {
-        let mut host = Host::novo(Some(0)).unwrap();
+        let host = Host::novo(Some(0)).unwrap();
         let addr = host.endereco().unwrap();
         let mut cliente = Cliente::entrar(addr).unwrap();
 
@@ -353,7 +354,7 @@ mod testes {
 
     #[test]
     fn pacote_de_host_desconhecido_e_ignorado() {
-        let mut host = Host::novo(Some(0)).unwrap();
+        let host = Host::novo(Some(0)).unwrap();
         let addr = host.endereco().unwrap();
         let mut cliente = Cliente::entrar(addr).unwrap();
 
@@ -373,7 +374,11 @@ mod testes {
 
         std::thread::sleep(Duration::from_millis(50));
         cliente.processar(64);
-        assert_ne!(cliente.jogador(), Some(99), "pacote de outro endereço não vale");
+        assert_ne!(
+            cliente.jogador(),
+            Some(99),
+            "pacote de outro endereço não vale"
+        );
     }
 
     #[test]

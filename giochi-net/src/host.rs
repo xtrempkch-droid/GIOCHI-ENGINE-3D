@@ -116,7 +116,11 @@ impl Host {
 
             // Handshake antes de qualquer checagem de cliente: é ele que CRIA
             // o cliente.
-            if let Mensagem::Handshake { versao, tipo_controle } = &mensagem {
+            if let Mensagem::Handshake {
+                versao,
+                tipo_controle,
+            } = &mensagem
+            {
                 self.responder_handshake(de, *versao, *tipo_controle, agora);
                 continue;
             }
@@ -131,14 +135,19 @@ impl Host {
             cliente.ultimo_pacote = agora;
 
             match &mensagem {
-                Mensagem::Input { camera_x, camera_z, .. } => {
+                Mensagem::Input {
+                    camera_x, camera_z, ..
+                } => {
                     cliente.camera_x = *camera_x;
                     cliente.camera_z = *camera_z;
                 }
                 Mensagem::Ping { enviado_ms } => {
-                    let _ = self
-                        .net
-                        .enviar(de, &Mensagem::Pong { enviado_ms: *enviado_ms });
+                    let _ = self.net.enviar(
+                        de,
+                        &Mensagem::Pong {
+                            enviado_ms: *enviado_ms,
+                        },
+                    );
                     continue;
                 }
                 _ => {}
@@ -172,9 +181,13 @@ impl Host {
         if let Some(existente) = self.clientes.get_mut(&de) {
             existente.ultimo_pacote = agora;
             let id = existente.id;
-            let _ = self
-                .net
-                .enviar(de, &Mensagem::HandshakeOk { versao: VERSAO_PROTOCOLO, jogador: id });
+            let _ = self.net.enviar(
+                de,
+                &Mensagem::HandshakeOk {
+                    versao: VERSAO_PROTOCOLO,
+                    jogador: id,
+                },
+            );
             return;
         }
 
@@ -205,9 +218,13 @@ impl Host {
                 raio: 0.0,
             },
         );
-        let _ = self
-            .net
-            .enviar(de, &Mensagem::HandshakeOk { versao: VERSAO_PROTOCOLO, jogador: id });
+        let _ = self.net.enviar(
+            de,
+            &Mensagem::HandshakeOk {
+                versao: VERSAO_PROTOCOLO,
+                jogador: id,
+            },
+        );
     }
 
     /// O jogo informa o raio de interesse **daquele** cliente.
@@ -357,7 +374,11 @@ mod testes {
             },
             500
         ));
-        assert_eq!(id_recebido, Some(1), "primeiro cliente é 1, porque 0 é o host");
+        assert_eq!(
+            id_recebido,
+            Some(1),
+            "primeiro cliente é 1, porque 0 é o host"
+        );
         assert_eq!(host.clientes(), 1);
     }
 
@@ -367,14 +388,16 @@ mod testes {
         let addr = host.endereco().unwrap();
         let mut cliente = Net::abrir("127.0.0.1:0", Modo::Cliente).unwrap();
 
-        // Manda versão antiga montando o datagrama à mão.
+        // Manda versão antiga montando o datagrama à mão: `enviar` sempre
+        // carimba a versão atual, então o caminho de recusa só é exercitado
+        // por bytes crus.
         let mut bytes = Mensagem::Handshake {
             versao: 1,
             tipo_controle: 0,
         }
         .codificar();
         bytes[0] = 99; // versão local = 99
-        cliente.socket.send_to(&bytes, addr).unwrap();
+        cliente.enviar_bruto(addr, &bytes).unwrap();
 
         // Como a versão é recusada na LEITURA, o host nem vê a mensagem.
         // O cliente de verdade recebe o recusado; aqui provamos que o host não
@@ -408,7 +431,10 @@ mod testes {
 
         std::thread::sleep(Duration::from_millis(50));
         let para_o_jogo = host.processar(64);
-        assert!(para_o_jogo.is_empty(), "input sem handshake não sobe para o jogo");
+        assert!(
+            para_o_jogo.is_empty(),
+            "input sem handshake não sobe para o jogo"
+        );
         assert_eq!(host.clientes(), 0);
     }
 
