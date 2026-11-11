@@ -6,6 +6,7 @@ members = [
     "giochi-engine-capi",
     "giochi-engine-lua",
     "giochi-engine-3d",
+    "giochi-net",
 ]
 
 [workspace.package]

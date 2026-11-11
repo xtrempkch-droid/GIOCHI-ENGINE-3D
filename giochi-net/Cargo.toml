@@ -1,0 +1,29 @@
+[package]
+name = "giochi-net"
+description = "Rede P2P host-autoritativa com Interest Management para o GIOCHI-ENGINE-3D"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# ## Zero dependência, de propósito
+#
+# O relatório do consultor exige compilar para `aarch64-unknown-linux-gnu` **sem
+# dependência de sistema além do libc**, e propõe `mdns-sd` + `postcard`/`bincode`.
+#
+# A serialização ficou escrita à mão (`src/wire.rs`): o protocolo tem variantes
+# de tipo fixo, e `serde` + derive custaria mais código gerado que a tabela
+# inteira, além de esconder o offset do erro de leitura.
+#
+# O `mdns-sd` fica como decisão em aberto — ver `docs/REDE.md`. Ele puxa
+# `if-addrs` e `socket2`, que são puro Rust mas fazem syscalls de descoberta de
+# interface. Não é bloqueio de arquitetura; é coisa para medir compilando, e
+# aqui **não há toolchain Rust** para medir.
+[dependencies]
+
+[dev-dependencies]
+
+[features]
+default = []
