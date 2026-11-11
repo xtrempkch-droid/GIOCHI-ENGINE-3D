@@ -24,9 +24,13 @@ fn assert_close(actual: f32, expected: f32, what: &str) {
 #[test]
 fn the_depth_range_is_the_opengl_one_not_the_vulkan_one() {
     // -1..1, not 0..1. This is the assertion that caught a real bug: glam offers both
-    // `perspective_rh` (0..1, Vulkan/D3D) and `perspective_rh_gl` (-1..1, OpenGL), and
-    // the first one produces a scene that looks plausible until geometry approaches the
-    // near plane. Nothing about the wrong matrix raises a GL error.
+    // conventions, and the 0..1 one produces a scene that looks plausible until geometry
+    // approaches the near plane. Nothing about the wrong matrix raises a GL error.
+    //
+    // Em glam 0.31 eram `perspective_rh` (0..1) e `perspective_rh_gl` (-1..1). Em 0.34 as
+    // duas viraram submódulos de `glam::camera::rh::proj`: `vulkan`/`directx` (0..1) e
+    // `opengl` (-1..1). Este teste é o que prende a troca de módulo — usar `vulkan` no
+    // lugar de `opengl` não gera erro de compilação, só uma cena errada.
     let camera = Camera3D::new()
         .with_aspect(1.0)
         .with_fov_y(std::f32::consts::FRAC_PI_2)

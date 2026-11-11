@@ -9,7 +9,7 @@
 //! Storage is column-major to match GL's uniform layout, so `as_ptr()` can be handed to
 //! `glUniformMatrix4fv` without a transpose.
 
-use glam::{Mat3 as GlamMat3, Mat4 as GlamMat4};
+use glam::{camera, Mat3 as GlamMat3, Mat4 as GlamMat4};
 
 use super::{Quat, Vec3};
 
@@ -103,11 +103,15 @@ impl Mat4 {
             return Err("far plane must be finite and greater than near");
         }
 
-        // `perspective_rh_gl`, not `perspective_rh`: the latter maps depth to 0..1
-        // (Vulkan/D3D convention) while OpenGL ES expects -1..1. Using the wrong one
-        // renders a scene that looks plausible until geometry approaches the near
-        // plane, so the tests below pin the -1..1 behaviour explicitly.
-        Ok(Self::from_glam(GlamMat4::perspective_rh_gl(
+        // `camera::rh::proj::opengl`, not `camera::rh::proj::vulkan`/`directx`: os
+        // dois últimos mapeiam a profundidade para 0..1, enquanto o OpenGL ES usa
+        // -1..1. Com a convenção errada a cena parece plausível até a geometria se
+        // aproximar do plano próximo — por isso os testes abaixo prendem o -1..1.
+        //
+        // glam 0.34 tirou `Mat4::perspective_rh_gl` e moveu as projeções para o
+        // módulo `camera`. O submódulo `opengl` é justamente o que carrega a
+        // convenção de profundidade do OpenGL.
+        Ok(Self::from_glam(camera::rh::proj::opengl::perspective(
             fov_y, aspect, near, far,
         )))
     }
@@ -133,7 +137,7 @@ impl Mat4 {
             return Err("orthographic bounds enclose no volume");
         }
 
-        Ok(Self::from_glam(GlamMat4::orthographic_rh_gl(
+        Ok(Self::from_glam(camera::rh::proj::opengl::orthographic(
             left, right, bottom, top, near, far,
         )))
     }
@@ -157,7 +161,7 @@ impl Mat4 {
             return Err("up vector is parallel to the view direction");
         }
 
-        Ok(Self::from_glam(GlamMat4::look_at_rh(
+        Ok(Self::from_glam(camera::rh::view::look_at_mat4(
             eye.to_glam(),
             center.to_glam(),
             up,
@@ -248,7 +252,9 @@ impl Mat4 {
     /// Returns normalised device coordinates: `x` and `y` in `-1..=1` inside the frame,
     /// and `z` in `-1..=1` between the near and far planes (OpenGL's convention, which is
     /// what [`Camera3D::projection_matrix`](super::Camera3D::projection_matrix) produces —
-    /// see ADR-038 on why `perspective_rh_gl` and not `perspective_rh`).
+    /// see ADR-038 on why the OpenGL depth range and not the 0..1 one. Em glam 0.34 isso
+    /// é `camera::rh::proj::opengl::perspective`; as versões `directx`/`vulkan` do mesmo
+    /// módulo mapeiam a profundidade para 0..1).
     ///
     /// Returns `None` when `w <= 0`, which is a point at or behind the eye. There the
     /// divide flips the sign, so a point behind the camera would otherwise come back as a

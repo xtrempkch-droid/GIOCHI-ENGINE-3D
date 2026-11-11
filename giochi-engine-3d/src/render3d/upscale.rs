@@ -225,7 +225,11 @@ impl Upscaler {
             0,
             glow::RGBA,
             glow::UNSIGNED_BYTE,
-            None,
+            // glow 0.18 trocou `Option<&[u8]>` por `PixelUnpackData`: o enum
+            // distingue slice de buffer nomeado, o que o OpenGL também distingue
+            // (`glTexImage2D` com PBO bound). `Slice(None)` é a alocação vazia,
+            // que é o que queremos — a textura é preenchida depois.
+            glow::PixelUnpackData::Slice(None),
         );
         gl.framebuffer_texture_2d(
             glow::FRAMEBUFFER,

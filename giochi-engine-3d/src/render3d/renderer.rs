@@ -423,7 +423,11 @@ impl RenderContext3D {
                 height as i32,
                 glow::RGBA,
                 glow::UNSIGNED_BYTE,
-                glow::PixelPackData::Slice(buffer.as_mut_slice()),
+                // glow 0.18 envolveu o destino em `Option`: `Slice(Some(..))` é
+                // "leia para este buffer", e `Slice(None)` agora significa "use o
+                // PBO ligado a PACK_BUFFER" — que é outra operação. Sem o `Some`,
+                // o 0.18 não compila; com o `None` antigo, leria para o PBO.
+                glow::PixelPackData::Slice(Some(buffer.as_mut_slice())),
             );
         }
 
