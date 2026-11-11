@@ -234,7 +234,7 @@ mod testes {
 
     #[test]
     fn cliente_entra_e_recebe_id() {
-        let mut host = Host::novo(Some(0)).unwrap();
+        let mut host = Host::escutar(("127.0.0.1", 0)).unwrap();
         let addr = host.endereco().unwrap();
 
         let mut cliente = Cliente::entrar(addr).expect("devia entrar");
@@ -257,7 +257,7 @@ mod testes {
 
     #[test]
     fn input_chega_ao_host_e_snapshot_volta() {
-        let mut host = Host::novo(Some(0)).unwrap();
+        let mut host = Host::escutar(("127.0.0.1", 0)).unwrap();
         let addr = host.endereco().unwrap();
         let mut cliente = Cliente::entrar(addr).unwrap();
 
@@ -339,7 +339,7 @@ mod testes {
 
     #[test]
     fn enviar_input_recusa_mensagem_que_nao_e_do_cliente() {
-        let host = Host::novo(Some(0)).unwrap();
+        let host = Host::escutar(("127.0.0.1", 0)).unwrap();
         let addr = host.endereco().unwrap();
         let mut cliente = Cliente::entrar(addr).unwrap();
 
@@ -354,14 +354,19 @@ mod testes {
 
     #[test]
     fn pacote_de_host_desconhecido_e_ignorado() {
-        let host = Host::novo(Some(0)).unwrap();
+        let host = Host::escutar(("127.0.0.1", 0)).unwrap();
         let addr = host.endereco().unwrap();
         let mut cliente = Cliente::entrar(addr).unwrap();
 
         // Um segundo host manda HandshakeOk para o cliente; o endereço não é o
         // do host combinado, então tem de ser ignorado.
         let mut impostor = crate::peer::Net::abrir("127.0.0.1:0", crate::peer::Modo::Host).unwrap();
-        let cliente_addr = cliente.net.local().unwrap();
+
+        // O cliente escuta em `0.0.0.0`, então `local()` devolve `0.0.0.0:porta`
+        // — endereço que NÃO aceita `send_to`. O socket, porém, recebe em
+        // qualquer IP local: basta trocar o IP e manter a porta.
+        let porta = cliente.net.local().unwrap().port();
+        let cliente_addr = std::net::SocketAddr::from(([127, 0, 0, 1], porta));
         impostor
             .enviar(
                 cliente_addr,

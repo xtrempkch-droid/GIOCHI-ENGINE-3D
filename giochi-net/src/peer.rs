@@ -88,6 +88,11 @@ impl Net {
     }
 
     /// Endereço local efetivo (o do cliente já traz a porta dada pelo SO).
+    ///
+    /// **Atenção:** quem abriu em `0.0.0.0` recebe `0.0.0.0:porta`, que não é
+    /// endereço de destino — `send_to` para ele falha com `AddrNotAvailable`.
+    /// O socket continua alcançável por qualquer IP da máquina naquela porta;
+    /// só o valor reportado é que é curinga.
     pub fn local(&self) -> io::Result<SocketAddr> {
         self.socket.local_addr()
     }

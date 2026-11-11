@@ -210,23 +210,35 @@ mod testes {
 
     #[test]
     fn a_contagem_do_relatorio_se_sustenta() {
-        // A conta que justifica o AOI: 150 inimigos em 16 telas, área de 1 tela.
-        // Esperado ~1/16 do mundo por cliente.
+        // A conta que justifica o AOI: mapa de 4x4 telas, 150 inimigos.
+        // Mundo de 400x400 com 16 telas de 100x100, inimigos em grade.
         let mundo: Vec<_> = (0..150)
             .map(|i| {
                 let col = (i % 16) as f32;
                 let lin = (i / 16) as f32;
-                inimigo(i, col * 100.0, lin * 100.0)
+                inimigo(i, col * 26.0, lin * 26.0)
             })
             .collect();
 
-        let area = AreaDeInteresse::nova(0.0, 0.0, 70.0);
+        // Raio de uma tela (100) sobre grade de 26 de espaçamento:
+        // área π·100² dividida por 26² ≈ 46 pontos esperados.
+        let area = AreaDeInteresse::nova(200.0, 130.0, 100.0);
         let mut saida = Vec::new();
-        let (mantidos, _) = filtrar(&mundo, area, &mut saida);
+        let (mantidos, cortados) = filtrar(&mundo, area, &mut saida);
 
-        // Aproximadamente 1/16 de 150 ≈ 9. Aceita uma faixa larga: o importante
-        // é que seja ordem de grandeza menor, não a fração exata.
-        assert!(mantidos <= 20, "AOI devia reduzir muito, veio {mantidos}");
-        assert!(mantidos >= 3, "e não zerar, veio {mantidos}");
+        // O primeiro teste desta função usava espaçamento 100 e esperava
+        // `mantidos >= 3` — com pontos a 100 de distância e raio 70, só o ponto
+        // central caía dentro, e a expectativa era impossível. Era o teste que
+        // estava errado, não o filtro.
+        assert!(
+            mantidos >= 20,
+            "AOI devia manter a vizinhança, veio {mantidos}"
+        );
+        assert!(
+            mantidos <= 80,
+            "AOI devia cortar a maior parte, veio {mantidos}"
+        );
+        assert!(cortados > 0, "o mundo tem de ser maior que a área");
+        assert_eq!(mantidos + cortados, mundo.len());
     }
 }

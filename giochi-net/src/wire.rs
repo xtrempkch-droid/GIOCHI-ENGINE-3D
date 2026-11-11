@@ -191,6 +191,16 @@ const TAG_PING: u8 = 8;
 const TAG_PONG: u8 = 9;
 const TAG_SHOP_BUY: u8 = 10;
 
+/// Bytes que um inimigo ocupa no snapshot.
+///
+/// `id`(2) + `x`(2) + `z`(2) + `hp`(1) + `tipo`(1) + `fase_chefe`(1) = **9**.
+///
+/// A primeira versão usava 5 aqui — número que eu tinha deduzido do campo
+/// "posição" e não do que o codificador realmente escreve. Com o divisor
+/// errado, 150 inimigos passavam do limite de datagrama e o crate produzia
+/// pacote grande demais. O teste pegou.
+const TAM_INIMIGO: usize = 9;
+
 struct Escritor {
     buf: Vec<u8>,
 }
@@ -334,10 +344,10 @@ impl Mensagem {
             Mensagem::Inimigos { tick, inimigos } => {
                 w.u8(TAG_INIMIGOS);
                 w.u32(*tick);
-                // Quantos cabem: 5 bytes por inimigo + 2 do contador, sobre o
-                // que já foi escrito.
+                // Quantos cabem: `TAM_INIMIGO` bytes por inimigo + 2 do
+                // contador, sobre o que já foi escrito.
                 let cabecalho = w.buf.len() + 2;
-                let cabe = crate::DATAGRAMA_MAX.saturating_sub(cabecalho) / 5;
+                let cabe = crate::DATAGRAMA_MAX.saturating_sub(cabecalho) / TAM_INIMIGO;
                 let n = inimigos.len().min(cabe);
                 w.u16(n as u16);
                 for ini in &inimigos[..n] {
