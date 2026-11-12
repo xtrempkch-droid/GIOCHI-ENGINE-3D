@@ -41,6 +41,12 @@ Out of scope for ABI v1: 3D, custom shaders, render pipelines, font rendering
 (`GiochiFont` is reserved), networking, and anything that requires the consumer
 to hold a Rust type.
 
+> **Networking deixou de estar fora de escopo na versão 4 da ABI.** Esta linha
+> dizia o contrário e foi citada por um relatório externo como prova de que a
+> engine não tem rede — era verdade em v1, deixou de ser na parte IV (ver §16).
+> Fica registado o histórico em vez de apagar a frase: quem leu a versão antiga
+> precisa de saber que ela mudou.
+
 ---
 
 ## 2. Ground rules
@@ -980,3 +986,139 @@ half-update a struct the host is already displaying.
 | `NULL` is rejected without writing | `c_smoke.c`, `python_smoke.py` |
 | Version 1 and 2 consumers keep working untouched | `c_smoke_3d.c` and `python_smoke_3d.py` assert `>= 2` and otherwise unchanged; `c_smoke.c` still asserts `>= 1` |
 | The function is exported and reachable from C and Python | `scripts/ffi-smoke.sh` links and calls it from both |
+
+---
+
+# Part IV — Networking (ABI v4)
+
+Rede P2P host-autoritativa com *Interest Management*. Implementada no crate
+`giochi-net` (transporte próprio, zero dependência) e exposta aqui.
+
+A versão passa de 3 para **4**. A mudança é puramente aditiva: nada do que
+existia mudou de assinatura ou de layout.
+
+## 16. Types
+
+```c
+#define GIOCHI_NET_MAX_INIMIGOS 64
+
+typedef struct {
+    uint16_t id;
+    float    x;
+    float    z;
+    uint16_t hp;
+    uint8_t  tipo;        /* o significado é do jogo */
+    uint8_t  fase_chefe;  /* 0 = não é chefe */
+} GiochiNetInimigo;       /* 16 bytes, alinhamento 4 */
+
+typedef struct {
+    uint32_t tick;        /* crescente; use para descartar snapshot velho */
+    uint32_t total;       /* quantos inimigos a área de interesse continha */
+    uint32_t escritos;    /* quantos foram copiados para `inimigos` */
+    uint32_t capacidade;  /* quantos cabem: sempre GIOCHI_NET_MAX_INIMIGOS */
+    GiochiNetInimigo inimigos[GIOCHI_NET_MAX_INIMIGOS];
+} GiochiNetSnapshot;      /* 1040 bytes */
+
+typedef struct {
+    uint32_t tick;
+    float    mover_x, mover_z;
+    float    mirar_x, mirar_z;
+    uint32_t acoes;                     /* bitmask do jogo */
+    float    camera_x, camera_z;
+} GiochiNetInput;         /* 32 bytes */
+```
+
+**`total` contra `escritos` é a parte que o consumidor não pode ignorar.**
+`GiochiNetSnapshot` tem tamanho fixo porque C não tem `Vec`, mas a engine pode ter
+mais inimigos na área do que cabem no array. Quando `total > escritos` houve
+truncamento: o jogo desenhou menos inimigos do que existem, e eles atacam a torre
+invisíveis. Reporte isso — HUD, log, o que for — em vez de assumir que `escritos`
+é o mundo.
+
+## 17. Functions
+
+| Função | Papel | Retorno |
+|---|---|---|
+| `uint64_t giochi_net_host_create(uint16_t porta)` | sobe um host; `0` = porta efêmera | handle, `0` = falha |
+| `uint64_t giochi_net_client_join(const char* endereco)` | entra numa partida (`"ip:porta"`) | handle, `0` = falha |
+| `int32_t giochi_net_destroy(uint64_t)` | liberta o nó | 0 / erro |
+| `int32_t giochi_net_local_port(uint64_t)` | porta de escuta (descobre a efêmera) | porta / negativo |
+| `int32_t giochi_net_player_id(uint64_t)` | id atribuído pelo host | id / `0` = ainda não |
+| `int32_t giochi_net_pump(uint64_t)` | bombeia a rede; chamar a cada frame | 0 / erro |
+| `int32_t giochi_net_send_input(uint64_t, const GiochiNetInput*)` | cliente manda input | 0 / erro |
+| `int32_t giochi_net_poll_input(uint64_t, GiochiNetInput*, uint8_t* id, uint32_t* escritos)` | host lê input | 0 / erro |
+| `int32_t giochi_net_set_camera_pos(uint64_t, float, float)` | cliente repõe a câmera | 0 / erro |
+| `int32_t giochi_net_set_area(uint64_t, uint8_t jogador, float raio)` | host define o AOI de um cliente | 0 / erro |
+| `int32_t giochi_net_host_snapshot(uint64_t, const GiochiNetInimigo*, uint32_t n)` | host publica o mundo | 0 / erro |
+| `int32_t giochi_net_broadcast(uint64_t, const uint8_t*, uint32_t)` | host manda estado global | 0 / erro |
+| `int32_t giochi_net_poll_snapshot(uint64_t, GiochiNetSnapshot*)` | cliente lê o snapshot | 0 / `1` / erro |
+| `int32_t giochi_net_poll_snapshot_filtered(uint64_t, GiochiNetSnapshot*, uint32_t max)` | idem, com teto | 0 / `1` / erro |
+
+### A única exceção à regra "0 ou negativo"
+
+`giochi_net_poll_snapshot` devolve **`1`** (`GIOCHI_NET_AGUARDE`) quando não há
+snapshot novo. O host publica a 15 Hz e o jogo chama a 60 Hz, então "ainda não
+chegou" é o caso **normal**, não erro.
+
+A alternativa — devolver `0` com `total == 0` — juntaria "nada chegou" com "chegou
+e não há inimigo na área". O cliente precisa dos dois separados: no primeiro ele
+interpola a posição anterior, no segundo ele limpa a tela.
+
+### Quem chama o quê
+
+```c
+/* host */
+uint64_t h = giochi_net_host_create(47721);
+giochi_net_set_area(h, 1, 900.0f);            /* raio do que o cliente 1 vê */
+while (rodando) {
+    giochi_net_pump(h);                        /* recebe input */
+    GiochiNetInput in; uint8_t quem; uint32_t n;
+    while (giochi_net_poll_input(h, &in, &quem, &n) == 0 && n == 1) {
+        simular(quem, &in);
+    }
+    simular_mundo();
+    giochi_net_host_snapshot(h, meus_inimigos, total);   /* filtra por AOI */
+    giochi_net_broadcast(h, &onda, sizeof onda);         /* estado global */
+}
+
+/* cliente */
+uint64_t c = giochi_net_client_join("10.55.0.2:47721");
+while (rodando) {
+    giochi_net_pump(c);
+    giochi_net_send_input(c, &meu_input);      /* a câmera vai no input */
+    GiochiNetSnapshot s;
+    if (giochi_net_poll_snapshot(c, &s) == 0) {
+        if (s.total > s.escritos) { log_truncado(s.total, s.escritos); }
+        desenhar(s.inimigos, s.escritos);
+    }
+}
+```
+
+## 18. What part IV deliberately does not have
+
+- **Nenhum tipo Rust atravessa a fronteira.** O `Cliente` e o `Host` são
+  `u64` opacos; o registro é `thread_local`, como o das cenas.
+- **Sem `net_poll_event` genérico.** Eventos que o jogo não pode tratar (handshake,
+  pong, timeout) são resolvidos dentro da camada C. Subir isso obrigaria cada jogo
+  a reimplementar a mesma máquina de estados.
+- **Sem NAT traversal, relay ou reconexão automática.** LAN apenas, como o
+  relatório que originou isto declara no "fora de escopo".
+- **Sem mDNS nesta versão.** O cliente recebe o endereço pronto. Ver
+  `docs/REDE.md` §2.4.
+- **Sem predição no cliente.** Host-autoritativo puro: o cliente vê a própria
+  posição com o atraso do RTT, que em LAN é 1–4 ms.
+- **A engine não conhece regra de jogo.** "Onda", "torre", "chefe" e "loja" viajam
+  como bytes opacos em `giochi_net_broadcast`.
+
+## 19. Compliance checklist for part IV
+
+| Requisito | Como é verificado |
+|---|---|
+| `GIOCHI_ABI_VERSION == 4` | `lib.rs::abi_version_matches_contract` |
+| `GiochiNetInimigo` = 16 bytes, `GiochiNetSnapshot` = 1040, `GiochiNetInput` = 32 | `net.rs::tamanho_das_structs_e_estavel` |
+| Handle `0` nunca é válido | `net.rs::handle_zero_nunca_e_valido` |
+| `NULL` é recusado sem escrever | `net.rs::argumentos_null_sao_recusados` |
+| Papel errado é recusado com mensagem | `net.rs::papel_errado_e_recusado_com_mensagem` |
+| `total > escritos` sinaliza truncamento | `net.rs::snapshot_truncado_reporta_total_maior_que_escritos` |
+| `GIOCHI_NET_AGUARDE` é positivo | `net.rs::codigo_de_espera_nao_e_erro` |
+| O header corresponde ao código | `scripts/gen-header.sh --check` no CI |

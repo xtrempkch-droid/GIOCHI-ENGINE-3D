@@ -69,6 +69,7 @@ mod audio;
 mod engine;
 mod input;
 mod lib3d;
+mod net;
 mod render;
 mod scene;
 mod state;
@@ -77,9 +78,10 @@ mod version;
 pub use abi_types::{
     GiochiEngineConfig, GiochiFrameStats, GiochiSceneCallbacks, GIOCHI_ABI_VERSION,
     GIOCHI_ERROR_ASSET, GIOCHI_ERROR_AUDIO, GIOCHI_ERROR_INTERNAL, GIOCHI_ERROR_INVALID_ARGUMENT,
-    GIOCHI_ERROR_INVALID_HANDLE, GIOCHI_ERROR_NOT_INITIALIZED, GIOCHI_ERROR_OK,
-    GIOCHI_ERROR_PLATFORM, GIOCHI_ERROR_RENDER, GIOCHI_ERROR_SCENE, GIOCHI_ERROR_UNSUPPORTED,
-    GIOCHI_MAX_ASSET_SIZE, GIOCHI_SHADER_FLAT, GIOCHI_SHADER_PHONG, GIOCHI_SHADER_TEXTURED,
+    GIOCHI_ERROR_INVALID_HANDLE, GIOCHI_ERROR_NETWORK, GIOCHI_ERROR_NOT_INITIALIZED,
+    GIOCHI_ERROR_OK, GIOCHI_ERROR_PLATFORM, GIOCHI_ERROR_RENDER, GIOCHI_ERROR_SCENE,
+    GIOCHI_ERROR_UNSUPPORTED, GIOCHI_MAX_ASSET_SIZE, GIOCHI_NET_AGUARDE, GIOCHI_SHADER_FLAT,
+    GIOCHI_SHADER_PHONG, GIOCHI_SHADER_TEXTURED,
 };
 pub use assets::{giochi_asset_read, giochi_asset_size};
 pub use audio::{
@@ -106,6 +108,13 @@ pub use lib3d::{
     giochi_renderer3d_draw_mesh, giochi_renderer3d_set_light, giochi_shader_builtin,
     giochi_shader_destroy, giochi_shader_load, giochi_transform3d_from_translation,
     giochi_transform3d_identity, GiochiEngine3D,
+};
+pub use net::{
+    giochi_net_broadcast, giochi_net_client_join, giochi_net_destroy, giochi_net_host_create,
+    giochi_net_host_snapshot, giochi_net_local_port, giochi_net_player_id, giochi_net_poll_input,
+    giochi_net_poll_snapshot, giochi_net_poll_snapshot_filtered, giochi_net_pump,
+    giochi_net_send_input, giochi_net_set_area, giochi_net_set_camera_pos, GiochiNetInimigo,
+    GiochiNetInput, GiochiNetSnapshot, GIOCHI_NET_MAX_INIMIGOS,
 };
 pub use render::{
     giochi_camera_get, giochi_camera_set, giochi_render_clear, giochi_render_draw_rect,
@@ -140,7 +149,7 @@ mod tests {
     fn abi_version_matches_contract() {
         // The number `docs/C_ABI_CONTRACT.md` names as the current part. Bump it with
         // the contract, never to make a test pass.
-        assert_eq!(GIOCHI_ABI_VERSION, 3);
+        assert_eq!(GIOCHI_ABI_VERSION, 4);
         assert_eq!(giochi_abi_version(), GIOCHI_ABI_VERSION);
     }
 

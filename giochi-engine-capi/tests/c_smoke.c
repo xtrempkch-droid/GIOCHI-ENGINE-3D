@@ -368,6 +368,60 @@ int main(void)
         }
     }
 
+    /* ---- parte IV: rede --------------------------------------------------- */
+    /* Prova que os símbolos existem e ligam de C. Nada de rede real: o CI não
+     * tem par, e um teste que depende de dois processos é o §4.2 do
+     * docs/TRANSFERENCIA.md, ainda por fazer. O que se prova aqui é que o
+     * cabeçalho declara, a biblioteca exporta e os tipos têm o tamanho que o
+     * cabeçalho promete. */
+    {
+        /* Tamanhos: se o layout mudar, um consumidor compilado contra o
+         * cabeçalho antigo leria deslocado. */
+        CHECK(sizeof(GiochiNetInimigo) == 16);
+        CHECK(sizeof(GiochiNetSnapshot) == 16 + GIOCHI_NET_MAX_INIMIGOS * 16);
+        CHECK(sizeof(GiochiNetInput) == 32);
+        CHECK(GIOCHI_NET_MAX_INIMIGOS == 64);
+        CHECK(GIOCHI_NET_AGUARDE > 0); /* positivo: "nada novo" não é erro */
+        CHECK(GIOCHI_ERROR_NETWORK < 0);
+
+        /* Handle 0 nunca é válido. */
+        CHECK(giochi_net_destroy(0) == GIOCHI_ERROR_NETWORK);
+        CHECK(giochi_net_local_port(0) == GIOCHI_ERROR_NETWORK);
+        CHECK(giochi_net_player_id(0) == 0);
+
+        /* Endereço NULL é recusado sem crashar. */
+        CHECK(giochi_net_client_join(NULL) == 0);
+
+        /* Host de verdade, em porta efêmera: sobe, reporta a porta, some. */
+        uint64_t net_host = giochi_net_host_create(0);
+        CHECK(net_host != 0);
+        if (net_host != 0) {
+            int32_t porta = giochi_net_local_port(net_host);
+            CHECK(porta > 0);
+            CHECK(giochi_net_pump(net_host) == GIOCHI_ERROR_OK);
+
+            /* Papel errado é recusado, e a mensagem diz qual é o certo. */
+            GiochiNetInput entrada;
+            memset(&entrada, 0, sizeof entrada);
+            CHECK(giochi_net_send_input(net_host, &entrada) ==
+                  GIOCHI_ERROR_INVALID_ARGUMENT);
+            CHECK(strstr(giochi_get_last_error(), "host") != NULL);
+
+            GiochiNetSnapshot instantaneo;
+            memset(&instantaneo, 0, sizeof instantaneo);
+            CHECK(giochi_net_poll_snapshot(net_host, &instantaneo) ==
+                  GIOCHI_ERROR_INVALID_ARGUMENT);
+
+            /* NULL é recusado e não escreve. */
+            CHECK(giochi_net_poll_snapshot(net_host, NULL) ==
+                  GIOCHI_ERROR_INVALID_ARGUMENT);
+
+            CHECK_CODE(giochi_net_destroy(net_host));
+            /* Destruído, o handle não vale mais. */
+            CHECK(giochi_net_local_port(net_host) == GIOCHI_ERROR_NETWORK);
+        }
+    }
+
     /* ---- teardown --------------------------------------------------------- */
     CHECK_CODE(giochi_scene_destroy(scene));
     CHECK(giochi_scene_destroy(scene) == GIOCHI_ERROR_INVALID_HANDLE);

@@ -257,7 +257,7 @@ def main() -> int:
     # Part I was written against 1; this script ships with the library, so it names the
     # current number. A consumer that predates a part should test `>= 1` instead, which
     # is the compatibility rule in giochi.h.
-    check(lib.giochi_abi_version() == 3, "abi version")
+    check(lib.giochi_abi_version() == 4, "abi version")
     check(lib.giochi_abi_version() >= 1, "abi version is at least part I")
     check(lib.giochi_engine_version() > 0, "engine version")
     check(lib.giochi_get_last_error() == b"", "last error starts empty")

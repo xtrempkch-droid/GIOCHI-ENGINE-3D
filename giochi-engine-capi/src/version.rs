@@ -18,7 +18,8 @@ use crate::state;
 /// if (giochi_abi_version() < 1) { /* built against a newer library */ }
 /// ```
 ///
-/// Part I is 1, part II (3D) added 2, and part III (frame statistics) made it 3.
+/// Part I is 1, part II (3D) added 2, part III (frame statistics) made it 3, and
+/// part IV (networking) made it 4.
 ///
 /// # C ABI
 ///

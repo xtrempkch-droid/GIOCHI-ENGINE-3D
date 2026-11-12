@@ -32,7 +32,7 @@ const _: () = assert!(ENGINE_TITLE_CAPACITY == 64);
 /// * `3` — part III (`GiochiFrameStats`), phase 18. Additive as well, so a consumer
 ///   written against `1` or `2` keeps working; the contract asks callers to accept
 ///   `giochi_abi_version() >= 1` for exactly this reason.
-pub const GIOCHI_ABI_VERSION: u32 = 3;
+pub const GIOCHI_ABI_VERSION: u32 = 4;
 
 /// Largest asset the loader accepts, in bytes (64 MiB).
 pub const GIOCHI_MAX_ASSET_SIZE: usize = 64 * 1024 * 1024;
@@ -291,3 +291,24 @@ impl From<giochi_engine::FrameStats> for GiochiFrameStats {
 // ones from the compiled header, so the two cannot drift apart silently.
 const _: () = assert!(core::mem::size_of::<GiochiFrameStats>() == 120);
 const _: () = assert!(core::mem::align_of::<GiochiFrameStats>() == 8);
+
+// ---------------------------------------------------------------------------
+// Part IV: networking
+// ---------------------------------------------------------------------------
+
+/// Falha na camada de rede.
+///
+/// Código novo (-10), no espaço livre entre `UNSUPPORTED` (-9) e `INTERNAL`
+/// (-99). Um consumidor que não conheça este código deve tratá-lo como falha
+/// genérica — o que é verdade: a mensagem em `giochi_get_last_error()` diz o
+/// que houve (porta ocupada, endereço inválido, host recusou, handle vencido).
+pub const GIOCHI_ERROR_NETWORK: i32 = -10;
+
+/// `giochi_net_poll_snapshot` não tinha nada novo para entregar.
+///
+/// **Positivo de propósito, e a única exceção à regra "0 ou negativo" da ABI.**
+/// O host publica a 15 Hz e o jogo chama a função a 60 Hz, então "ainda não
+/// chegou" é o caso comum — não é erro. Devolver `0` juntaria "nada chegou" com
+/// "chegou e a área não tem inimigo", e o cliente precisa dos dois separados para
+/// escolher entre interpolar e limpar a tela.
+pub const GIOCHI_NET_AGUARDE: i32 = 1;

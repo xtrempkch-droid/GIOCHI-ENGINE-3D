@@ -53,7 +53,7 @@ typedef struct GiochiEngine3D GiochiEngine3D;
 // * `3` — part III (`GiochiFrameStats`), phase 18. Additive as well, so a consumer
 //   written against `1` or `2` keeps working; the contract asks callers to accept
 //   `giochi_abi_version() >= 1` for exactly this reason.
-#define GIOCHI_ABI_VERSION 3
+#define GIOCHI_ABI_VERSION 4
 
 // Largest asset the loader accepts, in bytes (64 MiB).
 #define GIOCHI_MAX_ASSET_SIZE ((64 * 1024) * 1024)
@@ -100,6 +100,31 @@ typedef struct GiochiEngine3D GiochiEngine3D;
 
 // Unexpected internal failure, including a caught panic.
 #define GIOCHI_ERROR_INTERNAL -99
+
+// Falha na camada de rede.
+//
+// Código novo (-10), no espaço livre entre `UNSUPPORTED` (-9) e `INTERNAL`
+// (-99). Um consumidor que não conheça este código deve tratá-lo como falha
+// genérica — o que é verdade: a mensagem em `giochi_get_last_error()` diz o
+// que houve (porta ocupada, endereço inválido, host recusou, handle vencido).
+#define GIOCHI_ERROR_NETWORK -10
+
+// `giochi_net_poll_snapshot` não tinha nada novo para entregar.
+//
+// **Positivo de propósito, e a única exceção à regra "0 ou negativo" da ABI.**
+// O host publica a 15 Hz e o jogo chama a função a 60 Hz, então "ainda não
+// chegou" é o caso comum — não é erro. Devolver `0` juntaria "nada chegou" com
+// "chegou e a área não tem inimigo", e o cliente precisa dos dois separados para
+// escolher entre interpolar e limpar a tela.
+#define GIOCHI_NET_AGUARDE 1
+
+// Quantos inimigos cabem em [`GiochiNetSnapshot`].
+//
+// 64 é o teto do que um cliente vê de uma vez depois da AOI. O mapa tem 4×4
+// telas e o relatório fala em ~150 inimigos vivos: um quarto de tela em volta do
+// jogador raramente passa de 30, e 64 dá folga para o pior caso de um chefe
+// cercado.
+#define GIOCHI_NET_MAX_INIMIGOS 64
 
 // Opaque sound handle (short, fully decoded effect). `0` is invalid/null.
 //
@@ -398,6 +423,61 @@ typedef struct GiochiDirectionalLight {
     // Reserved for ABI-compatible growth. Must be zero.
     uint32_t _reserved[4];
 } GiochiDirectionalLight;
+
+// O input de um jogador, no sentido em que o cliente o envia.
+typedef struct GiochiNetInput {
+    // Tick do cliente, só para correlacionar RTT. Não é o tick da simulação.
+    uint32_t tick;
+    // Direção de movimento, `[-1, 1]`.
+    float mover_x;
+    // Direção de movimento, `[-1, 1]`.
+    float mover_z;
+    // Direção de mira, `[-1, 1]`.
+    float mirar_x;
+    // Direção de mira, `[-1, 1]`.
+    float mirar_z;
+    // Botões pressionados, bitmask do jogo.
+    uint32_t acoes;
+    // Posição X da câmera — o host usa para a área de interesse.
+    float camera_x;
+    // Posição Z da câmera — o host usa para a área de interesse.
+    float camera_z;
+} GiochiNetInput;
+
+// Um inimigo, como o C enxerga.
+typedef struct GiochiNetInimigo {
+    // Identificador estável enquanto o inimigo vive.
+    uint16_t id;
+    // Posição no plano do jogo.
+    float x;
+    // Posição no plano do jogo.
+    float z;
+    // Vida atual.
+    uint16_t hp;
+    // Tipo do inimigo. O significado é do jogo; a engine só transporta.
+    uint8_t tipo;
+    // Fase de chefe (`0` = não é chefe).
+    uint8_t fase_chefe;
+} GiochiNetInimigo;
+
+// O snapshot de um cliente.
+//
+// Ver a nota do módulo sobre `total` contra `escritos`.
+typedef struct GiochiNetSnapshot {
+    // Tick do host que produziu este snapshot. Sempre crescente.
+    //
+    // Use para descartar snapshot velho: se o valor não subiu, é o mesmo quadro.
+    uint32_t tick;
+    // Quantos inimigos a área de interesse do cliente continha.
+    uint32_t total;
+    // Quantos foram copiados para `inimigos`.
+    uint32_t escritos;
+    // Quantos cabem em `inimigos`. Constante, exposta para o chamador não
+    // precisar repetir o número.
+    uint32_t capacidade;
+    // Os inimigos.
+    struct GiochiNetInimigo inimigos[GIOCHI_NET_MAX_INIMIGOS];
+} GiochiNetSnapshot;
 
 // Opaque texture handle. `0` is invalid/null.
 //
@@ -1248,6 +1328,186 @@ int32_t giochi_renderer3d_draw_mesh(GiochiEngine3D *engine,
                                     const struct GiochiCamera3D *camera,
                                     struct GiochiColor3D color);
 
+// Sobe um host escutando na porta dada. `0` escolhe uma porta efêmera — use
+// [`giochi_net_local_port`] para descobrir qual foi.
+//
+// Devolve `0` em caso de falha.
+//
+// # C ABI
+//
+// ```c
+// uint64_t giochi_net_host_create(uint16_t porta);
+// ```
+uint64_t giochi_net_host_create(uint16_t porta);
+
+// Entra numa partida. `endereco` é `"192.168.1.10:47721"` ou `"host:porta"`.
+//
+// Devolve `0` em caso de falha. O handshake é enviado aqui; a conexão fica
+// pronta quando [`giochi_net_player_id`] devolver um valor positivo.
+//
+// # C ABI
+//
+// ```c
+// uint64_t giochi_net_client_join(const char* endereco);
+// ```
+uint64_t giochi_net_client_join(const char *endereco);
+
+// Liberta o nó. Devolve erro se o handle não existir.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_net_destroy(uint64_t handle);
+// ```
+int32_t giochi_net_destroy(uint64_t handle);
+
+// A porta em que o host está escutando, ou o erro negativo.
+//
+// Existe porque `porta = 0` em [`giochi_net_host_create`] delega a escolha ao
+// sistema — sem esta função, o host não teria como dizer aos clientes onde
+// entrar.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_net_local_port(uint64_t handle);
+// ```
+int32_t giochi_net_local_port(uint64_t handle);
+
+// Id do jogador atribuído pelo host, ou `0` se ainda não chegou.
+//
+// `0` também é o valor devolvido para um handle de host — o host não tem id.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_net_player_id(uint64_t handle);
+// ```
+int32_t giochi_net_player_id(uint64_t handle);
+
+// Bombeia a rede uma vez. Barato; chame a cada frame.
+//
+// Para o cliente, guarda o último snapshot e responde ao ping do host. Para o
+// host, recebe os inputs (bombeados por [`giochi_net_poll_input`]).
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_net_pump(uint64_t handle);
+// ```
+int32_t giochi_net_pump(uint64_t handle);
+
+// Lê um input do host.
+//
+// `out` recebe o input; `id` recebe de qual jogador veio (1..8, `0` é o host).
+// Devolve `0` com `*escritos = 0` quando não há nada, e `0` com `*escritos = 1`
+// quando escreveu.
+//
+// Este é o par de `giochi_net_send_input`: sem ele o host não tem como receber
+// nada, e a partida não acontece.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_net_poll_input(uint64_t handle, GiochiNetInput* out,
+//                               uint8_t* id, uint32_t* escritos);
+// ```
+int32_t giochi_net_poll_input(uint64_t handle,
+                              struct GiochiNetInput *out,
+                              uint8_t *id,
+                              uint32_t *escritos);
+
+// Manda o input do jogador. Só faz sentido num cliente.
+//
+// A câmera vai no input (é ela que define a área de interesse no host), então
+// não é preciso chamar [`giochi_net_set_camera_pos`] antes de cada quadro — ela
+// só existe para repor a câmera quando o jogo não a calcula por input.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_net_send_input(uint64_t handle, const GiochiNetInput* input);
+// ```
+int32_t giochi_net_send_input(uint64_t handle, const struct GiochiNetInput *input);
+
+// Repõe a câmera que vai junto com o próximo input. Só cliente.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_net_set_camera_pos(uint64_t handle, float x, float z);
+// ```
+int32_t giochi_net_set_camera_pos(uint64_t handle, float x, float z);
+
+// Define o raio da área de interesse de um cliente, no host.
+//
+// Quem sabe quanto do mundo cabe na tela é o **jogo**, não a engine: zoom, FOV
+// e névoa mudam o raio. Por isso ele é parâmetro, com o valor que o jogo
+// calculou (o relatório sugere `1,5 ×` a meia-diagonal da tela).
+//
+// `raio <= 0` desliga o filtro e manda todos os inimigos.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_net_set_area(uint64_t handle, uint8_t jogador, float raio);
+// ```
+int32_t giochi_net_set_area(uint64_t handle, uint8_t jogador, float raio);
+
+// Publica o mundo do host: filtra por área de interesse e manda um snapshot
+// por cliente.
+//
+// Chamar a 60 Hz é o uso normal; o host decide internamente se já é hora
+// (15 Hz). Devolve `0` mesmo quando não enviou nada.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_net_host_snapshot(uint64_t handle, const GiochiNetInimigo* inimigos,
+//                                  uint32_t quantidade);
+// ```
+int32_t giochi_net_host_snapshot(uint64_t handle,
+                                 const struct GiochiNetInimigo *inimigos,
+                                 uint32_t quantidade);
+
+// Broadcast de estado global (onda, torre, chefe) para todos os clientes.
+//
+// Bytes opacos: a engine transporta, o jogo interpreta.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_net_broadcast(uint64_t handle, const uint8_t* dados, uint32_t tamanho);
+// ```
+int32_t giochi_net_broadcast(uint64_t handle, const uint8_t *dados, uint32_t tamanho);
+
+// Lê o último snapshot recebido pelo cliente.
+//
+// Devolve [`GIOCHI_NET_AGUARDE`] (`1`) quando não há nada novo desde a última
+// leitura, `0` quando escreveu, negativo em caso de erro.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_net_poll_snapshot(uint64_t handle, GiochiNetSnapshot* out);
+// ```
+int32_t giochi_net_poll_snapshot(uint64_t handle, struct GiochiNetSnapshot *out);
+
+// Igual a [`giochi_net_poll_snapshot`], mas copia no máximo `max` inimigos.
+//
+// `max` acima de [`GIOCHI_NET_MAX_INIMIGOS`] é reduzido ao teto — o array da
+// struct não cresce.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_net_poll_snapshot_filtered(uint64_t handle, GiochiNetSnapshot* out,
+//                                           uint32_t max);
+// ```
+int32_t giochi_net_poll_snapshot_filtered(uint64_t handle,
+                                          struct GiochiNetSnapshot *out,
+                                          uint32_t max);
+
 // Creates a texture by loading an image file (PNG, JPEG, BMP, …).
 //
 // Goes through the resource cache: loading the same path twice returns the same
@@ -1447,7 +1707,8 @@ uint32_t giochi_engine_scene_depth(void);
 // if (giochi_abi_version() < 1) { /* built against a newer library */ }
 // ```
 //
-// Part I is 1, part II (3D) added 2, and part III (frame statistics) made it 3.
+// Part I is 1, part II (3D) added 2, part III (frame statistics) made it 3, and
+// part IV (networking) made it 4.
 //
 // # C ABI
 //
