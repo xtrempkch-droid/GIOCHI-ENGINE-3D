@@ -162,8 +162,40 @@ enviada com base num *probe* isolado mais o CI.
 - **O `Out-File -Encoding utf8` do PowerShell 5.1 põe BOM** e isso vazou para
   uma mensagem de commit (`﻿fix: ...`). Use o método do item acima.
 
-### 2.7 Comandos de verificação (o que deve dar verde)
+### 2.7 Rodar a suíte do **Giochi system** nesta máquina
 
+Não é Rust, mas é o outro repositório que você provavelmente vai precisar rodar,
+e ele exige três coisas no PATH — descobrir isso custou três execuções de 10 min:
+
+```powershell
+$nodeDir = "C:\Users\Jussara dias\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin"
+$pyDir   = "C:\Users\Jussara dias\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python"
+$env:PATH = "$nodeDir;$pyDir;C:\Program Files\Git\usr\bin;C:\Program Files\Git\bin;$env:PATH"
+Set-Location "..\Giochi system"
+& "$nodeDir\node.exe" tests/run-all.mjs
+```
+
+- **`node` no PATH** — há testes que fazem `execFileSync("node", ...)` para rodar
+  um script e conferir a saída.
+- **`sh` no PATH** (vem do `usr\bin` do Git) — sem ele: `spawnSync sh ENOENT`.
+- **Python no PATH** — e os testes resolvem `python3` → `python`, porque no
+  Windows o nome costuma ser `python` e o `python3` do PATH é o atalho da
+  Microsoft Store, que responde "Python não foi encontrado".
+
+Medido em 2026-11-11: **539 testes executam, 494 passam, 22 falham**. Antes do
+commit `c541d77` do `Giochi system`, **nenhum** rodava: 16 usos de
+`URL.pathname` derrubavam a suíte no import.
+
+As 22 falhas são de ambiente. A maior família confere bit de execução com
+`statSync(...).mode & 0o111`, que no Windows é sempre 0 — o título do teste diz
+"no índice do Git" e o código lê do sistema de arquivos; no CI Linux os dois
+coincidem.
+
+**Efeito colateral a vigiar:** quando a suíte roda, testes que montam caminho com
+`\` sem querer deixam arquivos de lixo na **raiz do repositório**, com nomes
+deformados (`CUsersJUSSAR~1AppData...uptime`). Se aparecerem, não commite:
+`git status` mostra eles como untracked.
+### 2.8 Comandos de verificação (o que deve dar verde)
 ```powershell
 $cargo = "$env:USERPROFILE\.cargo\bin\cargo.exe"
 $env:PATH = "$env:USERPROFILE\.cargo\bin;C:\Windows\system32;C:\Windows"
