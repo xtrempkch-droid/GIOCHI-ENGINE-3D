@@ -121,3 +121,143 @@ Retorno `int32_t`: 0 = sucesso, negativo = erro.
 
 - Touch (`SDL_Finger`) — extensão separada, prioridade baixa (ver issue do OS).
 - NAT traversal / relay para partidas fora da LAN — LAN only por ora.
+
+
+
+
+
+
+Relatório de Melhorias — Sistema de Texturas 3D da GIOCHI-ENGINE-3D
+
+1. Resumo
+
+A GIOCHI-ENGINE-3D possui suporte parcial a texturas 3D no nível do pipeline gráfico, mas falta uma API pública de alto nível, documentação e exemplo de uso. O código já contém shaders específicos para texturas (textured.vert e textured.frag), e a estrutura Vertex já inclui coordenadas UV (pub uv: [f32; 2]). Porém, não há um TextureHandle 3D exportado, nem funções documentadas para criação, carregamento, upload e vinculação de texturas no contexto 3D.
+
+Isso torna o uso confuso para quem tenta criar um jogo 3D, especialmente porque a documentação principal (C_ABI_CONTRACT.md) foca na API 2D, que já possui GiochiTexture e funções como giochi_texture_create, enquanto a parte 3D não oferece equivalente claro.
+
+2. Estado atual observado
+
+O que já existe
+
+· Shaders dedicados a texturas:
+  · textured.vert
+  · textured.frag
+· O textured.frag declara uniform sampler2D u_texture; e usa texture2D(u_texture, v_uv).
+· O textured.vert recebe o atributo a_uv e o repassa ao fragment shader.
+· A estrutura Vertex contém pub uv: [f32; 2].
+· O renderer menciona shaders “flat and textured”.
+
+O que falta ou está pouco claro
+
+· Não há uma API pública de alto nível para texturas 3D, como Texture3D, TextureHandle ou equivalente.
+· Não há funções documentadas para:
+  · criar textura;
+  · carregar imagem;
+  · fazer upload para a GPU;
+  · configurar filtros, wrap modes e mipmaps;
+  · vincular textura a uma unidade;
+  · passar o sampler para o shader.
+· O exemplo cube_demo não utiliza texturas.
+· A documentação não explica como usar os shaders textured.vert/textured.frag na prática.
+· Não está claro se o usuário deve usar glow/OpenGL diretamente ou se a engine pretende expor uma abstração própria.
+· A ABI C documentada parece priorizar a parte 2D; não há contrato equivalente para texturas 3D.
+
+3. Problemas para o usuário da engine
+
+1. Ambiguidade de responsabilidade: o usuário não sabe se deve criar texturas manualmente via OpenGL ou se a engine oferece suporte.
+2. Falta de exemplo funcional: não há demonstração de uma malha 3D texturizada.
+3. API inconsistente: a parte 2D tem GiochiTexture; a parte 3D não tem equivalente claro.
+4. Documentação insuficiente: os shaders existem, mas não há guia de integração.
+5. Risco de implementações divergentes: sem API oficial, cada usuário pode implementar texturas de forma diferente, gerando incompatibilidades.
+
+4. Solicitações à equipe mantenedora
+
+Solicito que a equipe avalie e implemente/atualize os seguintes pontos:
+
+4.1. Expor uma API pública de texturas 3D
+
+Criar uma abstração oficial, por exemplo:
+
+```rust
+pub struct Texture3D { /* handle interno */ }
+
+impl Texture3D {
+    pub fn from_file(path: &str) -> Result<Self, TextureError>;
+    pub fn from_bytes(data: &[u8], width: u32, height: u32) -> Result<Self, TextureError>;
+    pub fn bind(&self, unit: u32);
+    pub fn set_filtering(&mut self, min: Filter, mag: Filter);
+    pub fn set_wrap(&mut self, wrap_s: Wrap, wrap_t: Wrap);
+    pub fn set_mipmaps(&mut self, enabled: bool);
+}
+```
+
+Ou, se a intenção for manter a API próxima do OpenGL, documentar oficialmente esse caminho com exemplos.
+
+4.2. Integrar texturas ao sistema de materiais/renderização 3D
+
+· Permitir associar uma textura a um material.
+· Definir como o sampler é passado ao shader textured.
+· Documentar a ordem esperada de bindings e uniforms.
+· Garantir compatibilidade com o renderer existente.
+
+4.3. Documentar o fluxo completo
+
+Adicionar uma seção na documentação explicando:
+
+1. Como carregar uma imagem.
+2. Como criar a textura na GPU.
+3. Como configurar filtros e wrap modes.
+4. Como vincular a textura ao shader.
+5. Como definir UVs nos vértices.
+6. Como renderizar uma malha texturizada.
+
+4.4. Criar exemplo funcional
+
+Adicionar um exemplo, por exemplo textured_cube_demo, contendo:
+
+· Um cubo com UVs;
+· Uma textura de teste;
+· Uso dos shaders textured.vert e textured.frag;
+· Código comentado explicando cada etapa.
+
+4.5. Melhorar tratamento de erros
+
+Definir erros claros para:
+
+· arquivo de imagem inválido;
+· formato não suportado;
+· falha no upload para GPU;
+· textura não vinculada;
+· sampler não encontrado no shader.
+
+4.6. Adicionar testes
+
+Sugestões de testes:
+
+· Criação de textura a partir de bytes;
+· Upload e bind de textura;
+· Renderização de um quad texturizado;
+· Verificação de que o shader recebe o sampler correto;
+· Teste de fallback quando a textura não é encontrada.
+
+5. Critérios de aceitação
+
+Considerar a melhoria concluída quando:
+
+· Existir uma API pública documentada para texturas 3D;
+· Houver pelo menos um exemplo funcional de malha 3D texturizada;
+· A documentação explicar o fluxo completo de uso;
+· O cube_demo ou um novo demo demonstrar texturas;
+· A ABI C, se aplicável, tiver contrato equivalente para texturas 3D;
+· Houver testes cobrindo criação, bind e renderização com textura;
+· Erros comuns forem tratados e documentados.
+
+6. Prioridade sugerida
+
+Média/Alta, pois texturas são essenciais para jogos 3D e a ausência de uma API clara gera confusão e retrabalho para usuários da engine.
+
+7. Observação final
+
+O suporte parcial já existente nos shaders e na estrutura Vertex indica que a base técnica está presente. O principal gap é de API pública, documentação e exemplo de uso. Uma implementação guiada por esses pontos deve resolver a confusão relatada sem exigir grandes mudanças na arquitetura atual.
+
+---
