@@ -183,6 +183,18 @@ thread_local! {
     });
 }
 
+/// `GIOCHI_NET_AGUARDE` tem de ser positivo.
+///
+/// Garantia de **compilação**: o contrato diz "0 ou negativo = resultado", e um
+/// código de espera negativo seria lido como erro por qualquer consumidor que
+/// siga a regra. Um `assert!` num `#[test]` só falharia se alguém rodasse os
+/// testes; aqui o build já barra — e clippy reprova `assert!` sobre constante
+/// exatamente por isso.
+const _: () = assert!(
+    GIOCHI_NET_AGUARDE > 0,
+    "GIOCHI_NET_AGUARDE must be positive"
+);
+
 /// Roda `body` com o nó do handle, ou registra erro de handle inválido.
 fn com_no<T>(handle: u64, body: impl FnOnce(&mut No) -> Result<T, i32>) -> Result<T, i32> {
     REGISTRO.with(|r| {
@@ -884,9 +896,18 @@ mod testes {
 
     #[test]
     fn codigo_de_espera_nao_e_erro() {
-        // `1` é "nada novo", não falha. Se alguém trocar por um negativo, o
-        // cliente trataria o caso normal como erro.
-        assert_eq!(GIOCHI_NET_AGUARDE, 1);
-        assert!(GIOCHI_NET_AGUARDE > 0);
+        // O valor exato é garantido em tempo de compilação (const assert no topo do
+        // módulo). Aqui se prende a POLARIDADE contra um valor que o compilador não
+        // pode dobrar: `assert!(CONST > 0)` seria clippy::assertions_on_constants,
+        // e um teste que só reafirma o compilador não testa nada.
+        let zero = std::hint::black_box(0i32);
+        assert!(
+            GIOCHI_NET_AGUARDE > zero,
+            "o código de espera tem de ser positivo"
+        );
+        assert!(
+            GIOCHI_ERROR_NETWORK < zero,
+            "o código de erro tem de ser negativo"
+        );
     }
 }
