@@ -14,4 +14,4 @@ pub use gpu_mesh::{Mesh, FORCE_NO_VAO_ENV};
 pub use obj_loader::load_obj;
 pub use primitives::{cube, plane, sphere};
 pub use static_batch::{supports_u32_indices, StaticBatch, StaticBatchBuilder};
-pub use vertex::Vertex;
+pub use vertex::{needs_normal_repair, prepare_normals, Vertex};

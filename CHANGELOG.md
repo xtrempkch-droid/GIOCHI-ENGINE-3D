@@ -20,10 +20,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   runtime. The new function takes a `GiochiVertex3D` array (40 bytes, public layout) plus
   `u32` triangle indices, and rejects out-of-range indices and non-finite positions with
   a message instead of a GPU out-of-bounds read or a black frame.
-- **OBJ loader hardening.** A `vn` that is `NaN`/infinite is now treated as missing and
-  replaced by derived face normals; before, it reached the shader and shaded the model
-  black with no error. A non-finite vertex position is refused with the file name and
-  the vertex index instead of producing an empty frame.
+- **Zero or non-finite normals no longer reach the shader.** `normalize(vec3(0.0))` is
+  undefined in GLSL ES 1.00: on the AMD driver measured here it renders ambient-only
+  grey, and on others it produces `NaN` and a black surface — with no GL error either
+  way. `create_mesh`, `giochi_mesh_create` and the OBJ loader now run one shared
+  `mesh::prepare_normals`: a zero/non-finite normal is derived from the triangles and a
+  non-unit one is renormalised. `obj_loader` lost its private copy of that logic.
+- **OBJ loader hardening.** A non-finite vertex position is refused with the file name
+  and the vertex index instead of producing an empty frame; a `NaN` normal is derived
+  rather than passed through.
+- **`Texture3D::from_file` no longer panics on a non-UTF-8 path.** `sdl2`'s
+  `LoadSurface::from_file` does `to_str().unwrap()`, so the check happens before the call
+  and returns `Error3D::InvalidArgument`. The 3D crate also opens SDL_image itself
+  (probing PNG/JPEG) instead of relying on the 2D engine having done it.
 - **Textures on 3D meshes.** `RenderContext3D::create_texture` (file) and
   `create_texture_from_rgba` (procedural) upload a GL texture, and
   `draw_mesh_textured` binds it to `u_texture` (unit 0) with a tint. NPOT images get

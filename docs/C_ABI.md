@@ -405,6 +405,11 @@ zero. Indices are `u32` triangles; every index must be below `vertex_count`, and
 position must be finite — both are rejected with a message instead of producing a GPU
 out-of-bounds read or a black frame.
 
+A normal of `(0, 0, 0)` means "derive it from the triangles", not "flat shading":
+`normalize(vec3(0.0))` is undefined in GLSL ES 1.00, so relying on it gives a different
+result per driver. The engine derives the face normal, exactly as it does for an OBJ
+without `vn`, and renormalises a normal that is not unit length.
+
 ### 9.7 Textures on 3D objects
 
 Part II has its own texture type. `giochi_texture_create` returns a 2D

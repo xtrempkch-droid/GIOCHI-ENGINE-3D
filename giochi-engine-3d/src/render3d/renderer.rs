@@ -450,11 +450,28 @@ impl RenderContext3D {
 
     /// Uploads a mesh and returns its handle.
     ///
+    /// Normals are made usable before upload: a non-unit one is renormalised and a zero
+    /// or non-finite one is derived from the triangles. That is not cosmetic —
+    /// `normalize(vec3(0.0))` is undefined in GLSL ES 1.00, so a zero normal renders as
+    /// ambient-only grey on one driver and `NaN`/black on another, with no GL error.
+    ///
     /// # Errors
     ///
     /// [`Error3D::InvalidArgument`] for an empty mesh or an out-of-range index;
     /// [`Error3D::GlObject`] when the driver refuses a buffer.
     pub fn create_mesh(&mut self, vertices: &[Vertex], indices: &[u32]) -> Result3D<MeshHandle> {
+        // Only copy when there is something to fix, so the primitives and the OBJ loader
+        // (both already normalised) keep uploading the caller's buffer directly.
+        let repaired;
+        let vertices = if crate::mesh::needs_normal_repair(vertices) {
+            let mut copy = vertices.to_vec();
+            crate::mesh::prepare_normals(&mut copy, indices);
+            repaired = copy;
+            repaired.as_slice()
+        } else {
+            vertices
+        };
+
         let mesh = Mesh::from_vertices_indices(self.gl.glow(), vertices, indices)?;
         Ok(self.meshes.insert(mesh))
     }

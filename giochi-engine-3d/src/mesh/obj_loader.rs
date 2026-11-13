@@ -11,7 +11,7 @@
 
 use std::path::Path;
 
-use super::Vertex;
+use super::{prepare_normals, Vertex};
 use crate::error::{Error3D, Result3D};
 
 /// Loads every mesh in `path` and concatenates them into one vertex/index pair.
@@ -66,6 +66,12 @@ pub fn load_obj(path: &Path) -> Result3D<(Vec<Vertex>, Vec<u32>)> {
         )));
     }
 
+    // One pass over the merged buffer instead of per object: it normalises the `vn` the
+    // file carried and derives the ones it did not. Doing it after the merge keeps the
+    // index rebasing above simple, and a vertex only ever belongs to triangles of its own
+    // object, so the result is the same.
+    prepare_normals(&mut vertices, &indices);
+
     Ok((vertices, indices))
 }
 
@@ -78,14 +84,11 @@ fn append_mesh(
     let base = vertices.len() as u32;
     let count = mesh.positions.len() / 3;
 
-    // A `vn` that is `NaN` or infinite is worse than a missing one: `Vertex::normalized`
-    // deliberately leaves a non-finite normal alone, so it would reach the shader and
-    // shade the whole model black with no error. Treat it as absent and derive the face
-    // normals instead.
-    let has_normals = mesh.normals.len() >= count * 3
-        && mesh.normals[..count * 3]
-            .iter()
-            .all(|value| value.is_finite());
+    // `prepare_normals` runs after the merge and derives whatever is missing or unusable,
+    // so a `vn` that is absent, `NaN` or zero becomes a face normal there. A non-finite
+    // *position* cannot be recovered from, however: it cannot be projected, bounded or
+    // used to derive a normal, so the file is refused with enough detail to find it.
+    let has_normals = mesh.normals.len() >= count * 3;
     let has_uvs = mesh.texcoords.len() >= count * 2;
 
     for i in 0..count {
@@ -95,9 +98,6 @@ fn append_mesh(
             mesh.positions[i * 3 + 2],
         ];
 
-        // A non-finite position cannot be drawn, projected or put in a bounding box, and
-        // it propagates into every derived normal. Refusing the file names the problem
-        // instead of showing an empty frame.
         if !position.iter().all(|value| value.is_finite()) {
             return Err(Error3D::Asset(format!(
                 "OBJ file '{}' has a non-finite vertex position at index {i}",
@@ -112,6 +112,7 @@ fn append_mesh(
                 mesh.normals[i * 3 + 2],
             ]
         } else {
+            // Replaced by a derived face normal in `prepare_normals`.
             [0.0, 0.0, 0.0]
         };
 
@@ -121,64 +122,12 @@ fn append_mesh(
             [0.0, 0.0]
         };
 
-        vertices.push(Vertex::new(position, normal, uv).normalized());
+        vertices.push(Vertex::new(position, normal, uv));
     }
 
-    let first_new_index = indices.len();
     indices.extend(mesh.indices.iter().map(|index| base + index));
 
-    if !has_normals {
-        // With no normals in the file, derive them per triangle. This is the difference
-        // between a lit model and a black silhouette.
-        //
-        // Only the indices just appended are walked: passing the whole list would make a
-        // later object's triangles subtract a `base` larger than their own indices, which
-        // underflows `usize`.
-        compute_face_normals(vertices, &indices[first_new_index..], base, count);
-    }
-
     Ok(())
-}
-
-/// Fills in normals by averaging the faces that share each vertex.
-fn compute_face_normals(vertices: &mut [Vertex], indices: &[u32], base: u32, count: usize) {
-    let mut accumulated = vec![[0.0_f32; 3]; count];
-
-    for triangle in indices.chunks_exact(3) {
-        let [a, b, c] = [
-            triangle[0] as usize - base as usize,
-            triangle[1] as usize - base as usize,
-            triangle[2] as usize - base as usize,
-        ];
-
-        let p0 = vertices[base as usize + a].position;
-        let p1 = vertices[base as usize + b].position;
-        let p2 = vertices[base as usize + c].position;
-
-        let u = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
-        let v = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
-        let normal = [
-            u[1] * v[2] - u[2] * v[1],
-            u[2] * v[0] - u[0] * v[2],
-            u[0] * v[1] - u[1] * v[0],
-        ];
-
-        for corner in [a, b, c] {
-            if corner < count {
-                accumulated[corner][0] += normal[0];
-                accumulated[corner][1] += normal[1];
-                accumulated[corner][2] += normal[2];
-            }
-        }
-    }
-
-    for (i, normal) in accumulated.into_iter().enumerate() {
-        let vertex = &mut vertices[base as usize + i];
-        if vertex.normal == [0.0, 0.0, 0.0] {
-            vertex.normal = normal;
-        }
-        *vertex = vertex.normalized();
-    }
 }
 
 #[cfg(test)]

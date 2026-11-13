@@ -401,9 +401,13 @@ typedef struct GiochiTransform3D {
 // reserved): that type is internal and may gain a field, and this one may not.
 //
 // `uv` is `0.0..=1.0`; a mesh built without UVs puts `(0, 0)` and samples one texel if
-// it is drawn textured. A non-finite normal is zeroed, which shades the face with the
-// ambient term instead of `NaN`; a non-finite position is rejected, because it cannot be
-// projected.
+// it is drawn textured.
+//
+// A normal of `(0, 0, 0)` (or a non-finite one) means "derive it from the triangles",
+// the same rule the OBJ loader applies to a file without `vn`. Do **not** rely on a zero
+// normal meaning "flat": `normalize(vec3(0.0))` is undefined in GLSL ES 1.00, so the
+// surface would be grey on one driver and black on another. A non-finite position cannot
+// be projected or used to derive a normal, so it is rejected.
 //
 // # C ABI
 //

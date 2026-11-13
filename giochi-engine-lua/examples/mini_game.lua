@@ -180,9 +180,16 @@ end
 
 local function update(game, time, input, audio, beep)
     if game.over then
-        -- Any key or the Escape key restarts; the autopilot restarts on its own so a
-        -- headless run always ends with a reported score.
-        if options.auto or input:key_pressed(giochi.keys.space) then
+        -- The autopilot restarts on its own only when the game is interactive. A
+        -- headless run with `--frames` must STOP at game over: the engine can run two
+        -- fixed steps in one frame when it catches up, and if the second step restarted
+        -- the game the `quit` below would never see `over`, the run would continue to the
+        -- frame limit and report the fresh game's three lives instead of the defeat.
+        if options.auto and not options.frames then
+            return new_game()
+        end
+        -- Any key (space) or Escape restarts.
+        if input:key_pressed(giochi.keys.space) then
             return new_game()
         end
         if input:key_pressed(giochi.keys.escape) then

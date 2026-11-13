@@ -24,6 +24,41 @@ use sdl2::surface::Surface;
 
 use crate::error::{Error3D, Result3D};
 
+/// Opens SDL_image with the decoders this build actually has.
+///
+/// `IMG_Init` is idempotent, so the 2D engine opening it too is harmless. Probing PNG and
+/// JPEG separately is what turns "every texture is black on this console" into a warning
+/// at startup: a Buildroot image may ship SDL_image without libpng, and `IMG_Load` then
+/// fails per file with a message that names the format, not the missing library.
+fn ensure_image_subsystem() {
+    use std::sync::OnceLock;
+
+    static INIT: OnceLock<()> = OnceLock::new();
+    INIT.get_or_init(|| {
+        // `std::mem::forget` keeps the context alive for the process: dropping it would
+        // run `IMG_Quit`, and the engine has no shutdown hook that could re-open it.
+        match sdl2::image::init(sdl2::image::InitFlag::empty()) {
+            Ok(context) => std::mem::forget(context),
+            Err(err) => {
+                log::warn!("SDL_image is unavailable; 3D textures from files will fail: {err}");
+                return;
+            }
+        }
+
+        for (flag, name) in [
+            (sdl2::image::InitFlag::PNG, "PNG"),
+            (sdl2::image::InitFlag::JPG, "JPEG"),
+        ] {
+            match sdl2::image::init(flag) {
+                Ok(context) => std::mem::forget(context),
+                Err(_) => log::warn!(
+                    "SDL_image was built without {name} support; {name} textures will not load"
+                ),
+            }
+        }
+    });
+}
+
 /// A GL texture owned by a [`RenderContext3D`](super::RenderContext3D).
 ///
 /// Delete it through the renderer, never directly: the texture belongs to the GL
@@ -52,6 +87,16 @@ impl Texture3D {
         if path.as_os_str().is_empty() {
             return Err(Error3D::InvalidArgument("texture path is empty".to_owned()));
         }
+        // `sdl2::image::LoadSurface::from_file` does `to_str().unwrap()`, so a non-UTF-8
+        // path would panic inside the dependency instead of returning the error this
+        // signature promises.
+        if path.to_str().is_none() {
+            return Err(Error3D::InvalidArgument(format!(
+                "texture path is not valid UTF-8: {}",
+                path.display()
+            )));
+        }
+        ensure_image_subsystem();
 
         let surface = Surface::from_file(path).map_err(|err| {
             Error3D::Asset(format!(

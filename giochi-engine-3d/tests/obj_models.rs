@@ -20,7 +20,7 @@ use giochi_engine::platform::sdl::Platform;
 use giochi_engine::platform::window::{Window, WindowConfig};
 use giochi_engine_3d::context::{self, GlesVersion};
 use giochi_engine_3d::math3d::{Camera3D, Color3D, Transform3D, Vec3};
-use giochi_engine_3d::mesh::load_obj;
+use giochi_engine_3d::mesh::{load_obj, Vertex};
 use giochi_engine_3d::shader::BuiltinShader;
 use giochi_engine_3d::RenderContext3D;
 
@@ -244,6 +244,82 @@ fn an_obj_model_draws_textured_with_its_own_geometry() {
 
     assert!(render.destroy_mesh(mesh));
     assert!(render.destroy_texture(texture));
+    assert!(render.destroy_shader(shader));
+}
+
+#[test]
+fn a_mesh_with_zero_normals_is_lit_instead_of_undefined() {
+    // `normalize(vec3(0.0))` is undefined in GLSL ES 1.00. On the AMD driver measured here
+    // it returns zero, which lands on the ambient-only term (89/255); another driver can
+    // produce NaN and a black surface. Neither is what the caller asked for, so
+    // `create_mesh` derives the normal from the triangles.
+    //
+    // The flat shader hardcodes its light at normalize(0.4, 0.9, 0.3), so the quad is
+    // built facing exactly that direction: with a derived normal it is fully lit
+    // (~255), while an ambient-only surface would be 89. That gap is what makes this
+    // test able to tell the two apart — a plain grey quad would pass either way.
+    let Some((_guard, _platform, window, mut render)) = headless() else {
+        eprintln!("skipped: no OpenGL ES driver available");
+        return;
+    };
+
+    let n = normalize([0.4, 0.9, 0.3]);
+    let tangent = normalize(cross(n, [0.0, 0.0, 1.0]));
+    let bitangent = cross(n, tangent);
+
+    let corner = |scale: f32, ti: f32, bi: f32| {
+        [
+            (tangent[0] * ti + bitangent[0] * bi) * scale,
+            (tangent[1] * ti + bitangent[1] * bi) * scale,
+            (tangent[2] * ti + bitangent[2] * bi) * scale,
+        ]
+    };
+
+    // Wound so `cross(p1 - p0, p2 - p0)` points along `n`; the derived normal then faces
+    // the hardcoded light.
+    let vertices = [
+        Vertex::new(corner(1.0, -1.0, -1.0), [0.0; 3], [0.0, 1.0]),
+        Vertex::new(corner(1.0, 1.0, -1.0), [0.0; 3], [1.0, 1.0]),
+        Vertex::new(corner(1.0, 1.0, 1.0), [0.0; 3], [1.0, 0.0]),
+        Vertex::new(corner(1.0, -1.0, 1.0), [0.0; 3], [0.0, 0.0]),
+    ];
+    let indices = [0u32, 1, 2, 0, 2, 3];
+
+    let mesh = render.create_mesh(&vertices, &indices).expect("mesh");
+    let shader = render
+        .create_builtin_shader(BuiltinShader::Flat)
+        .expect("flat shader");
+    let camera =
+        Camera3D::from_parts(Vec3::new(0.0, 0.0, 3.0), Vec3::ZERO, Vec3::UP).with_aspect(1.0);
+
+    render.set_clear_color(Color3D::BLACK);
+    render.begin_frame(&window);
+    render
+        .draw_mesh_colored(
+            mesh,
+            shader,
+            &Transform3D::IDENTITY,
+            &camera,
+            Color3D::WHITE,
+        )
+        .expect("draw");
+
+    let pixels = render.read_pixels(SIZE, SIZE).expect("read back");
+    let centre = ((SIZE / 2) * SIZE + SIZE / 2) as usize * 4;
+    let [r, g, b, a] = [
+        pixels[centre],
+        pixels[centre + 1],
+        pixels[centre + 2],
+        pixels[centre + 3],
+    ];
+    assert_eq!(a, 255, "the quad must be opaque at the centre");
+    assert!(
+        r > 200,
+        "a derived normal facing the light must be near-white, got ({r}, {g}, {b}); \
+         ~89 means the zero normal reached the shader as a zero vector"
+    );
+
+    assert!(render.destroy_mesh(mesh));
     assert!(render.destroy_shader(shader));
 }
 

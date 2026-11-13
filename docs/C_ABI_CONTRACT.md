@@ -770,7 +770,7 @@ typedef uint64_t GiochiGlTextureHandle; /* 0 invalid */
 
 typedef struct GiochiVertex3D {
     float    position[3];   /* model space */
-    float    normal[3];     /* normalised on upload; (0,0,0) = flat/ambient only */
+    float    normal[3];     /* normalised on upload; (0,0,0) = derived from triangles */
     float    uv[2];         /* 0.0..=1.0; (0,0) if the mesh has none */
     uint32_t _reserved[2];
 } GiochiVertex3D;           /* size 40, align 4 */
@@ -894,8 +894,13 @@ Rules, all enforced with `GIOCHI_ERROR_INVALID_ARGUMENT`:
 * `index_count` a multiple of three (whole triangles only);
 * every index below `vertex_count` — an out-of-range index is an out-of-bounds GPU read
   that renders as a flickering surface with no GL error;
-* every `position` finite. A `NaN`/infinite `normal` is zeroed instead of rejected: it
-  shades the face with the ambient term rather than turning it `NaN`.
+* every `position` finite. A `NaN`/infinite `normal` is treated like `(0, 0, 0)`.
+
+A zero normal is **not** "flat shading": `normalize(vec3(0.0))` is undefined in GLSL ES
+1.00, so the surface is grey on one driver and black on another, with no GL error. The
+engine derives the face normal from the triangles instead — the same rule the OBJ loader
+applies to a file with no `vn` — and renormalises whatever unit-length normal the caller
+passed.
 
 ### 10.7 Why `draw_mesh` takes a colour
 

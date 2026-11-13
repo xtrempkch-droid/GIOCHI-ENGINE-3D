@@ -377,7 +377,7 @@ to ~4 KB/s.
 | `mdns` | `Anunciante` / `Descoberta` for finding hosts on the LAN | handhelds, where typing an IP is not an option |
 
 ```bash
-cargo test -p giochi-net                    # 38 tests, zero dependencies
+cargo test -p giochi-net                    # 39 tests, zero dependencies
 cargo test -p giochi-net --all-features     # + laminar and mdns
 ```
 
