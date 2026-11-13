@@ -51,8 +51,27 @@ Console devolvido ao launcher depois de cada execução (`DRM master: giochi-lau
    respeitam um `SDL_VIDEODRIVER` já definido (`tests/common::set_headless_driver`), então
    a mesma suíte pode rodar num console com `SDL_VIDEODRIVER=kmsdrm`.
 
-A descoberta mDNS continua medida só nesta máquina de desenvolvimento; o multicast numa
-LAN real é o item que falta.
+### Descoberta mDNS medida entre duas máquinas
+
+Testada nos dois sentidos entre este PC e o R35S pelo cabo USB-Ethernet:
+
+```
+console anuncia  -> PC descobre:     found 10.55.0.2:47721
+PC anuncia (--ip 10.55.0.1) -> console descobre: found 10.55.0.1:47800
+```
+
+A primeira tentativa **falhou no console e funcionava no PC**: `ip_anunciavel()` usava o
+truque do `connect()` UDP, que devolve `ENETUNREACH` quando não há rota default — e o
+aparelho não tem (`ip route` só mostra `10.55.0.0/24 dev usb0`). Corrigido com um segundo
+caminho que enumera as interfaces (`if-addrs`, atrás da feature `mdns`; o build padrão
+continua zero-dependência). Dois testes fixam: `interface_sem_rota_default_e_utilizavel` e
+`link_local_v6_reconhece_fe80`.
+
+O que a **imagem** precisa fornecer — com o que já entrega e o que falta — está em
+[docs/REQUISITOS-IMAGEM.md](docs/REQUISITOS-IMAGEM.md). O item mais sério não é da engine:
+o `udhcpd` anuncia `router 10.55.0.2` e `dns 10.55.0.2`, mas o aparelho não encaminha
+(`ip_forward=0`), não tem NAT e não roda DNS — então um PC cujo único adaptador seja o
+cabo perde a internet e o culpado parece ser o console.
 
 ## Fase 18 — Flags ARM64 + CI de performance + C ABI v3
 Fases 15–18 concluídas (performance, batching, instancing/upscaling, C ABI v3).

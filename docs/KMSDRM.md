@@ -322,6 +322,14 @@ scripts/hardware-check.sh --host root@10.55.0.2 --sysroot /tmp/r35s-sysroot
 | SDL2 | 2.28.5 — **KMSDRM only**, no `dummy` and no `offscreen` video driver |
 | glibc | 2.38 |
 | SDL2_image / mixer / ttf | 2.8.2 / 2.6.3 / 2.22.0 |
+| Input | `r36s_Gamepad` on `/dev/input/event2`; SDL sees it as a **mapped controller**, 4 axes / 17 buttons, with no `libudev` on the image |
+| Audio | `rk817_int`, opens at 48 kHz stereo (`SDL_OpenAudioDevice` succeeded) |
+| Network | `usb0` at 10.55.0.2/24, **no default route**; multicast works, so mDNS works |
+| Thermal | `soc-thermal` 70–73 °C and `gpu-thermal` 69–71 °C at idle, against a passive trip point of 70 °C |
+| Tools | bash, `timeout`, `fuser`, `nc`, `tar`; **no** `ldd`, `python3`, `socat` |
+
+The full list of what the image must provide — what already exists, what is missing,
+and the command that verifies each line — is [REQUISITOS-IMAGEM.md](REQUISITOS-IMAGEM.md).
 
 Two consequences worth knowing before writing a test for this class of device:
 
@@ -343,8 +351,11 @@ launcher and confirms the console came back. Use `--skip-build` to reuse an exis
 `target/aarch64-unknown-linux-gnu/release`, and `--skip-c-smoke` when no
 `aarch64-linux-gnu-gcc` is available.
 
-Every remote snippet sticks to busybox `sh`/`awk`/`ps`/`readlink`: the target image
-has no bash, no `python3`, no `timeout` and no `fuser`.
+Every remote snippet sticks to busybox `sh`/`awk`/`ps`/`readlink`, even though this
+image has `/bin/bash`, `timeout` and `fuser`: the restriction costs nothing and keeps
+the script runnable on an image built without them. What is genuinely absent is
+`python3`, `ldd` and `socat` — the first two are listed in
+[REQUISITOS-IMAGEM.md](REQUISITOS-IMAGEM.md) as worth adding.
 
 ### 8.7 The BMP fallback is not a theory
 

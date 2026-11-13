@@ -657,6 +657,7 @@ other the way they do: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | [docs/C_ABI_CONTRACT.md](docs/C_ABI_CONTRACT.md) | Authoritative C ABI: types, sizes, error codes, functions |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Architecture decision records |
 | [docs/KMSDRM.md](docs/KMSDRM.md) | Bare-console video: permissions, failures, runtime libs |
+| [docs/REQUISITOS-IMAGEM.md](docs/REQUISITOS-IMAGEM.md) | What the device image must provide, measured, and what it is missing |
 | [docs/CROSS_COMPILE.md](docs/CROSS_COMPILE.md) | ARM64 cross toolchain |
 | [PROGRESS.md](PROGRESS.md) | Phase status and validated gates |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |

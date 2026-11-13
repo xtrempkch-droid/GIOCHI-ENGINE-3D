@@ -46,6 +46,14 @@ as well as on x86_64; see PROGRESS.md for the per-check results.
   implemented, so the `textured` shader had no way to receive a texture.
   `cube_demo --texture <image>` demonstrates it, and `tests/textures_3d.rs` proves both
   halves of a two-colour texture reach the framebuffer.
+- **`mdns_smoke` example: discovery across two machines.** Announces with
+  `Anunciante` on one side and browses with `Descoberta` on the other, with `--ip` to pin
+  the interface when the host has several. It exists because one-machine discovery proves
+  the API and not the network: mDNS sends to a multicast group **on a specific interface**,
+  and a socket without `IP_MULTICAST_IF` leaves by the default route and is seen by nobody.
+  Measured both directions between a PC and an R35S over USB-Ethernet.
+- **`docs/REQUISITOS-IMAGEM.md`**: what the device image must provide, measured, with the
+  command that verifies each line — including the items it does **not** provide.
 - **`loopback_smoke` example: the network, end to end, on the target.** A real host and a
   real client on one machine exercise handshake, input with the camera, AOI filtering and
   opaque global state, and exit non-zero on the first failure so it can gate a device run.
@@ -71,6 +79,14 @@ as well as on x86_64; see PROGRESS.md for the per-check results.
 
 ### Fixed
 
+- **mDNS announcement failed on any device without a default route.** `ip_anunciavel()`
+  discovered the outbound address by `connect()`ing a UDP socket to a documentation
+  address, which the kernel answers with `ENETUNREACH` when there is no default route —
+  exactly the console tethered to a PC, and any isolated LAN. It worked on every
+  developer machine and failed on the R35S. It now falls back to enumerating interfaces
+  (`if-addrs`, behind the existing `mdns` feature, so the default build keeps zero
+  dependencies) and picks the first non-loopback, non-link-local address. Loopback is
+  still refused: an announcement there exists in the register and nobody can connect.
 - **The C client could not read the host's global state.** `giochi_net_broadcast` had
   no client-side counterpart, so the wave/tower/boss bytes were discarded by
   `giochi_net_pump`; `giochi_net_poll_global` now delivers them.

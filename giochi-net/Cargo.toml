@@ -39,8 +39,25 @@ laminar = { version = "0.5", optional = true }
 # na LAN ve. A biblioteca resolve isso; escrever a mao custaria centenas de
 # linhas de socket option e ficaria pior.
 mdns-sd = { version = "0.13", optional = true }
+# Enumerar interfaces, para o caso em que nao existe rota default. Ver `descobrir.rs`:
+# o truque do `connect` UDP escolhe a interface certa quando ha rota default, e falha
+# com ENETUNREACH quando nao ha -- que e o caso de um console ligado por USB-Ethernet
+# ao PC, sem gateway. O `mdns-sd` ja puxa este crate, entao nao e dependencia nova no
+# grafo; declarar aqui e o que permite chama-lo direto.
+if-addrs = { version = "0.13", optional = true }
 
 [dev-dependencies]
+
+[[example]]
+name = "loopback_smoke"
+path = "examples/loopback_smoke.rs"
+
+# Built only with `mdns`, which is what pulls `mdns-sd` in. Without this line cargo would
+# try to compile it in a default build and fail on the missing crate.
+[[example]]
+name = "mdns_smoke"
+path = "examples/mdns_smoke.rs"
+required-features = ["mdns"]
 
 [features]
 default = []
@@ -50,4 +67,4 @@ laminar = ["dep:laminar"]
 # Descoberta de hosts na LAN por mDNS. Puxa `if-addrs` e `socket2`, portanto NAO
 # e compativel com o requisito de "zero dependencia" do alvo aarch64 -- fica
 # desligada por padrao, e o CI cross-verifica esta feature a parte.
-mdns = ["dep:mdns-sd"]
+mdns = ["dep:mdns-sd", "dep:if-addrs"]

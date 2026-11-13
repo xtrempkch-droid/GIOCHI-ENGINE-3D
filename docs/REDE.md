@@ -124,8 +124,24 @@ no aparelho de outra pessoa.
 funciona. O registro existe, o *browse* encontra, e **nenhum outro aparelho
 consegue conectar**. Medido nesta máquina: com `127.0.0.1` a descoberta deu
 "não achou" em 15 s; com o IP da interface (`192.168.1.107`), resolveu em menos
-de 2 s. `ip_anunciavel()` descobre o IP certo com o truque do `connect` UDP e
-**recusa loopback** — a recusa é a correção.
+de 2 s. `ip_anunciavel()` **recusa loopback** — a recusa é a correção.
+
+**A segunda armadilha, medida no R35S:** o truque do `connect()` UDP só funciona
+se existir **rota default**. Sem ela o kernel devolve `ENETUNREACH`, e o anúncio
+falha — no console, que é ligado por USB-Ethernet a um PC sem gateway, e em
+qualquer LAN isolada. O sintoma engana porque funciona em todo PC de
+desenvolvimento. `ip_anunciavel()` passou a ter dois caminhos, nesta ordem:
+
+1. rota default, como antes — resolve o caso normal e escolhe a mesma interface
+   que qualquer outro tráfego escolheria;
+2. **enumerar as interfaces** (`if-addrs`) — primeira não-loopback e não
+   link-local, preferindo IPv4; se não houver nenhuma, os nomes das interfaces
+   vão na mensagem de erro, porque é esse o dado que falta para diagnosticar uma
+   imagem mal configurada.
+
+`if-addrs` entra atrás da própria feature `mdns`, então o build padrão do alvo
+continua zero-dependência. O teste que fixa o caminho 2 é
+`interface_sem_rota_default_e_utilizavel`.
 
 Se o cross-compile de `mdns` falhar em aarch64, o substituto é **broadcast UDP**
 num endereço fixo: 30 linhas, sem dependência, funciona em LAN plana.
@@ -180,13 +196,14 @@ tem asserts próprios em `net.rs::tamanho_das_structs_e_estavel`.
 ## 4. O que os testes cobrem
 
 `cargo test -p giochi-net` — **39 testes**; **43** com `--features laminar`;
-**43 + 1 ignorado** com `--features mdns`. Todos executados:
+**46** com `--features mdns` (45 + 1 ignorado); **50** com `--all-features`.
 
 | Configuração | Testes | Observação |
 | --- | --- | --- |
 | padrão | 39 | zero dependência |
 | `--features laminar` | 43 | +4 do transporte |
-| `--features mdns` | 43 | +4 do mDNS e 1 `#[ignore]` |
+| `--features mdns` | 46 | +6 do mDNS e 1 `#[ignore]` |
+| `--all-features` | 50 | os dois |
 
 O teste ignorado (`encontra_o_proprio_anuncio`) **é** executado, com
 `-- --ignored`: depende de multicast numa interface real, então não pode rodar
@@ -200,7 +217,7 @@ no CI. Medido nesta máquina: encontra o próprio anúncio em **1,03 s**.
 | `host.rs` | 6 | sobe e escuta, handshake atribui id 1, versão errada não cria cliente, input sem handshake ignorado, snapshot respeita taxa e AOI, id não reusa jogador vivo na volta do contador |
 | `client.rs` | 7 | entra e recebe id, input chega e snapshot volta filtrado, `enviar_input` recusa o que não é do cliente, pacote de outro endereço ignorado, id 0 é recusado, host silencioso faz desistir, RTT satura |
 | `lib.rs` | 2 | versão/porta/taxa estáveis, datagrama cabe no MTU mínimo de IPv6 |
-| `descobrir.rs` (feature `mdns`) | 4 + 1 ignorado | nome de instância utilizável, tipo de serviço com o sufixo obrigatório, `ip_anunciavel` recusa loopback, anúncio só com loopback é descartado; o ignorado anuncia e encontra o próprio anúncio de verdade |
+| `descobrir.rs` (feature `mdns`) | 6 + 1 ignorado | nome de instância utilizável, tipo de serviço com o sufixo obrigatório, `ip_anunciavel` recusa loopback, anúncio só com loopback é descartado, o caminho sem rota default acha uma interface utilizável, `fe80::/10` reconhecido sem confundir `fec0::/10`; o ignorado anuncia e encontra o próprio anúncio de verdade |
 
 O teste mais importante é o de `peer.rs`: ele **mede o tempo** de `drenar` sem
 pacote na fila. Se o socket voltasse a ser bloqueante, ele falha por timeout — é o
@@ -259,3 +276,7 @@ Então declarar rede exige mexer em **dois repositórios** (schema + validador n
 poderia abrir porta no firewall. Registrado aqui para não virar surpresa: o app
 pode funcionar em rede hoje porque o aparelho não tem firewall — o que não é uma
 decisão, é ausência de controle.
+
+A lista completa do que a **imagem** precisa fornecer — medida no R35S, com o que
+já existe e o que falta, incluindo o `udhcpd` que anuncia um gateway e um DNS
+inexistentes — está em [REQUISITOS-IMAGEM.md](REQUISITOS-IMAGEM.md).

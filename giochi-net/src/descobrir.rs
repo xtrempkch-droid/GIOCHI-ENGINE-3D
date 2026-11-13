@@ -93,16 +93,38 @@ impl From<mdns_sd::Error> for ErroDescoberta {
 
 /// IP pelo qual os outros aparelhos alcançam esta máquina.
 ///
-/// Truque padrão: um `connect` UDP **não envia pacote**, só faz o SO escolher a
-/// rota de saída, e `local_addr` passa a devolver o IP daquela interface. É o
-/// mesmo método de [`crate::Host::endereco_anunciado`], repetido aqui para o
-/// módulo não depender de um `Host` já criado.
+/// Dois métodos, nesta ordem:
+///
+/// 1. **Rota default.** Um `connect` UDP **não envia pacote**, só faz o SO escolher a
+///    interface de saída, e `local_addr` passa a devolver o IP dela. É o que resolve
+///    o caso normal: vários adaptadores, um deles com rota padrão, e a escolha é a
+///    mesma que qualquer outro tráfego faria.
+/// 2. **Enumerar as interfaces.** Quando **não há rota default** o passo 1 falha com
+///    `ENETUNREACH` — e isso não é um caso exótico: é o console ligado por
+///    USB-Ethernet ao PC (10.55.0.2/24, sem gateway) e qualquer LAN isolada. Medido
+///    no R35S. Aí a escolha é a primeira interface não-loopback que não seja
+///    link-local; se não houver nenhuma, os nomes das interfaces vão na mensagem
+///    de erro, que é o dado que falta para diagnosticar uma imagem mal configurada.
+///
+/// Em ambos os casos `loopback` e `unspecified` são recusados: um anúncio neles
+/// existe no registro mDNS e nenhum outro aparelho consegue conectar, que é a
+/// armadilha documentada no topo deste módulo.
 pub fn ip_anunciavel() -> Result<IpAddr, ErroDescoberta> {
+    match ip_pela_rota_default()? {
+        Some(ip) => Ok(ip),
+        None => ip_pelas_interfaces(),
+    }
+}
+
+/// Passo 1: deixa o SO escolher a interface para um destino externo.
+///
+/// `Ok(None)` quando não há rota default — não é erro, é o outro caminho.
+fn ip_pela_rota_default() -> Result<Option<IpAddr>, ErroDescoberta> {
     let sonda = std::net::UdpSocket::bind("0.0.0.0:0").map_err(ErroDescoberta::SemInterface)?;
     // TEST-NET-1: documentação, não roteável. Não sai pacote.
-    sonda
-        .connect("192.0.2.1:9")
-        .map_err(ErroDescoberta::SemInterface)?;
+    if sonda.connect("192.0.2.1:9").is_err() {
+        return Ok(None);
+    }
     let ip = sonda
         .local_addr()
         .map_err(ErroDescoberta::SemInterface)?
@@ -112,7 +134,58 @@ pub fn ip_anunciavel() -> Result<IpAddr, ErroDescoberta> {
             "interface de saída é loopback; um anúncio assim não é alcançável",
         )));
     }
-    Ok(ip)
+    Ok(Some(ip))
+}
+
+/// Passo 2: primeira interface IPv4 utilizável, ou IPv6 global como último recurso.
+///
+/// A ordem de `get_if_addrs` é a do SO (`if_nameindex`), que costuma trazer `eth0`
+/// antes de `wlan0`; não há critério melhor sem tabela de rotas, e qualquer uma das
+/// duas é alcançável pelos outros aparelhos da mesma LAN.
+fn ip_pelas_interfaces() -> Result<IpAddr, ErroDescoberta> {
+    let interfaces = if_addrs::get_if_addrs().map_err(ErroDescoberta::SemInterface)?;
+
+    let mut v6 = None;
+    for interface in &interfaces {
+        match interface.addr {
+            if_addrs::IfAddr::V4(ref v4) => {
+                let ip = v4.ip;
+                if !ip.is_loopback() && !ip.is_unspecified() && !ip.is_link_local() {
+                    return Ok(IpAddr::V4(ip));
+                }
+            }
+            if_addrs::IfAddr::V6(ref v6_addr) => {
+                let ip = v6_addr.ip;
+                if !ip.is_loopback() && !ip.is_unspecified() && !link_local_v6(&ip) {
+                    // IPv6 só se não houver IPv4: funciona, mas exige que o outro lado
+                    // também fale IPv6.
+                    v6.get_or_insert(ip);
+                }
+            }
+        }
+    }
+    if let Some(ip) = v6 {
+        return Ok(IpAddr::V6(ip));
+    }
+
+    let vistas: Vec<&str> = interfaces.iter().map(|i| i.name.as_str()).collect();
+    Err(ErroDescoberta::SemInterface(std::io::Error::other(
+        if vistas.is_empty() {
+            "nenhuma interface de rede; um anúncio em loopback não é alcançável".to_owned()
+        } else {
+            format!(
+                "nenhuma interface com endereço roteável entre {vistas:?}; \
+                 um anúncio em loopback não é alcançável de outro aparelho"
+            )
+        },
+    )))
+}
+
+/// `fe80::/10`, escrito à mão: `Ipv6Addr::is_unicast_link_local` só entrou no
+/// Rust 1.84 e o MSRV do workspace é 1.82. É o equivalente do `169.254/16` em
+/// IPv4, e não é alcançável de outra máquina.
+fn link_local_v6(ip: &std::net::Ipv6Addr) -> bool {
+    (ip.segments()[0] & 0xffc0) == 0xfe80
 }
 
 /// Nome de instância do anúncio.
@@ -305,6 +378,41 @@ mod testes {
             Err(ErroDescoberta::SemInterface(_)) => {}
             Err(outro) => panic!("erro inesperado: {outro}"),
         }
+    }
+
+    /// O caminho sem rota default escolhe uma interface utilizável.
+    ///
+    /// É o caso medido no R35S: `ip route` só tinha `10.55.0.0/24 dev usb0`, o
+    /// `connect` UDP devolvia `ENETUNREACH` e o anúncio nunca saía. Aqui a
+    /// enumeração tem que achar o mesmo endereço que a rota acharia — e nunca
+    /// devolver loopback nem link-local.
+    #[test]
+    fn interface_sem_rota_default_e_utilizavel() {
+        let por_interface = match ip_pelas_interfaces() {
+            Ok(ip) => ip,
+            // Máquina só com loopback: a recusa é o comportamento correto.
+            Err(ErroDescoberta::SemInterface(_)) => return,
+            Err(outro) => panic!("erro inesperado: {outro}"),
+        };
+        assert!(!por_interface.is_loopback());
+        assert!(!por_interface.is_unspecified());
+        match por_interface {
+            IpAddr::V4(v4) => assert!(!v4.is_link_local(), "169.254/16 não é alcançável"),
+            IpAddr::V6(v6) => assert!(!link_local_v6(&v6), "fe80::/10 não é alcançável"),
+        }
+    }
+
+    /// `fe80::/10` é reconhecido, e o vizinho `fec0::/10` não é confundido.
+    #[test]
+    fn link_local_v6_reconhece_fe80() {
+        use std::net::Ipv6Addr;
+        assert!(link_local_v6(&Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)));
+        assert!(link_local_v6(&Ipv6Addr::new(0xfebf, 1, 2, 3, 4, 5, 6, 7)));
+        // Fronteira: `fec0::` já é site-local (depreciado), não link-local.
+        assert!(!link_local_v6(&Ipv6Addr::new(0xfec0, 0, 0, 0, 0, 0, 0, 1)));
+        assert!(!link_local_v6(&Ipv6Addr::new(
+            0x2001, 0xdb8, 0, 0, 0, 0, 0, 1
+        )));
     }
 
     /// Descoberta de verdade: anuncia e encontra o próprio anúncio.
