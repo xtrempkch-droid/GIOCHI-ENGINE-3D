@@ -22,6 +22,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Free disk space
+        # O SDL2 "bundled" e compilado do codigo-fonte quando o cache do cargo nao
+        # existe -- e qualquer mudanca em `Cargo.lock` invalida a chave. Sem
+        # liberar espaco, o build script do `sdl2-sys` falha ao copiar
+        # `libSDL2_test.a` com um erro de I/O que ele NAO imprime, e o sintoma e
+        # "failed to run custom build command for sdl2-sys", que parece bug de
+        # codigo e nao e.
+        #
+        # Medido: a execucao com cache passou; a sem cache falhou no mesmo
+        # commit base. Os ~20 GB removidos aqui sao SDKs pre-instalados no runner
+        # que este projeto nao usa.
+        run: |
+          echo "antes:"; df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo apt-get clean
+          echo "depois:"; df -h /
+
       - name: Install Rust
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
@@ -114,6 +132,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Free disk space
+        # O SDL2 "bundled" e compilado do codigo-fonte quando o cache do cargo nao
+        # existe -- e qualquer mudanca em `Cargo.lock` invalida a chave. Sem
+        # liberar espaco, o build script do `sdl2-sys` falha ao copiar
+        # `libSDL2_test.a` com um erro de I/O que ele NAO imprime, e o sintoma e
+        # "failed to run custom build command for sdl2-sys", que parece bug de
+        # codigo e nao e.
+        #
+        # Medido: a execucao com cache passou; a sem cache falhou no mesmo
+        # commit base. Os ~20 GB removidos aqui sao SDKs pre-instalados no runner
+        # que este projeto nao usa.
+        run: |
+          echo "antes:"; df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo apt-get clean
+          echo "depois:"; df -h /
+
       - name: Install Rust
         run: |
           rustup toolchain install stable --profile minimal
@@ -141,6 +177,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Free disk space
+        # O SDL2 "bundled" e compilado do codigo-fonte quando o cache do cargo nao
+        # existe -- e qualquer mudanca em `Cargo.lock` invalida a chave. Sem
+        # liberar espaco, o build script do `sdl2-sys` falha ao copiar
+        # `libSDL2_test.a` com um erro de I/O que ele NAO imprime, e o sintoma e
+        # "failed to run custom build command for sdl2-sys", que parece bug de
+        # codigo e nao e.
+        #
+        # Medido: a execucao com cache passou; a sem cache falhou no mesmo
+        # commit base. Os ~20 GB removidos aqui sao SDKs pre-instalados no runner
+        # que este projeto nao usa.
+        run: |
+          echo "antes:"; df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo apt-get clean
+          echo "depois:"; df -h /
+
       - name: Install Rust and the ARM64 cross toolchain
         run: |
           rustup toolchain install stable --profile minimal
@@ -164,6 +218,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
+      - name: Free disk space
+        # O SDL2 "bundled" e compilado do codigo-fonte quando o cache do cargo nao
+        # existe -- e qualquer mudanca em `Cargo.lock` invalida a chave. Sem
+        # liberar espaco, o build script do `sdl2-sys` falha ao copiar
+        # `libSDL2_test.a` com um erro de I/O que ele NAO imprime, e o sintoma e
+        # "failed to run custom build command for sdl2-sys", que parece bug de
+        # codigo e nao e.
+        #
+        # Medido: a execucao com cache passou; a sem cache falhou no mesmo
+        # commit base. Os ~20 GB removidos aqui sao SDKs pre-instalados no runner
+        # que este projeto nao usa.
+        run: |
+          echo "antes:"; df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo apt-get clean
+          echo "depois:"; df -h /
 
       - name: Install Rust
         run: |
