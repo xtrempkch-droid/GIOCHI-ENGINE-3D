@@ -33,7 +33,7 @@ pub extern "C" fn giochi_abi_version() -> u32 {
 
 /// Returns the engine version packed as `major << 16 | minor << 8 | patch`.
 ///
-/// For version `0.3.1` this returns `0x0003_0001`.
+/// For version `0.4.0` this returns `0x0004_0000`.
 ///
 /// # C ABI
 ///

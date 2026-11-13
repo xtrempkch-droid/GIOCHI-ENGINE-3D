@@ -1,12 +1,27 @@
 # Estado — GIOCHI-ENGINE
 
-## Última entrega: release 0.3.1 — `sdl2-system` alcançável a partir de um consumidor 3D
-Data: 2026-11-09
+## Última entrega: release 0.4.0 — rede (ABI v4), texturas e geometria própria em 3D
+Data: 2026-11-13
 
-## Última fase concluída: 18 — Flags ARM64 + CI de performance + C ABI v3
+O que 0.4.0 acrescenta, e o que foi **de fato** verificado:
+
+| Área | Entrega | Verificado em |
+|---|---|---|
+| Rede | crate `giochi-net`: protocolo binário, AOI, host/cliente, transporte `laminar` opcional, descoberta mDNS opcional | x86_64: 43 testes; AArch64: `cargo check` do workspace e das duas features |
+| C ABI | parte IV (`GIOCHI_ABI_VERSION 4`): 15 funções `giochi_net_*`, `GiochiNetSnapshot`/`Global`/`Input`/`Inimigo` | `c_smoke.c`, `python_smoke.py`, `rust_ffi.rs`, `ffi-smoke.sh` |
+| 3D | texturas por arquivo ou procedurais, `draw_mesh_textured` | x86_64 (driver Mesa/AMD em `offscreen`): `textures_3d.rs` lê o framebuffer |
+| 3D | geometria própria: `model_viewer` para qualquer OBJ, `giochi_mesh_create` para vértices crus | x86_64: `obj_models.rs` gera um torus knot de 4 680 vértices e lê o framebuffer |
+| Correções | 10 defeitos de rede/ABI e 4 de 3D encontrados em auditoria (porta efêmera, `poll_global`, `poll_snapshot`, câmera, ids, decoder, mDNS, normais, path UTF-8, SDL_image) | testes de regressão dedicados, cada um falhando sem a correção |
+
+**Não validado em hardware nesta entrega.** O PX30 continua sendo a referência das fases
+0–18; a rede e as texturas 3D nunca rodaram num aparelho. O primeiro item da lista de
+pendências é justamente esse. Números de AOI em `docs/REDE.md` são aritmética, não
+medição; a descoberta mDNS foi medida só nesta máquina.
+
+## Fase 18 — Flags ARM64 + CI de performance + C ABI v3
 Fases 15–18 concluídas (performance, batching, instancing/upscaling, C ABI v3).
 
-**Fases concluídas: 0–8 (2D), 9–14 (extensão 3D) e 15–18 (performance e ABI v3). Versão 0.3.1.**
+**Fases concluídas: 0–8 (2D), 9–14 (extensão 3D) e 15–18 (performance e ABI v3).**
 
 ## Correção 0.3.1 — feature de cross-compile inalcançável
 

@@ -17,7 +17,7 @@ repository.workspace = true
 # so the build ran CMake and the cross-compile path died. The two SDL2 features are
 # forwarded below instead, and `default = ["sdl2-bundled"]` keeps the old behaviour for
 # callers who ask for nothing.
-giochi-engine = { path = "../giochi-engine", version = "0.3.1", default-features = false }
+giochi-engine = { path = "../giochi-engine", version = "0.4.0", default-features = false }
 glow = { workspace = true }
 bytemuck = { workspace = true }
 tobj = { workspace = true }

@@ -19,16 +19,16 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 # `[features]` below. Left implicit, `giochi-engine`'s default `sdl2-bundled` won the
 # feature union and `--features sdl2-system` built SDL2 from source through CMake —
 # which is the one thing the console cross-compile cannot do.
-giochi-engine = { path = "../giochi-engine", version = "0.3.1", default-features = false }
+giochi-engine = { path = "../giochi-engine", version = "0.4.0", default-features = false }
 # Part II of the ABI (3D); frame statistics (part III) come from `giochi-engine`.
 # The 3D crate is the only thing here that
 # links GLES, so a 2D-only consumer of `libgiochi.so` still pulls it in — that is the
 # price of one shared library, and the alternative (a second .so) would make a C program
 # that wants both link two things and keep two versions in step.
-giochi-engine-3d = { path = "../giochi-engine-3d", version = "0.3.1", default-features = false }
+giochi-engine-3d = { path = "../giochi-engine-3d", version = "0.4.0", default-features = false }
 # Part IV of the ABI: networking. Sem feature: o transporte padrao do
 # `giochi-net` tem zero dependencia, que e o que o cross-compile aarch64 exige.
-giochi-net = { path = "../giochi-net", version = "0.3.1" }
+giochi-net = { path = "../giochi-net", version = "0.4.0" }
 log = { workspace = true }
 
 [features]

@@ -10,17 +10,19 @@ language through a C ABI. **2D** through `sdl2::render`, and **3D** through Open
 over EGL in a separate crate. Primary target: `aarch64-unknown-linux-gnu` (Linux consoles
 with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 
-> **Status: 0.3.1 — every phase (0 to 18) complete.** The workspace, the SDL2 platform
-> layer, the fixed-timestep loop, the 2D renderer with opaque texture handles,
-> keyboard/mouse/gamepad input, the asset cache, the audio mixer, the scene stack, the
-> `Engine` facade, the **C ABI** (`libgiochi.so` / `libgiochi.a` + generated `giochi.h`,
-> parts I–IV, version 4), the **Lua binding** (`giochi` module + a complete reference
-> game), the **3D crate** — GLES/EGL context, mesh pipeline, Blinn-Phong lighting,
-> `Camera3D` with a controller, instancing, static batching and upscaling — the
-> **networking crate** (`giochi-net`: host-authoritative UDP, interest management,
-> optional `laminar` transport and mDNS discovery) and the **profiler** (frame
-> statistics, `F1` overlay, C ABI v4), with CI, release packaging and the guides.
-> Validated on a Rockchip PX30 (Mali-G31). See [PROGRESS.md](PROGRESS.md).
+> **Status: 0.4.0.** Phases 0–18, plus the networking layer and ABI v4. The workspace,
+> the SDL2 platform layer, the fixed-timestep loop, the 2D renderer with opaque texture
+> handles, keyboard/mouse/gamepad input, the asset cache, the audio mixer, the scene
+> stack, the `Engine` facade, the **C ABI** (`libgiochi.so` / `libgiochi.a` + generated
+> `giochi.h`, parts I–IV, version 4), the **Lua binding** (`giochi` module + a complete
+> reference game), the **3D crate** — GLES/EGL context, arbitrary OBJ or generated
+> geometry, textures, Blinn-Phong lighting, `Camera3D` with a controller, instancing,
+> static batching and upscaling — the **networking crate** (`giochi-net`:
+> host-authoritative UDP, interest management, optional `laminar` transport and mDNS
+> discovery) and the **profiler** (frame statistics, `F1` overlay), with CI, release
+> packaging and the guides. Validated on a Rockchip PX30 (Mali-G31) up to 0.3.1; the
+> 0.4.0 additions are validated on x86_64 + AArch64 cross-compile. See
+> [PROGRESS.md](PROGRESS.md).
 
 
 ## Why "C-shaped" Rust?

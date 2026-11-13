@@ -78,7 +78,7 @@ for path in giochi-demo include/giochi.h lib/libgiochi.so lib/libgiochi.a \
 done
 # The 3D examples are how a user sees the renderer; an archive whose only 3D artifact is
 # a shared library is one nobody can run.
-for example in cube_demo mini_fps ball_balance; do
+for example in cube_demo model_viewer mini_fps ball_balance; do
     if [[ -x "$work/bin/$example" ]]; then
         echo "  ok    bin/$example present"
     else
@@ -87,7 +87,7 @@ for example in cube_demo mini_fps ball_balance; do
     fi
 done
 
-for doc in C_ABI_CONTRACT ARCHITECTURE KMSDRM CROSS_COMPILE API_GUIDE C_ABI LUA_BINDING DECISIONS; do
+for doc in C_ABI_CONTRACT ARCHITECTURE KMSDRM CROSS_COMPILE API_GUIDE C_ABI LUA_BINDING REDE DECISIONS; do
     check "docs/$doc.md" test -f "$work/docs/$doc.md"
 done
 
@@ -152,6 +152,23 @@ if command -v cc >/dev/null 2>&1; then
           -o "$work/c_smoke" >"$work/cc.log" 2>&1; then
         if ( cd "$work" && SDL_VIDEODRIVER=dummy ./c_smoke ) >"$work/csmoke.log" 2>&1; then
             echo "  ok    c_smoke ($(grep -o 'OK (abi [0-9]*, engine [0-9.]*)' "$work/csmoke.log" || echo passed))"
+
+            # The header and the library must describe the SAME version. Checking only
+            # the header is what let a 0.1.1 library sit under a 0.2.0 header: every
+            # other check passes, because the exported symbols are all there. `c_smoke`
+            # prints what the library itself reports, so compare the two.
+            engine="$(sed -n 's/.*engine \([0-9][0-9.]*\)).*/\1/p' "$work/csmoke.log" | head -1)"
+            if [[ -z "$engine" ]]; then
+                echo "  FAIL  c_smoke did not report the engine version" >&2
+                failures=$((failures + 1))
+            elif [[ -n "$declared" && "$engine" != "$declared" ]]; then
+                echo "  FAIL  the library reports engine $engine but the header says $declared" >&2
+                echo "        rebuild with 'cargo build --release --workspace' -- note that" >&2
+                echo "        '--workspace --examples' FILTERS and does not build the cdylib." >&2
+                failures=$((failures + 1))
+            else
+                echo "  ok    header and library agree on $engine"
+            fi
         else
             echo "  FAIL  c_smoke run" >&2
             tail -10 "$work/csmoke.log" >&2

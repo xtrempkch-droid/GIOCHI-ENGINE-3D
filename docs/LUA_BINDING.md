@@ -96,7 +96,7 @@ engine is running and the app is borrowed.
 
 | Member | Type | Meaning |
 |---|---|---|
-| `giochi.version` | string | Binding version (`0.3.1`). |
+| `giochi.version` | string | Binding version (`0.4.0`). |
 | `giochi.module_version` | string | Engine version. |
 | `giochi.abi_version` | integer | Version of part I (2D) of the C ABI (`1`); the binding does not expose the 3D parts. |
 | `giochi.app(config?)` | function | Creates the engine and returns an `App`. |

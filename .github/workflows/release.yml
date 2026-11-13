@@ -64,7 +64,7 @@ jobs:
           # The 3D examples. They are separate binaries, not subcommands of the demo:
           # they need a GL context and the 2D demo deliberately never asks for one.
           mkdir -p dist/bin
-          for example in cube_demo mini_fps ball_balance; do
+          for example in cube_demo model_viewer mini_fps ball_balance; do
             cp "target/x86_64-unknown-linux-gnu/release/examples/$example" dist/bin/
           done
           # The Lua binding's reference game ships with the binary that runs it.
@@ -117,7 +117,7 @@ jobs:
           cp target/aarch64-unknown-linux-gnu/release/libgiochi.so dist/lib/
           cp target/aarch64-unknown-linux-gnu/release/libgiochi.a dist/lib/
           mkdir -p dist/bin
-          for example in cube_demo mini_fps ball_balance; do
+          for example in cube_demo model_viewer mini_fps ball_balance; do
             cp "target/aarch64-unknown-linux-gnu/release/examples/$example" dist/bin/
           done
           cp giochi-engine-lua/examples/mini_game.lua dist/lua/
@@ -167,8 +167,8 @@ jobs:
             echo
             echo "Each archive contains the demo binary, the C ABI (\`include/giochi.h\`,"
             echo "\`lib/libgiochi.so\`, \`lib/libgiochi.a\`), the Lua reference game"
-            echo "(\`lua/mini_game.lua\`), the docs, the assets, and the three 3D examples"
-            echo "in \`bin/\` (\`cube_demo\`, \`mini_fps\`, \`ball_balance\`)."
+            echo "(\`lua/mini_game.lua\`), the docs, the assets, and the four 3D examples"
+            echo "in \`bin/\` (\`cube_demo\`, \`model_viewer\`, \`mini_fps\`, \`ball_balance\`)."
             echo
             echo "Requires libdrm, libgbm and libEGL on the target (see docs/KMSDRM.md)."
             echo
@@ -211,14 +211,14 @@ jobs:
           tar -C "$work" -xzf "$archive"
           for path in giochi-demo include/giochi.h lib/libgiochi.so lib/libgiochi.a \
                       lua/mini_game.lua assets/player.bmp assets/checker.bmp \
-                      bin/cube_demo bin/mini_fps bin/ball_balance \
+                      bin/cube_demo bin/model_viewer bin/mini_fps bin/ball_balance \
                       docs/KMSDRM.md docs/C_ABI_CONTRACT.md; do
             test -e "$work/$path" || { echo "missing: $path" >&2; exit 1; }
           done
           file "$work/giochi-demo" | grep -q 'ARM aarch64'
           file "$work/lib/libgiochi.so" | grep -q 'ARM aarch64'
           # The 3D examples are how a console user sees the renderer at all.
-          for example in cube_demo mini_fps ball_balance; do
+          for example in cube_demo model_viewer mini_fps ball_balance; do
             file "$work/bin/$example" | grep -q 'ARM aarch64' \
               || { echo "not AArch64: bin/$example" >&2; exit 1; }
           done

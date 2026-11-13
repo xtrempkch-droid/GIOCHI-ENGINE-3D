@@ -9,8 +9,8 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-giochi-engine = { path = "../giochi-engine", version = "0.3.1", default-features = false }
-giochi-engine-lua = { path = "../giochi-engine-lua", version = "0.3.1", default-features = false }
+giochi-engine = { path = "../giochi-engine", version = "0.4.0", default-features = false }
+giochi-engine-lua = { path = "../giochi-engine-lua", version = "0.4.0", default-features = false }
 env_logger = { workspace = true }
 log = { workspace = true }
 
