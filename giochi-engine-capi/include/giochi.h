@@ -32,6 +32,12 @@
 /* Part II: the 3D engine has no C representation, so callers only ever see a pointer. */
 typedef struct GiochiEngine3D GiochiEngine3D;
 
+/* Part II handles. cbindgen emits the function signatures with `uint64_t`, so these
+ * aliases exist to give the contract's names a definition a C compiler accepts. */
+typedef uint64_t GiochiMeshHandle;      /* 0 invalid */
+typedef uint64_t GiochiShaderHandle;    /* 0 invalid */
+typedef uint64_t GiochiGlTextureHandle; /* 0 invalid */
+
 #ifndef GIOCHI_H
 #define GIOCHI_H
 
@@ -1290,6 +1296,64 @@ int32_t giochi_shader_builtin(int32_t which, uint64_t *out);
 // ```
 int32_t giochi_shader_destroy(uint64_t shader);
 
+// Decodes an image file and uploads it as a GL texture for meshes.
+//
+// The 2D `giochi_texture_create` returns a `sdl2::render` texture, which raw GLES
+// cannot sample; this is the 3D counterpart. Returns `0` on failure, with the reason
+// in [`giochi_get_last_error`](crate::giochi_get_last_error).
+//
+// Works on the most recently created engine on this thread (§10.5), like
+// [`giochi_mesh_load_obj`].
+//
+// # C ABI
+//
+// ```c
+// GiochiGlTextureHandle giochi_gl_texture_create(const char* path);
+// ```
+uint64_t giochi_gl_texture_create(const char *path);
+
+// Uploads raw RGBA8 pixels as a GL texture.
+//
+// `pixels` must point to exactly `width * height * 4` bytes. Useful for a procedurally
+// generated texture, which has no file to load.
+//
+// Returns `0` on failure.
+//
+// # C ABI
+//
+// ```c
+// GiochiGlTextureHandle giochi_gl_texture_create_rgba(const uint8_t* pixels,
+//                                                     uint32_t width, uint32_t height);
+// ```
+uint64_t giochi_gl_texture_create_rgba(const uint8_t *pixels, uint32_t width, uint32_t height);
+
+// Releases a GL texture. `0` and unknown handles are errors, like the mesh ones.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_gl_texture_destroy(GiochiGlTextureHandle texture);
+// ```
+int32_t giochi_gl_texture_destroy(uint64_t texture);
+
+// Width of a GL texture in pixels, or `0` for an invalid handle.
+//
+// # C ABI
+//
+// ```c
+// uint32_t giochi_gl_texture_width(GiochiGlTextureHandle texture);
+// ```
+uint32_t giochi_gl_texture_width(uint64_t texture);
+
+// Height of a GL texture in pixels, or `0` for an invalid handle.
+//
+// # C ABI
+//
+// ```c
+// uint32_t giochi_gl_texture_height(GiochiGlTextureHandle texture);
+// ```
+uint32_t giochi_gl_texture_height(uint64_t texture);
+
 // Replaces the light every draw in the next frames is shaded with.
 //
 // `GIOCHI_SHADER_PHONG` reads it; the other two built-ins ignore it. The light is engine
@@ -1355,6 +1419,32 @@ int32_t giochi_renderer3d_draw_mesh(GiochiEngine3D *engine,
                                     const struct GiochiTransform3D *model,
                                     const struct GiochiCamera3D *camera,
                                     struct GiochiColor3D color);
+
+// Draws `mesh` sampling `texture`, with `tint` multiplied over the sample.
+//
+// `shader` must declare `uniform sampler2D u_texture`; `GIOCHI_SHADER_TEXTURED` does.
+// `tint` is multiplied into the sampled colour, so white shows the image unchanged.
+//
+// The texture is bound to unit 0 for the duration of the draw.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_renderer3d_draw_mesh_textured(GiochiEngine3D* engine,
+//                                              GiochiMeshHandle mesh,
+//                                              GiochiShaderHandle shader,
+//                                              GiochiGlTextureHandle texture,
+//                                              const GiochiTransform3D* model,
+//                                              const GiochiCamera3D* camera,
+//                                              GiochiColor3D tint);
+// ```
+int32_t giochi_renderer3d_draw_mesh_textured(GiochiEngine3D *engine,
+                                             uint64_t mesh,
+                                             uint64_t shader,
+                                             uint64_t texture,
+                                             const struct GiochiTransform3D *model,
+                                             const struct GiochiCamera3D *camera,
+                                             struct GiochiColor3D tint);
 
 // Sobe um host escutando na porta dada. `0` escolhe uma porta efêmera — use
 // [`giochi_net_local_port`] para descobrir qual foi.

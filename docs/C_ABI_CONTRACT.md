@@ -770,9 +770,14 @@ typedef uint64_t GiochiGlTextureHandle; /* 0 invalid */
 ```
 
 Ownership: `giochi_mesh_destroy` and `giochi_shader_destroy` release them. Textures are
-created through `giochi_gl_texture_create` and released with `giochi_gl_texture_destroy`.
-Nothing is freed on engine shutdown — a caller that leaks a mesh leaks it, exactly as in
-part I.
+created through `giochi_gl_texture_create` (or `giochi_gl_texture_create_rgba` for
+pixels a caller generated) and released with `giochi_gl_texture_destroy`. Nothing is
+freed on engine shutdown — a caller that leaks a mesh leaks it, exactly as in part I.
+
+A 3D texture is **not** a `GiochiTexture`: the 2D one wraps an `sdl2::render` texture
+that raw GLES cannot sample. The two registries are separate, so a 2D handle passed to
+`giochi_renderer3d_draw_mesh_textured` is `GIOCHI_ERROR_INVALID_HANDLE` rather than a
+wrong-colour draw.
 
 ## 10. Functions (phase 14)
 
@@ -807,6 +812,21 @@ int32_t giochi_renderer3d_draw_mesh(GiochiEngine3D* engine,
                                     const GiochiTransform3D* model,
                                     const GiochiCamera3D* camera,
                                     GiochiColor3D color);
+int32_t giochi_renderer3d_draw_mesh_textured(GiochiEngine3D* engine,
+                                             GiochiMeshHandle mesh,
+                                             GiochiShaderHandle shader,
+                                             GiochiGlTextureHandle texture,
+                                             const GiochiTransform3D* model,
+                                             const GiochiCamera3D* camera,
+                                             GiochiColor3D tint);
+
+/* 10.3a GL textures — the 3D counterpart of giochi_texture_* */
+GiochiGlTextureHandle giochi_gl_texture_create(const char* path);
+GiochiGlTextureHandle giochi_gl_texture_create_rgba(const uint8_t* pixels,
+                                                    uint32_t width, uint32_t height);
+int32_t               giochi_gl_texture_destroy(GiochiGlTextureHandle texture);
+uint32_t              giochi_gl_texture_width(GiochiGlTextureHandle texture);
+uint32_t              giochi_gl_texture_height(GiochiGlTextureHandle texture);
 
 /* 10.4a Lighting — the input GIOCHI_SHADER_PHONG reads */
 int32_t giochi_renderer3d_set_light(GiochiEngine3D* engine,
@@ -895,7 +915,8 @@ The same type the Rust side calls `WindowConfig`, so there is nothing to keep in
 | 3D additions never change a part I signature | `git diff` review plus `c_smoke.c` continuing to pass untouched |
 | The sizes in §9 are the ones a C compiler produces | `c_smoke_3d.c` `_Static_assert`s them — 28, 32, 88 |
 | Every type this document names is in `giochi.h` | `scripts/gen-header.sh --check`. A type defined here but missing from `cbindgen.toml`'s `include` is silently not emitted; `GiochiDirectionalLight` was, until the third audit |
-| Every function in §10 exists and is exported | `scripts/ffi-smoke.sh` links each one from C. A documented-but-unimplemented function is a link error at the consumer, which is how the missing `giochi_renderer3d_set_light` would have been caught before shipping |
+| Every function in §10 exists and is exported | `scripts/ffi-smoke.sh` links each one from C. A documented-but-unimplemented function is a link error at the consumer, which is how the missing `giochi_renderer3d_set_light` would have been caught before shipping — and, later, the four `giochi_gl_texture_*` functions this section named before they existed |
+| A textured mesh actually samples the texture | `giochi-engine-3d/tests/textures_3d.rs` reads the framebuffer and requires both halves of a two-colour texture; `c_smoke_3d.c` links and calls the C path |
 
 # Part III — Frame statistics (ABI version 3, phase 18)
 

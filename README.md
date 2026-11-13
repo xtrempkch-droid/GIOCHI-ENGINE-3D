@@ -52,7 +52,8 @@ is authoritative.
 | [`giochi-engine`](giochi-engine/) | lib | Idiomatic Rust API, C-shaped data, no `unsafe` |
 | [`giochi-engine-capi`](giochi-engine-capi/) | `cdylib` + `staticlib` | `libgiochi` C ABI and generated `giochi.h` |
 | [`giochi-engine-lua`](giochi-engine-lua/) | lib | Reference binding — Lua 5.4 via mLua, no `unsafe` |
-| [`giochi-engine-3d`](giochi-engine-3d/) | lib | 3D: GLES 2.0 over EGL, meshes, shaders, lighting, camera |
+| [`giochi-engine-3d`](giochi-engine-3d/) | lib | 3D: GLES 2.0 over EGL, meshes, **textures**, shaders, lighting, camera |
+| [`giochi-net`](giochi-net/) | lib | Networking: host-authoritative UDP, interest management, optional `laminar`/`mdns` |
 | [`giochi-demo`](giochi-demo/) | bin | The demo; `--frames`, `--verify`, `lua <script>` |
 
 ## Build
@@ -109,6 +110,16 @@ cargo run -p giochi-engine --example mini_game       # complete space shooter
 All examples accept `--frames N` to run for a fixed number of frames, which is how
 the smoke tests exercise them without a display.
 
+The 3D crate has its own:
+
+```bash
+cargo run -p giochi-engine-3d --example cube_demo    # one lit, textured cube
+cargo run -p giochi-engine-3d --example mini_fps     # F2 instancing, F3 render scale
+cargo run -p giochi-engine-3d --example ball_balance  # moving camera + physics-lite
+```
+
+They need a GL driver; `SDL_VIDEODRIVER=offscreen` runs them headless.
+
 ### Profiling
 
 Phase 15 adds an in-game overlay and a 60-frame frame-time window behind the
@@ -149,6 +160,93 @@ atlas. On SDL's `software` renderer batching costs 3 % at 1000 sprites — that 
 rasterises triangles instead of using its fast blit — so a host there can set a batch
 of 1 or call `draw_texture_immediate`. Details in `docs/PERF_LOG.md` and ADR-043.
 
+### Textures on 3D objects
+
+A 3D object is textured in three steps: upload the image, draw with a shader that samples
+it, and pass the texture to the draw call. The vertex format has carried a `uv`
+attribute since the first mesh, and every primitive (`cube`, `plane`, `sphere`) and
+every OBJ loaded by the crate supplies one — so there is no extra vertex work.
+
+```rust
+use std::path::Path;
+use giochi_engine_3d::math3d::{Camera3D, Color3D, Transform3D};
+use giochi_engine_3d::shader::BuiltinShader;
+
+// 1. Upload. PNG, JPEG and BMP all work; the format is sniffed from the file.
+let texture = render.create_texture(Path::new("assets/checker.png"))?;
+let (width, height) = render.texture_size(texture).expect("live texture");
+
+// 2. A shader that samples `u_texture`. `Textured` is the built-in one.
+let shader = render.create_builtin_shader(BuiltinShader::Textured)?;
+let cube = render.create_cube_mesh(1.0)?;
+
+// 3. Draw. The last argument is a tint multiplied over the sample; WHITE is "as-is".
+let camera = Camera3D::new().with_aspect(16.0 / 9.0);
+render.begin_frame(&window);
+render.clear(&window, Color3D::SKY);
+render.draw_mesh_textured(
+    cube,
+    shader,
+    texture,
+    &Transform3D::IDENTITY.with_position(Vec3::new(0.0, 0.0, -4.0)),
+    &camera,
+    Color3D::WHITE,
+)?;
+render.end_frame(&window);
+
+// 4. Explicit teardown, like every other handle.
+render.destroy_texture(texture);
+```
+
+Procedural textures skip the file entirely:
+
+```rust
+// 2x2 checkerboard: red and blue, RGBA8, exactly width * height * 4 bytes.
+let pixels: [u8; 16] = [
+    255, 0, 0, 255,   0, 0, 255, 255,
+    0, 0, 255, 255, 255, 0, 0, 255,
+];
+let texture = render.create_texture_from_rgba(2, 2, &pixels)?;
+```
+
+Things worth knowing:
+
+* **A 3D texture is not a 2D texture.** `giochi_engine::TextureRegistry` (and
+  `giochi_texture_create` in C) returns an `sdl2::render` texture for the 2D canvas;
+  raw GLES cannot sample it. In 3D use `RenderContext3D::create_texture`, or
+  `giochi_gl_texture_create` / `_create_rgba` from C.
+* **Power-of-two vs not.** GLES 2.0 only allows mipmaps and `GL_REPEAT` on
+  power-of-two sizes. The upload picks `REPEAT` + trilinear filtering for those and
+  `CLAMP_TO_EDGE` + bilinear for the rest, so an odd-sized sprite atlas does not render
+  black.
+* **`uv` is per vertex**, in `0.0..=1.0`. A `Vertex::flat` has `(0, 0)` and samples a
+  single texel; use `Vertex::new(position, normal, uv)` when building geometry by hand.
+* **Tint, not lighting.** The textured shader multiplies the sample by one Lambert
+  term and by `u_tint`; use `GIOCHI_SHADER_PHONG` when you need specular highlights.
+* `render.texture_count()` is part of the leak check `release_all` performs.
+
+Runnable example (the cube uses any image you point it at):
+
+```bash
+cargo run -p giochi-engine-3d --example cube_demo -- --texture assets/checker.png
+SDL_VIDEODRIVER=offscreen cargo run -p giochi-engine-3d --example cube_demo -- \
+    --texture assets/checker.png --frames 3 --quadro /tmp/cube.bmp
+```
+
+From C, the same three steps after `giochi_engine3d_create`:
+
+```c
+GiochiGlTextureHandle tex = giochi_gl_texture_create("assets/checker.png");
+GiochiShaderHandle textured;
+giochi_shader_builtin(GIOCHI_SHADER_TEXTURED, &textured);
+
+GiochiColor3D white = { .r = 1, .g = 1, .b = 1, .a = 1, ._reserved = {0} };
+giochi_renderer3d_draw_mesh_textured(engine, cube, textured, tex,
+                                      &model, &camera, white);
+
+giochi_gl_texture_destroy(tex);
+```
+
 ### 3D: instancing, static batching and upscaling
 
 Three optimisations from phase 17, all additive:
@@ -182,6 +280,62 @@ Measured: 100 instanced cubes take the frame from 103 draw calls to 4 and from 4
 25776.0 FPS on x86_64 (**5.87x**); 12.19x in the criterion benchmark. Upscaling at 0.75
 gives **+61 %** on the PX30 (fill-bound) and **−30 %** on a discrete GPU (submission-bound),
 so measure before turning it on. See `docs/PERF_LOG.md` and ADR-044.
+
+### Networking
+
+`giochi-net` is a host-authoritative LAN layer: the host simulates, clients send input
+and receive state. It is synchronous (no `tokio`), never blocks the fixed timestep, and
+has **zero dependencies** unless you opt in to `laminar` (reliable/ordered packets) or
+`mdns` (host discovery).
+
+```rust
+use giochi_net::{Cliente, Host, Mensagem};
+
+// Host: port 0 asks the OS for an ephemeral one.
+let mut host = Host::novo(None)?;
+println!("listening on {}", host.endereco()?.port());
+
+// Client: "ip:porta".
+let mut cliente = Cliente::entrar("192.168.1.10:47721")?;
+
+// Each frame: pump both ends, then read what arrived.
+for (jogador, mensagem) in host.processar(64) {
+    if let Mensagem::Input { mover_x, .. } = mensagem {
+        /* simulate player `jogador` */
+    }
+}
+for mensagem in cliente.processar(64) {
+    match mensagem {
+        Mensagem::Inimigos { inimigos, .. } => { /* AOI-filtered snapshot */ }
+        Mensagem::Global { dados, .. } => { /* wave, tower, boss: opaque bytes */ }
+        _ => {}
+    }
+}
+```
+
+Interest management is per client: `host.definir_area(jogador, raio)` sets how much of
+the world that player sees, and `Host::tick_snapshot` sends each client only the enemies
+inside its area, at `SNAPSHOT_HZ` (15 Hz) regardless of the 60 Hz call rate. The report's
+arithmetic is in [docs/REDE.md](docs/REDE.md): ~150 enemies × 4 clients go from ~45 KB/s
+to ~4 KB/s.
+
+| Feature | What it adds | When to enable |
+|---|---|---|
+| *(default)* | UDP transport, protocol, AOI, host/client | always usable; zero dependencies |
+| `laminar` | reliable-ordered, reliable-sequenced and unreliable channels | shop purchases, global state, anything that cannot be lost |
+| `mdns` | `Anunciante` / `Descoberta` for finding hosts on the LAN | handhelds, where typing an IP is not an option |
+
+```bash
+cargo test -p giochi-net                    # 38 tests, zero dependencies
+cargo test -p giochi-net --all-features     # + laminar and mdns
+```
+
+The C ABI exposes the whole loop as `giochi_net_*` (ABI v4): `host_create`,
+`client_join`, `pump`, `send_input`, `poll_input`, `host_snapshot`, `broadcast`,
+`poll_snapshot`, `poll_global`, `set_area`, `set_camera_pos`. Both poll functions return
+`GIOCHI_NET_AGUARDE` (`1`) when there is nothing new, which is the normal case at 60 Hz.
+Full guide: [docs/C_ABI.md](docs/C_ABI.md) §11; design and measurements:
+[docs/REDE.md](docs/REDE.md).
 
 ### Cross build for ARM64
 
@@ -413,6 +567,11 @@ scripts/gates.sh             # fmt, clippy, build, test, doc, aarch64 check
 SKIP_ARM64=1 scripts/gates.sh
 ```
 
+`gates.sh` also builds and tests `giochi-net` with every optional feature
+(`--all-features`), because the workspace build alone never compiles `laminar` or `mdns`;
+and `scripts/check-aarch64.sh` cross-compiles both, since they pull in system-interface
+crates the default transport does not.
+
 ## Design rules (short version)
 
 1. The public surface is C-shaped from the start.
@@ -433,7 +592,8 @@ other the way they do: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 |---|---|
 | [docs/API_GUIDE.md](docs/API_GUIDE.md) | Task-oriented guide: scenes, rendering, input, audio, assets, errors |
 | [docs/LUA_BINDING.md](docs/LUA_BINDING.md) | The `giochi` Lua module, capabilities, handles, the reference game |
-| [docs/C_ABI.md](docs/C_ABI.md) | Consuming the engine from C, Python, Go, Zig, C# |
+| [docs/C_ABI.md](docs/C_ABI.md) | Consuming the engine from C, Python, Go, Zig, C# (parts I–IV) |
+| [docs/REDE.md](docs/REDE.md) | Networking: protocol, interest management, measurements, what is missing |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Layers, dependency rules, ownership, per-frame order, testing |
 | [docs/C_ABI_CONTRACT.md](docs/C_ABI_CONTRACT.md) | Authoritative C ABI: types, sizes, error codes, functions |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Architecture decision records |

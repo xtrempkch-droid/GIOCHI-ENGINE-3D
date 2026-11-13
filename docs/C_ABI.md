@@ -382,6 +382,37 @@ it is not a crash either. `giochi_engine3d_destroy` releases the GL context and 
 window; handles you made become meaningless at that point, so free them first if you want
 the engine to report leaks — it logs a warning when objects outlive the context.
 
+### 9.6 Textures on 3D objects
+
+Part II has its own texture type. `giochi_texture_create` returns a 2D
+`sdl2::render` texture, which raw GLES cannot sample; the 3D one is
+`giochi_gl_texture_create` (or `_create_rgba` for pixels you generated).
+
+```c
+GiochiGlTextureHandle tex = giochi_gl_texture_create("assets/checker.png");
+if (tex == 0) { fprintf(stderr, "%s\n", giochi_get_last_error()); }
+
+GiochiShaderHandle textured;
+giochi_shader_builtin(GIOCHI_SHADER_TEXTURED, &textured);
+
+GiochiCamera3D camera = giochi_camera3d_new();
+camera.aspect = 16.0f / 9.0f;
+GiochiTransform3D model = giochi_transform3d_from_translation((GiochiVec3){0, 0, -4, {0}});
+GiochiColor3D white = { .r = 1, .g = 1, .b = 1, .a = 1, ._reserved = {0} };
+
+giochi_renderer3d_draw_mesh_textured(engine, cube, textured, tex, &model, &camera, white);
+
+giochi_gl_texture_destroy(tex);
+```
+
+The mesh must carry UVs: `giochi_mesh_create_cube` and `giochi_mesh_load_obj` both do.
+The texture is bound to unit 0 for the duration of the draw, and `tint` is multiplied
+over the sample, so white shows the image unchanged. Width and height are available
+through `giochi_gl_texture_width`/`_height`; `0` means an invalid handle.
+
+Like the mesh functions, the texture functions take no engine and act on the most
+recently created engine on this thread (§10.5).
+
 ## 10. Part III: frame statistics (ABI version 3)
 
 Part III is one function and one struct, and it is purely additive:

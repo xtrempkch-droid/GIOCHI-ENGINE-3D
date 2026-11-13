@@ -55,7 +55,13 @@ header = """/*
  */
 
 /* Part II: the 3D engine has no C representation, so callers only ever see a pointer. */
-typedef struct GiochiEngine3D GiochiEngine3D;"""
+typedef struct GiochiEngine3D GiochiEngine3D;
+
+/* Part II handles. cbindgen emits the function signatures with `uint64_t`, so these
+ * aliases exist to give the contract's names a definition a C compiler accepts. */
+typedef uint64_t GiochiMeshHandle;      /* 0 invalid */
+typedef uint64_t GiochiShaderHandle;    /* 0 invalid */
+typedef uint64_t GiochiGlTextureHandle; /* 0 invalid */"""
 
 [parse]
 parse_deps = true

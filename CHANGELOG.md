@@ -8,6 +8,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Textures on 3D meshes.** `RenderContext3D::create_texture` (file) and
+  `create_texture_from_rgba` (procedural) upload a GL texture, and
+  `draw_mesh_textured` binds it to `u_texture` (unit 0) with a tint. NPOT images get
+  `CLAMP_TO_EDGE`/bilinear and POT ones get `REPEAT`/mipmaps, which is what GLES 2.0
+  allows. The C ABI gains `giochi_gl_texture_create`, `_create_rgba`, `_destroy`,
+  `_width`, `_height` and `giochi_renderer3d_draw_mesh_textured` — the contract named
+  `giochi_gl_texture_create`/`_destroy` since part II, but they had never been
+  implemented, so the `textured` shader had no way to receive a texture.
+  `cube_demo --texture <image>` demonstrates it, and `tests/textures_3d.rs` proves both
+  halves of a two-colour texture reach the framebuffer.
 - **Networking (`giochi-net` + C ABI part IV).** Host-authoritative UDP transport with
   interest management, optional `laminar` reliability/ordering and optional mDNS
   discovery. ABI v4 adds 15 `giochi_net_*` functions and four `GiochiNet*` structs;

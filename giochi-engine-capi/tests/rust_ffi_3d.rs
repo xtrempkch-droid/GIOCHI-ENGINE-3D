@@ -17,14 +17,16 @@ use std::ffi::{CStr, CString};
 use giochi::{
     giochi_abi_version, giochi_camera3d_look_at, giochi_camera3d_new, giochi_engine3d_begin_frame,
     giochi_engine3d_create, giochi_engine3d_destroy, giochi_engine3d_end_frame,
-    giochi_get_last_error, giochi_mesh_create_cube, giochi_mesh_destroy, giochi_mesh_load_obj,
-    giochi_renderer3d_clear, giochi_renderer3d_draw_mesh, giochi_renderer3d_set_light,
+    giochi_get_last_error, giochi_gl_texture_create, giochi_gl_texture_create_rgba,
+    giochi_gl_texture_destroy, giochi_gl_texture_height, giochi_gl_texture_width,
+    giochi_mesh_create_cube, giochi_mesh_destroy, giochi_mesh_load_obj, giochi_renderer3d_clear,
+    giochi_renderer3d_draw_mesh, giochi_renderer3d_draw_mesh_textured, giochi_renderer3d_set_light,
     giochi_shader_builtin, giochi_shader_destroy, giochi_shader_load,
     giochi_transform3d_from_translation, giochi_transform3d_identity, GiochiCamera3D,
     GiochiColor3D, GiochiDirectionalLight, GiochiEngine3D, GiochiQuat, GiochiTransform3D,
     GiochiVec3, GiochiWindowConfig, GIOCHI_ABI_VERSION, GIOCHI_ERROR_ASSET,
     GIOCHI_ERROR_INVALID_ARGUMENT, GIOCHI_ERROR_INVALID_HANDLE, GIOCHI_ERROR_NOT_INITIALIZED,
-    GIOCHI_ERROR_OK, GIOCHI_SHADER_FLAT, GIOCHI_SHADER_PHONG,
+    GIOCHI_ERROR_OK, GIOCHI_SHADER_FLAT, GIOCHI_SHADER_PHONG, GIOCHI_SHADER_TEXTURED,
 };
 
 /// The message of the thread's last error, as a `String`.
@@ -394,6 +396,115 @@ fn the_full_3d_cycle_creates_draws_and_tears_down_cleanly() {
         giochi_mesh_create_cube(1.0, &mut after),
         GIOCHI_ERROR_NOT_INITIALIZED
     );
+}
+
+#[test]
+fn a_gl_texture_created_from_c_draws_on_a_mesh() {
+    let Some(engine) = engine_or_skip() else {
+        return;
+    };
+
+    // 2x2 RGBA: red and blue, so a black frame means "the sampler was not bound".
+    let pixels: [u8; 16] = [
+        255, 0, 0, 255, 0, 0, 255, 255, 255, 0, 0, 255, 0, 0, 255, 255,
+    ];
+    let texture = giochi_gl_texture_create_rgba(pixels.as_ptr(), 2, 2);
+    assert_ne!(texture, 0, "texture create failed: {}", last_error());
+    assert_eq!(giochi_gl_texture_width(texture), 2);
+    assert_eq!(giochi_gl_texture_height(texture), 2);
+
+    let mut mesh = 0u64;
+    assert_eq!(giochi_mesh_create_cube(1.0, &mut mesh), GIOCHI_ERROR_OK);
+    let mut shader = 0u64;
+    assert_eq!(
+        giochi_shader_builtin(GIOCHI_SHADER_TEXTURED, &mut shader),
+        GIOCHI_ERROR_OK
+    );
+
+    assert_eq!(giochi_engine3d_begin_frame(engine), GIOCHI_ERROR_OK);
+    assert_eq!(
+        giochi_renderer3d_clear(engine, color(0.0, 0.0, 0.0, 1.0)),
+        GIOCHI_ERROR_OK
+    );
+
+    let mut camera = giochi_camera3d_new();
+    camera.aspect = 1.0;
+    let model = giochi_transform3d_from_translation(GiochiVec3 {
+        x: 0.0,
+        y: 0.0,
+        z: -4.0,
+        _reserved: [0; 4],
+    });
+    assert_eq!(
+        giochi_renderer3d_draw_mesh_textured(
+            engine,
+            mesh,
+            shader,
+            texture,
+            &model,
+            &camera,
+            color(1.0, 1.0, 1.0, 1.0),
+        ),
+        GIOCHI_ERROR_OK,
+        "textured draw failed: {}",
+        last_error()
+    );
+    assert_eq!(giochi_engine3d_end_frame(engine), GIOCHI_ERROR_OK);
+
+    assert_eq!(giochi_gl_texture_destroy(texture), GIOCHI_ERROR_OK);
+    assert_eq!(
+        giochi_gl_texture_destroy(texture),
+        GIOCHI_ERROR_INVALID_HANDLE,
+        "a double destroy must be reported"
+    );
+    assert_eq!(giochi_mesh_destroy(mesh), GIOCHI_ERROR_OK);
+    assert_eq!(giochi_shader_destroy(shader), GIOCHI_ERROR_OK);
+    giochi_engine3d_destroy(engine);
+}
+
+#[test]
+fn gl_texture_functions_reject_bad_input_with_codes() {
+    // No engine needed for the argument checks; the handle ones need one, so this test
+    // takes the same skip as the renderer tests.
+    let Some(engine) = engine_or_skip() else {
+        return;
+    };
+
+    assert_eq!(giochi_gl_texture_create(std::ptr::null()), 0);
+    assert!(last_error().contains("path"), "{}", last_error());
+
+    assert_eq!(
+        giochi_gl_texture_create(CString::new("/nonexistent/giochi.png").unwrap().as_ptr()),
+        0
+    );
+    assert!(!last_error().is_empty());
+
+    assert_eq!(
+        giochi_gl_texture_create_rgba(std::ptr::null(), 2, 2),
+        0,
+        "NULL pixels are rejected"
+    );
+    assert_eq!(giochi_gl_texture_create_rgba([0u8; 16].as_ptr(), 0, 2), 0);
+    assert_eq!(giochi_gl_texture_destroy(0), GIOCHI_ERROR_INVALID_HANDLE);
+    assert_eq!(giochi_gl_texture_width(0), 0);
+    assert_eq!(giochi_gl_texture_height(0), 0);
+
+    // A NULL engine is a caller mistake in the call itself, and the mesh API reports it
+    // the same way.
+    assert_eq!(
+        giochi_renderer3d_draw_mesh_textured(
+            std::ptr::null_mut(),
+            1,
+            1,
+            1,
+            std::ptr::null(),
+            std::ptr::null(),
+            color(1.0, 1.0, 1.0, 1.0)
+        ),
+        GIOCHI_ERROR_INVALID_ARGUMENT
+    );
+
+    giochi_engine3d_destroy(engine);
 }
 
 #[test]

@@ -682,6 +682,171 @@ pub extern "C" fn giochi_shader_destroy(shader: u64) -> i32 {
     })
 }
 
+// ---- 10.3a GL textures ---------------------------------------------------
+
+/// Decodes an image file and uploads it as a GL texture for meshes.
+///
+/// The 2D `giochi_texture_create` returns a `sdl2::render` texture, which raw GLES
+/// cannot sample; this is the 3D counterpart. Returns `0` on failure, with the reason
+/// in [`giochi_get_last_error`](crate::giochi_get_last_error).
+///
+/// Works on the most recently created engine on this thread (§10.5), like
+/// [`giochi_mesh_load_obj`].
+///
+/// # C ABI
+///
+/// ```c
+/// GiochiGlTextureHandle giochi_gl_texture_create(const char* path);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_gl_texture_create(path: *const c_char) -> u64 {
+    guard(0, || {
+        let Some(path) = string_or_error(path, "path") else {
+            return 0;
+        };
+
+        match with_current(|engine| engine.render.create_texture(std::path::Path::new(&path))) {
+            Err(code) => {
+                if code == codes::NOT_INITIALIZED {
+                    state::set_last_error(
+                        "giochi_gl_texture_create needs a 3D engine; call giochi_engine3d_create first",
+                    );
+                }
+                0
+            }
+            Ok(Ok(handle)) => handle,
+            Ok(Err(err)) => {
+                fail3d(&err);
+                0
+            }
+        }
+    })
+}
+
+/// Uploads raw RGBA8 pixels as a GL texture.
+///
+/// `pixels` must point to exactly `width * height * 4` bytes. Useful for a procedurally
+/// generated texture, which has no file to load.
+///
+/// Returns `0` on failure.
+///
+/// # C ABI
+///
+/// ```c
+/// GiochiGlTextureHandle giochi_gl_texture_create_rgba(const uint8_t* pixels,
+///                                                     uint32_t width, uint32_t height);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_gl_texture_create_rgba(pixels: *const u8, width: u32, height: u32) -> u64 {
+    guard(0, || {
+        if pixels.is_null() {
+            state::invalid_argument("pixels must not be NULL");
+            return 0;
+        }
+        let Some(len) = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|pixels| pixels.checked_mul(4))
+        else {
+            state::invalid_argument("width and height overflow the address space");
+            return 0;
+        };
+        if width == 0 || height == 0 {
+            state::invalid_argument("width and height must be non-zero");
+            return 0;
+        }
+
+        // SAFETY: non-NULL (checked above) and the C contract says it points to
+        // `width * height * 4` readable bytes.
+        let bytes = unsafe { std::slice::from_raw_parts(pixels, len) };
+
+        match with_current(|engine| engine.render.create_texture_from_rgba(width, height, bytes)) {
+            Err(code) => {
+                if code == codes::NOT_INITIALIZED {
+                    state::set_last_error(
+                        "giochi_gl_texture_create_rgba needs a 3D engine; call giochi_engine3d_create first",
+                    );
+                }
+                0
+            }
+            Ok(Ok(handle)) => handle,
+            Ok(Err(err)) => {
+                fail3d(&err);
+                0
+            }
+        }
+    })
+}
+
+/// Releases a GL texture. `0` and unknown handles are errors, like the mesh ones.
+///
+/// # C ABI
+///
+/// ```c
+/// int32_t giochi_gl_texture_destroy(GiochiGlTextureHandle texture);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_gl_texture_destroy(texture: u64) -> i32 {
+    guard(codes::INTERNAL, || {
+        match with_current(|engine| engine.render.destroy_texture(texture)) {
+            Err(code) => {
+                if code == codes::NOT_INITIALIZED {
+                    state::set_last_error(
+                        "giochi_gl_texture_destroy needs the 3D engine that created the texture",
+                    );
+                }
+                code
+            }
+            Ok(true) => codes::OK,
+            Ok(false) => {
+                state::set_last_error(&format!("texture {texture} does not exist"));
+                codes::INVALID_HANDLE
+            }
+        }
+    })
+}
+
+/// Width of a GL texture in pixels, or `0` for an invalid handle.
+///
+/// # C ABI
+///
+/// ```c
+/// uint32_t giochi_gl_texture_width(GiochiGlTextureHandle texture);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_gl_texture_width(texture: u64) -> u32 {
+    guard(0, || {
+        with_current(|engine| {
+            engine
+                .render
+                .texture_size(texture)
+                .map(|(width, _)| width)
+                .unwrap_or(0)
+        })
+        .unwrap_or(0)
+    })
+}
+
+/// Height of a GL texture in pixels, or `0` for an invalid handle.
+///
+/// # C ABI
+///
+/// ```c
+/// uint32_t giochi_gl_texture_height(GiochiGlTextureHandle texture);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_gl_texture_height(texture: u64) -> u32 {
+    guard(0, || {
+        with_current(|engine| {
+            engine
+                .render
+                .texture_size(texture)
+                .map(|(_, height)| height)
+                .unwrap_or(0)
+        })
+        .unwrap_or(0)
+    })
+}
+
 /// Maps a `GIOCHI_SHADER_*` constant onto the crate's enum. `None` for anything else.
 fn builtin_shader(which: i32) -> Option<BuiltinShader> {
     match which {
@@ -830,6 +995,70 @@ pub extern "C" fn giochi_renderer3d_draw_mesh(
             Ok(true) => codes::OK,
             // A model matrix that is not finite, or a camera with no view matrix, arrives as
             // `InvalidArgument` and maps to the code the caller expects.
+            Err(err) => fail3d(&err),
+        }
+    })
+}
+
+/// Draws `mesh` sampling `texture`, with `tint` multiplied over the sample.
+///
+/// `shader` must declare `uniform sampler2D u_texture`; `GIOCHI_SHADER_TEXTURED` does.
+/// `tint` is multiplied into the sampled colour, so white shows the image unchanged.
+///
+/// The texture is bound to unit 0 for the duration of the draw.
+///
+/// # C ABI
+///
+/// ```c
+/// int32_t giochi_renderer3d_draw_mesh_textured(GiochiEngine3D* engine,
+///                                              GiochiMeshHandle mesh,
+///                                              GiochiShaderHandle shader,
+///                                              GiochiGlTextureHandle texture,
+///                                              const GiochiTransform3D* model,
+///                                              const GiochiCamera3D* camera,
+///                                              GiochiColor3D tint);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_renderer3d_draw_mesh_textured(
+    engine: *mut GiochiEngine3D,
+    mesh: u64,
+    shader: u64,
+    texture: u64,
+    model: *const Transform3D,
+    camera: *const Camera3D,
+    tint: Color3D,
+) -> i32 {
+    guard(codes::INTERNAL, || {
+        let engine = match validate_engine(engine) {
+            Ok(engine) => engine,
+            Err(code) => return code,
+        };
+        if model.is_null() {
+            state::invalid_argument(
+                "model must not be NULL; use giochi_transform3d_identity() for no transform",
+            );
+            return codes::INVALID_ARGUMENT;
+        }
+        if camera.is_null() {
+            state::invalid_argument("camera must not be NULL; use giochi_camera3d_new()");
+            return codes::INVALID_ARGUMENT;
+        }
+
+        // SAFETY: the engine was validated above and the two structs are non-NULL
+        // pointers to caller-provided `#[repr(C)]` values, read and never retained.
+        let (model, camera) = unsafe { (&*model, &*camera) };
+
+        match engine
+            .render
+            .draw_mesh_textured(mesh, shader, texture, model, camera, tint)
+        {
+            Ok(false) => {
+                state::set_last_error(&format!(
+                    "mesh {mesh}, shader {shader} or texture {texture} does not exist in this engine"
+                ));
+                codes::INVALID_HANDLE
+            }
+            Ok(true) => codes::OK,
             Err(err) => fail3d(&err),
         }
     })

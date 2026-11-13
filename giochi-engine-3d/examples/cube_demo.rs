@@ -10,6 +10,7 @@
 //! cargo run -p giochi-engine-3d --example cube_demo -- --frames 120
 //! cargo run -p giochi-engine-3d --example cube_demo -- --frames 3 --quadro cube.bmp
 //! cargo run -p giochi-engine-3d --example cube_demo -- --obj model.obj
+//! cargo run -p giochi-engine-3d --example cube_demo -- --texture assets/checker.png
 //! SDL_VIDEODRIVER=offscreen GIOCHI_FORCE_NO_VAO=1 \
 //!     cargo run -p giochi-engine-3d --example cube_demo -- --frames 60
 //! ```
@@ -44,6 +45,12 @@ struct Options {
     /// code in the crate that parses untrusted input. This flag gives it a path to run
     /// through on the console, where `tobj` meets the device's own libc.
     obj: Option<String>,
+    /// `--texture <imagem>`: draw with `BuiltinShader::Textured` instead of the flat
+    /// colour, sampling this image.
+    ///
+    /// The cube's UVs come from the procedural primitive, so any image tiles once per
+    /// face; an OBJ brings its own. Without the flag the demo keeps its old look.
+    texture: Option<String>,
     /// `--quadro <arquivo.bmp>`: capture the last frame.
     ///
     /// Exists for the same reason the 2D demo has it: "drew a frame" and "drew the right
@@ -75,13 +82,17 @@ impl Options {
                 options.obj = Some(next_value(&mut args, "--obj")?.to_string());
             } else if let Some(value) = arg.strip_prefix("--obj=") {
                 options.obj = Some(value.to_string());
+            } else if arg == "--texture" {
+                options.texture = Some(next_value(&mut args, "--texture")?.to_string());
+            } else if let Some(value) = arg.strip_prefix("--texture=") {
+                options.texture = Some(value.to_string());
             } else if arg == "--quadro" {
                 options.quadro = Some(next_value(&mut args, "--quadro")?.to_string());
             } else if let Some(value) = arg.strip_prefix("--quadro=") {
                 options.quadro = Some(value.to_string());
             } else {
                 return Err(format!(
-                    "unknown argument '{arg}'; accepted: --frames N, --obj PATH, --quadro PATH"
+                    "unknown argument '{arg}'; accepted: --frames N, --obj PATH, --texture PATH, --quadro PATH"
                 ));
             }
         }
@@ -93,7 +104,9 @@ impl Options {
 /// Returns the value that follows a flag, or an error naming it.
 fn next_value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, String> {
     args.next().ok_or_else(|| {
-        format!("{flag} needs a value; accepted: --frames N, --obj PATH, --quadro PATH")
+        format!(
+            "{flag} needs a value; accepted: --frames N, --obj PATH, --texture PATH, --quadro PATH"
+        )
     })
 }
 
@@ -148,7 +161,23 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         Some(path) => render.load_obj_mesh(std::path::Path::new(path))?,
         None => render.create_cube_mesh(CUBE_SIZE)?,
     };
-    let shader = render.create_builtin_shader(BuiltinShader::Flat)?;
+    // `--texture` swaps the shader, not the pipeline: the textured shader is the flat
+    // one with a `texture2D` sample multiplied in, so the geometry and the matrices are
+    // identical.
+    let texture = match options.texture.as_deref() {
+        Some(path) => Some(render.create_texture(std::path::Path::new(path))?),
+        None => None,
+    };
+    let builtin = if texture.is_some() {
+        BuiltinShader::Textured
+    } else {
+        BuiltinShader::Flat
+    };
+    let shader = render.create_builtin_shader(builtin)?;
+    if let Some(handle) = texture {
+        let (width, height) = render.texture_size(handle).unwrap_or((0, 0));
+        println!("texture {handle}: {width}x{height} ({})", builtin.name());
+    }
     println!(
         "mesh {mesh}: {} vertices, {} indices, vertex array object: {}",
         render.mesh_vertex_count(mesh),
@@ -183,7 +212,7 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
 
         for event in platform.poll_events() {
             if quit_signal(&event) != QuitSignal::None {
-                report(&mut render, mesh, shader, frames);
+                report(&mut render, mesh, shader, texture, frames);
                 return Ok(());
             }
         }
@@ -200,13 +229,18 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         .with_position(Vec3::new(0.0, 0.0, -CUBE_DISTANCE));
 
         render.begin_frame(&window);
-        render.draw_mesh_colored(
-            mesh,
-            shader,
-            &model,
-            &camera,
-            Color3D::new(0.95, 0.55, 0.25, 1.0),
-        )?;
+        match texture {
+            Some(handle) => {
+                render.draw_mesh_textured(mesh, shader, handle, &model, &camera, Color3D::WHITE)?
+            }
+            None => render.draw_mesh_colored(
+                mesh,
+                shader,
+                &model,
+                &camera,
+                Color3D::new(0.95, 0.55, 0.25, 1.0),
+            )?,
+        };
 
         // The capture has to happen before the swap: after `end_frame` the back buffer
         // holds the *next* frame's undefined contents.
@@ -236,7 +270,7 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
 
         if let Some(limit) = options.frames {
             if frames >= limit {
-                report(&mut render, mesh, shader, frames);
+                report(&mut render, mesh, shader, texture, frames);
                 return Ok(());
             }
             continue;
@@ -249,17 +283,21 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn report(render: &mut RenderContext3D, mesh: u64, shader: u64, frames: u64) {
+fn report(render: &mut RenderContext3D, mesh: u64, shader: u64, texture: Option<u64>, frames: u64) {
     println!("{frames} frames rendered, no GL error");
 
     // The leak check the 2D engine also prints: after destroying its own resources a game
     // should have nothing left in the registry.
     render.destroy_mesh(mesh);
     render.destroy_shader(shader);
+    if let Some(handle) = texture {
+        render.destroy_texture(handle);
+    }
     println!(
-        "released: {} meshes and {} shaders left",
+        "released: {} meshes, {} shaders and {} textures left",
         render.mesh_count(),
-        render.shader_count()
+        render.shader_count(),
+        render.texture_count()
     );
 }
 

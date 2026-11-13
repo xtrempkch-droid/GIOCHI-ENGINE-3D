@@ -14,7 +14,7 @@ use crate::error::{Error3D, Result3D};
 use crate::math3d::{Camera3D, Color3D, Mat4, Transform3D};
 use crate::mesh::{Mesh, Vertex};
 use crate::registry::HandleRegistry;
-use crate::render3d::{DirectionalLight, InstancedRenderer, Upscaler};
+use crate::render3d::{DirectionalLight, InstancedRenderer, Texture3D, Upscaler};
 use crate::shader::{BuiltinShader, Program};
 
 /// Opaque handle to a mesh. `0` is invalid.
@@ -29,6 +29,12 @@ pub type MeshHandle = u64;
 ///
 /// `typedef uint64_t GiochiShaderHandle;`.
 pub type ShaderHandle = u64;
+/// Opaque handle to a GL texture. `0` is invalid.
+///
+/// # C ABI
+///
+/// `typedef uint64_t GiochiGlTextureHandle;` (`docs/C_ABI_CONTRACT.md` §9.5).
+pub type TextureHandle = u64;
 
 /// The 3D renderer.
 ///
@@ -44,6 +50,10 @@ pub struct RenderContext3D {
     light: DirectionalLight,
     meshes: HandleRegistry<Mesh>,
     shaders: HandleRegistry<Program>,
+    /// Textures a mesh can sample. Separate from the 2D engine's `TextureRegistry`:
+    /// those belong to a `sdl2::render` canvas, and this context draws with raw GLES
+    /// (ADR-037), so one handle cannot serve both.
+    textures: HandleRegistry<Texture3D>,
     /// Set when the frame renders below the window size; `None` is full resolution.
     ///
     /// Stored as the requested scale rather than as a `bool` so a resize can rebuild the
@@ -77,6 +87,7 @@ impl std::fmt::Debug for RenderContext3D {
             .field("light", &self.light)
             .field("meshes", &self.meshes.len())
             .field("shaders", &self.shaders.len())
+            .field("textures", &self.textures.len())
             .finish_non_exhaustive()
     }
 }
@@ -106,6 +117,7 @@ impl RenderContext3D {
             light: DirectionalLight::sun(),
             meshes: HandleRegistry::new(),
             shaders: HandleRegistry::new(),
+            textures: HandleRegistry::new(),
             render_scale: None,
             upscaler: None,
             // `RenderContext3D::new` is infallible by contract, so a refused buffer
@@ -596,6 +608,67 @@ impl RenderContext3D {
         self.shaders.len()
     }
 
+    // ---- textures --------------------------------------------------------
+
+    /// Decodes an image file and uploads it as a GL texture.
+    ///
+    /// Use it with [`BuiltinShader::Textured`] and
+    /// [`RenderContext3D::draw_mesh_textured`]. The mesh must carry UVs — every
+    /// primitive and every OBJ loaded by this crate does, so the only case that does
+    /// not is a hand-built [`Vertex::flat`] mesh.
+    ///
+    /// # Errors
+    ///
+    /// [`Error3D::Asset`] when the file cannot be read or decoded, and
+    /// [`Error3D::GlObject`] when the driver refuses the upload.
+    pub fn create_texture(&mut self, path: &std::path::Path) -> Result3D<TextureHandle> {
+        let texture = Texture3D::from_file(self.gl.glow(), path)?;
+        Ok(self.textures.insert(texture))
+    }
+
+    /// Uploads raw RGBA8 pixels, for procedurally generated textures.
+    ///
+    /// `pixels` must be exactly `width * height * 4` bytes.
+    pub fn create_texture_from_rgba(
+        &mut self,
+        width: u32,
+        height: u32,
+        pixels: &[u8],
+    ) -> Result3D<TextureHandle> {
+        let texture = Texture3D::from_rgba8(self.gl.glow(), width, height, pixels)?;
+        Ok(self.textures.insert(texture))
+    }
+
+    /// Releases a texture. Returns `false` for `0` or an unknown handle.
+    pub fn destroy_texture(&mut self, handle: TextureHandle) -> bool {
+        // `take` so `Rc::try_unwrap` can succeed; `get` clones and leaks the GL name
+        // (the same trap `destroy_mesh` documents).
+        let Some(texture) = self.textures.take(handle) else {
+            return false;
+        };
+
+        match std::rc::Rc::try_unwrap(texture) {
+            Ok(texture) => texture.destroy(self.gl.glow()),
+            Err(_) => {
+                log::warn!("texture {handle} is still referenced elsewhere; GL object leaked");
+            }
+        }
+
+        true
+    }
+
+    /// Pixel size of a texture, or `None` for an unknown handle.
+    pub fn texture_size(&self, handle: TextureHandle) -> Option<(u32, u32)> {
+        self.textures
+            .get(handle)
+            .map(|texture| (texture.width(), texture.height()))
+    }
+
+    /// Number of live textures.
+    pub fn texture_count(&self) -> usize {
+        self.textures.len()
+    }
+
     /// Releases every mesh and shader, then reports whether anything is left.
     ///
     /// Exists for an orderly shutdown and for the leak check the demo prints: after
@@ -619,6 +692,12 @@ impl RenderContext3D {
             }
             self.destroy_shader(handle);
         }
+        for handle in self.textures.handles() {
+            if self.textures.strong_count(handle) > Some(1) {
+                leaked += 1;
+            }
+            self.destroy_texture(handle);
+        }
 
         // Not a handle either: the render target is rebuilt on demand, so dropping it
         // here releases the framebuffer, its attachments and the upscale program.
@@ -638,7 +717,7 @@ impl RenderContext3D {
             log::warn!("{leaked} resource(s) were still referenced elsewhere and leaked");
         }
 
-        self.meshes.is_empty() && self.shaders.is_empty() && leaked == 0
+        self.meshes.is_empty() && self.shaders.is_empty() && self.textures.is_empty() && leaked == 0
     }
 
     // ---- drawing ---------------------------------------------------------
@@ -790,6 +869,53 @@ impl RenderContext3D {
         program.set_color(self.gl.glow(), "u_color", colour.clamped());
 
         mesh.draw(self.gl.glow(), &program);
+
+        #[cfg(feature = "profiling")]
+        self.counters.record_mesh(
+            u64::from(mesh.vertex_count()),
+            u64::from(mesh.vertex_count()) * std::mem::size_of::<Vertex>() as u64,
+        );
+
+        Ok(true)
+    }
+
+    /// Draws `mesh` sampling `texture`, with `tint` multiplied over the sample.
+    ///
+    /// `shader` must declare `uniform sampler2D u_texture` — [`BuiltinShader::Textured`]
+    /// does, and a custom shader may. The texture is bound to unit 0 and the sampler
+    /// uniform is pointed at it; binding one without the other is a black mesh with no
+    /// GL error, which is why both happen inside this function.
+    ///
+    /// `tint` is multiplied into the sampled colour, so [`Color3D::WHITE`] shows the
+    /// image unchanged and a lower alpha fades it.
+    ///
+    /// Returns `false` when any of the three handles is unknown.
+    pub fn draw_mesh_textured(
+        &mut self,
+        mesh: MeshHandle,
+        shader: ShaderHandle,
+        texture: TextureHandle,
+        model: &Transform3D,
+        camera: &Camera3D,
+        tint: Color3D,
+    ) -> Result3D<bool> {
+        let Some(mesh) = self.meshes.get(mesh) else {
+            return Ok(false);
+        };
+        let Some(program) = self.shaders.get(shader) else {
+            return Ok(false);
+        };
+        let Some(texture) = self.textures.get(texture) else {
+            return Ok(false);
+        };
+
+        self.bind_and_upload(&program, model, camera)?;
+
+        let gl = self.gl.glow();
+        program.set_texture(gl, "u_texture", texture.gl_name(), 0);
+        program.set_color(gl, "u_tint", tint.clamped());
+
+        mesh.draw(gl, &program);
 
         #[cfg(feature = "profiling")]
         self.counters.record_mesh(

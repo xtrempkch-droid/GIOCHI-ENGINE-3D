@@ -183,6 +183,30 @@ int main(void)
         CHECK(missing == 0);
     }
 
+    /* ---- GL textures ------------------------------------------------------ */
+    /* The 2D `giochi_texture_create` returns an `sdl2::render` texture, which raw GLES
+     * cannot sample. Part II has its own, and these checks are what proves the symbols
+     * link from C. A real textured frame is drawn below. */
+    uint64_t texture = 0;
+    {
+        CHECK(giochi_gl_texture_create(NULL) == 0);
+        CHECK(giochi_gl_texture_create("/nonexistent/giochi.png") == 0);
+        CHECK(!giochi_get_last_error()[0] == '\0');
+        CHECK(giochi_gl_texture_create_rgba(NULL, 2, 2) == 0);
+        CHECK(giochi_gl_texture_width(0) == 0);
+        CHECK(giochi_gl_texture_height(0) == 0);
+        CHECK_CODE(giochi_gl_texture_destroy(0), GIOCHI_ERROR_INVALID_HANDLE);
+
+        static const uint8_t pixels[16] = {
+            255, 0, 0, 255,  0, 0, 255, 255,
+            255, 0, 0, 255,  0, 0, 255, 255,
+        };
+        texture = giochi_gl_texture_create_rgba(pixels, 2, 2);
+        CHECK(texture != 0);
+        CHECK(giochi_gl_texture_width(texture) == 2);
+        CHECK(giochi_gl_texture_height(texture) == 2);
+    }
+
     /* ---- camera and transforms -------------------------------------------- */
     GiochiCamera3D camera = giochi_camera3d_new();
     CHECK(camera.aspect == 0.0f);   /* "ask the drawable", per ADR-035 */
@@ -230,6 +254,28 @@ int main(void)
         CHECK_OK(giochi_renderer3d_draw_mesh(engine, cube, shader, &model, &camera,
                                              cube_color));
         CHECK_OK(giochi_engine3d_end_frame(engine));
+    }
+
+    /* One frame with the textured shader and the checkerboard texture above. A wrong
+     * sampler unit, or a texture deleted before the draw, would make this fail or draw
+     * an all-background frame -- the smokes do not read pixels, so the pixel assertion
+     * lives in `giochi-engine-3d/tests/textures_3d.rs`. */
+    {
+        uint64_t textured_shader = 0;
+        CHECK_OK(giochi_shader_builtin(GIOCHI_SHADER_TEXTURED, &textured_shader));
+
+        CHECK_OK(giochi_engine3d_begin_frame(engine));
+        CHECK_OK(giochi_renderer3d_clear(engine, background));
+        const GiochiColor3D white = color3d(1.0f, 1.0f, 1.0f, 1.0f);
+        CHECK_OK(giochi_renderer3d_draw_mesh_textured(engine, cube, textured_shader, texture,
+                                                      &model, &camera, white));
+        CHECK_OK(giochi_engine3d_end_frame(engine));
+
+        /* An unknown texture is a handle error, like an unknown mesh. */
+        CHECK_CODE(giochi_renderer3d_draw_mesh_textured(engine, cube, textured_shader, 0, &model,
+                                                        &camera, white),
+                   GIOCHI_ERROR_INVALID_HANDLE);
+        CHECK_OK(giochi_shader_destroy(textured_shader));
     }
 
     /* ---- the error paths a caller will actually hit ----------------------- */
@@ -299,6 +345,8 @@ int main(void)
     CHECK_CODE(giochi_mesh_destroy(cube), GIOCHI_ERROR_INVALID_HANDLE);
     CHECK_OK(giochi_shader_destroy(shader));
     CHECK_CODE(giochi_shader_destroy(shader), GIOCHI_ERROR_INVALID_HANDLE);
+    CHECK_OK(giochi_gl_texture_destroy(texture));
+    CHECK_CODE(giochi_gl_texture_destroy(texture), GIOCHI_ERROR_INVALID_HANDLE);
 
     giochi_engine3d_destroy(engine);
 

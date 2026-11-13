@@ -57,7 +57,7 @@ mod registry;
 pub use error::{Error3D, Result3D};
 pub use render3d::{
     sanitise_scale, scaled_size, DirectionalLight, InstancedRenderer, MeshHandle, RenderContext3D,
-    ShaderHandle, Upscaler, MAX_SCALE, MIN_SCALE,
+    ShaderHandle, TextureHandle, Upscaler, MAX_SCALE, MIN_SCALE,
 };
 
 /// Semantic version of the crate, as declared in `Cargo.toml`.
