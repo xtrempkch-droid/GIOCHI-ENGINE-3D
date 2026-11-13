@@ -169,7 +169,7 @@ every OBJ loaded by the crate supplies one — so there is no extra vertex work.
 
 ```rust
 use std::path::Path;
-use giochi_engine_3d::math3d::{Camera3D, Color3D, Transform3D};
+use giochi_engine_3d::math3d::{Camera3D, Color3D, Transform3D, Vec3};
 use giochi_engine_3d::shader::BuiltinShader;
 
 // 1. Upload. PNG, JPEG and BMP all work; the format is sniffed from the file.
