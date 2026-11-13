@@ -1,6 +1,6 @@
 //! `giochi-net` — camada de rede P2P do GIOCHI-ENGINE-3D.
 //!
-//! Especificação: `Relatório consultor externo.md`, relatório 2 (§Arquitetura,
+//! Especificação: `Relatório consultor externo.txt`, relatório 2 (§Arquitetura,
 //! §Protocolo, §Interest Management).
 //!
 //! ## Princípios que este crate segue, e por quê

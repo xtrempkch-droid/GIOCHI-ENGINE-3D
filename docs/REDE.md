@@ -1,7 +1,7 @@
 # Rede P2P — `giochi-net`
 
 Implementação do **Relatório 2** do
-[Relatório consultor externo](../Relatório%20consultor%20externo.md): camada de
+[Relatório consultor externo](../Relatório%20consultor%20externo.txt): camada de
 rede P2P host-autoritativa com *Interest Management*, para o GIOCHI-OS em Linux
 ARM64.
 

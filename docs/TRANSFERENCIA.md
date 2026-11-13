@@ -467,5 +467,5 @@ clientes) se sustentam.
   `postcard`, por que o raio da AOI é do jogo, tabela dos dois transportes).
 - `docs/C_ABI_CONTRACT.md` — o contrato da ABI. **A linha 41 precisa mudar**
   quando a ABI de rede existir.
-- `Relatório consultor externo.md` — o pedido original (relatório 2, rede P2P).
+- `Relatório consultor externo.txt` — o pedido original (relatório 2, rede P2P).
 - `docs/DECISIONS.md` — ADRs; a ADR-038 explica a convenção de profundidade.
