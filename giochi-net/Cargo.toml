@@ -31,6 +31,14 @@ repository.workspace = true
 # Fica opcional para o alvo aarch64 poder continuar sem dependência alguma
 # quando isso importar mais que a garantia de entrega.
 laminar = { version = "0.5", optional = true }
+# Descoberta de hosts na LAN (ver `src/descobrir.rs`).
+#
+# mDNS parece simples e nao e: sondagem para evitar colisao de nome, goodbye com
+# TTL 0, e principalmente enviar para o grupo multicast NA INTERFACE certa --
+# um send_to em 224.0.0.251 sem IP_MULTICAST_IF sai pela rota padrao e ninguem
+# na LAN ve. A biblioteca resolve isso; escrever a mao custaria centenas de
+# linhas de socket option e ficaria pior.
+mdns-sd = { version = "0.13", optional = true }
 
 [dev-dependencies]
 
@@ -39,3 +47,7 @@ default = []
 # Transporte alternativo com garantias de entrega. Não muda o protocolo: os
 # mesmos bytes de `wire` viajam por baixo.
 laminar = ["dep:laminar"]
+# Descoberta de hosts na LAN por mDNS. Puxa `if-addrs` e `socket2`, portanto NAO
+# e compativel com o requisito de "zero dependencia" do alvo aarch64 -- fica
+# desligada por padrao, e o CI cross-verifica esta feature a parte.
+mdns = ["dep:mdns-sd"]

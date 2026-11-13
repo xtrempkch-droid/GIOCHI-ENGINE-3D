@@ -103,55 +103,92 @@ dentro do nosso `drenar`. Consequência: **os dois lados precisam chamar
 cliente que só envia — arranjo natural — faz o cliente nunca transmitir nada, e
 o sintoma é "a rede não funciona" sem erro nenhum.
 
-### 2.4 `mdns-sd` não entrou — e é decisão em aberto, não esquecimento
-O relatório pede descoberta automática por mDNS. O `mdns-sd` é puro Rust, mas
-puxa `if-addrs` e `socket2`, que enumeram interfaces por syscall. Pode passar em
-`aarch64-unknown-linux-gnu` sem problema — **não há como saber sem compilar**, e
-aqui não há compilador.
+### 2.4 mDNS: entrou, com uma armadilha medida
+O relatório pede descoberta automática em LAN. **Entrou**, atrás da feature
+`mdns`, com `mdns-sd` 0.13 (ver `src/descobrir.rs`).
 
-Adiar uma dependência por falta de ferramenta de verificação é decisão, e ela
-custa: **sem mDNS, o cliente precisa do IP do host na mão.** No GIOCHI-OS isso é
-aceitável no curto prazo (a rede é LAN, e o `giochi-selftest` já mostra o IP no
-log), mas não é o que o relatório pediu.
+Custa a única dependência com peso do crate: `mdns-sd` puxa `if-addrs`,
+`socket2`, `flume` e `mio`. Por isso fica **desligada por padrão** — o alvo
+aarch64 continua podendo ser zero-dependência. O CI cross-verifica a feature
+`mdns` a parte, em `scripts/check-aarch64.sh`.
 
-Quando houver toolchain: ligar `mdns-sd`, compilar para aarch64, e se passar,
-manter. Se falhar, o substituto é descoberta por **broadcast UDP** num endereço
-fixo — 30 linhas, sem dependência, funciona em LAN plana.
+**Por que não foi escrito à mão:** mDNS parece simples e não é. Sondagem para
+evitar colisão de nome, *goodbye* com TTL 0, resposta a PTR/SRV/TXT/A, e — a que
+mais dói — **enviar para o grupo multicast na interface certa**: um `send_to` em
+`224.0.0.251` num socket sem `IP_MULTICAST_IF` sai pela rota padrão e ninguém na
+LAN vê. Seriam sessenta linhas de socket option e um comportamento que só falha
+no aparelho de outra pessoa.
+
+**A armadilha medida, e que custa uma sessão:** anunciar com `127.0.0.1` não
+funciona. O registro existe, o *browse* encontra, e **nenhum outro aparelho
+consegue conectar**. Medido nesta máquina: com `127.0.0.1` a descoberta deu
+"não achou" em 15 s; com o IP da interface (`192.168.1.107`), resolveu em menos
+de 2 s. `ip_anunciavel()` descobre o IP certo com o truque do `connect` UDP e
+**recusa loopback** — a recusa é a correção.
+
+Se o cross-compile de `mdns` falhar em aarch64, o substituto é **broadcast UDP**
+num endereço fixo: 30 linhas, sem dependência, funciona em LAN plana.
 
 ---
 
-## 3. O que o relatório pede e NÃO foi feito
+## 3. O que o relatório pede e o estado de cada item
 
 | # | Pedido | Estado |
 | --- | --- | --- |
 | 1 | crate `giochi-net` | **feito** |
 | 2 | protocolo + máquina de estados | **feito** |
-| 3 | funções na ABI C (`giochi-engine-capi`) | **não feito** |
+| 3 | funções na ABI C (`giochi-engine-capi`) | **feito** — parte IV, ABI v4 (commit `45e2ffa`) |
 | 4 | teste de integração com dois processos | **parcial** — host e cliente rodam em sockets reais dentro do mesmo processo de teste; dois processos não |
-| 5 | cross-compile aarch64 no CI | **não feito** |
+| 5 | cross-compile aarch64 no CI | **feito** — `scripts/check-aarch64.sh` cobre o workspace e as features `laminar` e `mdns` |
 | — | AOI por cliente | **feito** |
-| — | `net_set_camera_pos` / `net_poll_snapshot_filtered` | **não feito** (a AOI existe na engine; a ABI não expõe) |
+| — | `net_set_camera_pos` / `net_poll_snapshot_filtered` | **feito** na ABI |
+| — | descoberta em LAN (mDNS) | **feito** — feature `mdns`, §2.4 |
 
-### Por que a ABI C não foi feita
+### O que sobrou da ABI C
+
+Nada. As 14 funções estão em `giochi-engine-capi/src/net.rs`, o header foi
+regerado com `cbindgen 0.27`, e o contrato ganhou §16–19. Verificado de C,
+Python e Rust no CI (`c_smoke: OK (abi 4, ...)`).
+
+**A descoberta mDNS não está na ABI**, de propósito: ela serve ao *launcher*
+(Rust), que encontra o host e passa o endereço pronto ao app. Expor ao C
+significaria mais três funções e uma ABI v5 sem necessidade demonstrada. Se um
+app C precisar descobrir sozinho, é aí que se faz.
+
+### Como a ABI C foi feita (e o que custou)
 
 O `giochi-engine-capi` usa registry de handles opacos `u64` e `#[repr(C)]`, com
-`cbindgen` gerando o header e um teste de layout de ABI (`tests/abi_layout.rs`).
-Acrescentar seis funções lá exige:
+`cbindgen` gerando o header. A parte IV seguiu o mesmo padrão, e o obstáculo real
+não foi nenhum dos três previstos — foi **C não ter `Vec`**:
 
-1. decidir a struct `#[repr(C)]` do snapshot (e ela precisa de **tamanho fixo**,
-   porque C não tem `Vec`);
-2. regenerar o header e o `C_ABI_CONTRACT.md`;
-3. atualizar o teste de layout, que falha de propósito quando a ABI muda.
+`Mensagem::Inimigos` carrega uma lista, e uma struct `#[repr(C)]` precisa de
+tamanho fixo. A saída foi array de 64 mais **dois contadores** (`total` e
+`escritos`), e `total > escritos` passou a ser o sinal de truncamento que o
+consumidor tem de olhar.
 
-É trabalho de uma sessão própria, e fazer às cegas — sem compilar — produziria
-header e documentação que não correspondem ao código. **A camada Rust está pronta;
-a ponte C é o próximo passo**, e é o que destrava o jogo de verdade.
+Uma exceção deliberada à regra "0 ou negativo": `giochi_net_poll_snapshot`
+devolve `1` (`GIOCHI_NET_AGUARDE`) quando não há snapshot novo, porque o host
+publica a 15 Hz e o jogo chama a 60 Hz — esse é o caso normal, não erro.
+
+O teste de layout não foi tocado: ele prende as structs do 2D/3D, e a parte IV
+tem asserts próprios em `net.rs::tamanho_das_structs_e_estavel`.
 
 ---
 
 ## 4. O que os testes cobrem
 
-`cargo test -p giochi-net` — **34 testes**, e **38** com `--features laminar`. Todos executados e verdes:
+`cargo test -p giochi-net` — **34 testes**; **38** com `--features laminar`;
+**37 + 1 ignorado** com `--features mdns`. Todos executados:
+
+| Configuração | Testes | Observação |
+| --- | --- | --- |
+| padrão | 34 | zero dependência |
+| `--features laminar` | 38 | +4 do transporte |
+| `--features mdns` | 37 | +3 do mDNS e 1 `#[ignore]` |
+
+O teste ignorado (`encontra_o_proprio_anuncio`) **é** executado, com
+`-- --ignored`: depende de multicast numa interface real, então não pode rodar
+no CI. Medido nesta máquina: encontra o próprio anúncio em **1,03 s**.
 
 | Arquivo | Testes | O que fixa |
 | --- | --- | --- |
@@ -161,6 +198,7 @@ a ponte C é o próximo passo**, e é o que destrava o jogo de verdade.
 | `host.rs` | 5 | sobe e escuta, handshake atribui id 1, versão errada não cria cliente, input sem handshake ignorado, snapshot respeita taxa e AOI |
 | `client.rs` | 5 | entra e recebe id, input chega e snapshot volta filtrado, `enviar_input` recusa o que não é do cliente, pacote de outro endereço ignorado, RTT satura |
 | `lib.rs` | 2 | versão/porta/taxa estáveis, datagrama cabe no MTU mínimo de IPv6 |
+| `descobrir.rs` (feature `mdns`) | 3 + 1 ignorado | nome de instância utilizável, tipo de serviço com o sufixo obrigatório, `ip_anunciavel` recusa loopback; o ignorado anuncia e encontra o próprio anúncio de verdade |
 
 O teste mais importante é o de `peer.rs`: ele **mede o tempo** de `drenar` sem
 pacote na fila. Se o socket voltasse a ser bloqueante, ele falha por timeout — é o
@@ -190,18 +228,18 @@ não existia no enum. Compilar teria falhado na primeira linha útil.
 
 ## 6. O que fazer na próxima sessão, em ordem
 
-1. **`cargo test -p giochi-net`** e **`--features laminar`** — já rodam, 34 e 38.
-   Rodar de novo depois de qualquer mudança é obrigatório: o crate tem dois bugs
-   que só apareceram aqui (tamanho de inimigo no datagrama e `0.0.0.0` como
-   endereço de destino).
-2. **`cargo build --workspace`** — garantir que entrar no workspace não quebrou
-   os outros cinco crates.
-3. **`scripts/check-aarch64.sh`** — o repo já tem o script de cross-compile; ele
-   precisa incluir `giochi-net`.
-4. **ABI C** — `net_host_create`, `net_client_join`, `net_send_input`,
-   `net_set_camera_pos`, `net_poll_snapshot`, `net_poll_snapshot_filtered`.
-   Definir a struct de snapshot com tamanho fixo e regenerar header + contrato.
-5. **Decidir mDNS** com o compilador na mão (§2.4).
+1. **Teste com dois processos** (§4.2 do `TRANSFERENCIA.md`) — é o único item do
+   relatório ainda incompleto. Host e cliente já trocam pacotes em sockets reais,
+   mas no mesmo processo.
+2. **Rodar em hardware.** Nada disto rodou num aparelho. Os números de AOI em
+   §2.3 são aritmética, não medição.
+3. **Permissão de rede no manifesto** — cruza `Giochi app` e `Giochi os`;
+   documentado em §7.
+4. **Decidir se a descoberta vai para a ABI C.** Hoje é só Rust, e o launcher é
+   Rust — mas se um app C precisar descobrir sozinho, são três funções e ABI v5.
+5. **Reavaliar `mdns-sd` 0.21.** A 0.13 foi a que se verificou; a 0.21 existe e é
+   mais nova. Trocar exige repetir esta bateria (<code>--features mdns</code> e o
+   cross-check aarch64).
 
 ## 7. O que o GIOCHI-OS precisa, e ainda não tem
 

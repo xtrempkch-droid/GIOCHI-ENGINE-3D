@@ -39,4 +39,8 @@ cargo check --workspace --target aarch64-unknown-linux-gnu "$@"
 # crates que precisam cross-compilar para o aparelho. Verificado à parte, de
 # propósito — `--all-features` no workspace ligaria também `profiling` e o
 # `tester` do laminar, que não são o que o aparelho usa.
-cargo check -p giochi-net --features laminar --target aarch64-unknown-linux-gnu "$@"
+# A descoberta por mDNS e a feature que mais arrisca a portabilidade: `mdns-sd`
+# puxa `if-addrs` e `socket2`, que fazem syscalls de enumeracao de interface.
+# Se ela nao compilar para o aparelho, o substituto e broadcast UDP (ver
+# docs/REDE.md) -- mas isso so se decide com o resultado deste passo.
+cargo check -p giochi-net --features laminar,mdns --target aarch64-unknown-linux-gnu "$@"

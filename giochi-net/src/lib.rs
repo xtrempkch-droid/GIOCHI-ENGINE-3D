@@ -36,6 +36,8 @@
 
 pub mod aoi;
 pub mod client;
+#[cfg(feature = "mdns")]
+pub mod descobrir;
 pub mod host;
 #[cfg(feature = "laminar")]
 pub mod laminar_backend;
@@ -44,6 +46,8 @@ pub mod wire;
 
 pub use aoi::{filtrar, AreaDeInteresse, FiltroAoi};
 pub use client::{Cliente, Estado};
+#[cfg(feature = "mdns")]
+pub use descobrir::{Anunciante, Descoberta, Encontrado, ErroDescoberta};
 pub use host::{ClienteId, Host, MAX_CLIENTES, TIMEOUT_CLIENTE};
 pub use peer::{Evento, Modo, Net};
 pub use wire::{ErroLeitura, Mensagem, ResumoJogador, SnapshotInimigo};
