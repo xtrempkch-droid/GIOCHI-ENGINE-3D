@@ -99,6 +99,59 @@ done
 CROSS_SYSROOT=/tmp/console-sysroot scripts/build-aarch64.sh --release
 ```
 
+**A runtime-only image has no `.pc` files and no headers.** Measured on the R35S
+(Buildroot 2024.02): `/usr/lib/libSDL2*.so*` exist, but there is no `sdl2.pc`, no
+`/usr/include/SDL2` and no `pkg-config`. `--features sdl2-system` then fails at
+`sdl2-sys`'s `pkg-config` probe. What worked was to lift the shared objects and write the
+four `.pc` files by hand, with the headers taken from the build host (the `sdl2-sys`
+bindings are pre-generated, so only the include path has to exist):
+
+```bash
+mkdir -p /tmp/r35s-sysroot/usr/lib/aarch64-linux-gnu /tmp/r35s-sysroot/usr/lib/pkgconfig
+cd /tmp/r35s-sysroot/usr/lib/aarch64-linux-gnu
+for so in $(ssh root@console 'ls /usr/lib/libSDL2*.so.*'); do
+    scp -q root@console:"$so" .
+done
+ln -sf libSDL2-2.0.so.0       libSDL2.so
+ln -sf libSDL2_image-2.0.so.0 libSDL2_image.so
+ln -sf libSDL2_mixer-2.0.so.0 libSDL2_mixer.so
+ln -sf libSDL2_ttf-2.0.so.0   libSDL2_ttf.so
+
+# sdl2.pc points at the sysroot; PKG_CONFIG_SYSROOT_DIR, which build-aarch64.sh
+# already exports, prefixes these paths with the sysroot at link time.
+cat > /tmp/r35s-sysroot/usr/lib/pkgconfig/sdl2.pc <<'PC'
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: sdl2
+Description: Simple DirectMedia Layer
+Version: 2.28.5
+Libs: -L${libdir} -lSDL2
+Cflags: -I${includedir}/SDL2 -D_REENTRANT
+PC
+# SDL2_image.pc, SDL2_mixer.pc and SDL2_ttf.pc follow the same shape.
+cp -r /usr/include/SDL2 /tmp/r35s-sysroot/usr/include/
+```
+
+Then, because `--features` on a virtual workspace needs package-qualified names:
+
+```bash
+PKG_CONFIG_ALLOW_CROSS=1 CROSS_SYSROOT=/tmp/r35s-sysroot scripts/build-aarch64.sh \
+    --release --workspace --examples --no-default-features \
+    --features giochi-engine/sdl2-system,giochi-engine-3d/sdl2-system,\
+giochi-engine-capi/sdl2-system,giochi-engine-lua/sdl2-system,giochi-demo/sdl2-system
+```
+
+`scripts/hardware-check.sh` forwards those two options, so the whole device run is:
+
+```bash
+PKG_CONFIG_ALLOW_CROSS=1 scripts/hardware-check.sh \
+    --host root@10.55.0.2 --sysroot /tmp/r35s-sysroot \
+    --no-default-features --features <the list above>
+```
+
 The script looks for the satellites under `$CROSS_SYSROOT/usr/lib/<triple>`,
 `$CROSS_SYSROOT/usr/lib/aarch64-linux-gnu`, `$CROSS_SYSROOT/lib/aarch64-linux-gnu`
 and `$CROSS_SYSROOT/usr/lib`, and adds a `-Lnative=` flag so `rustc` finds them.

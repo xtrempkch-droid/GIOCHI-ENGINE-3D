@@ -311,6 +311,29 @@ failure:
 
 ```bash
 scripts/hardware-check.sh --host root@10.55.0.2 --sysroot /tmp/r35s-sysroot
+
+### What an R35S actually provides (measured 2026-11-13)
+
+| Item | Value |
+|---|---|
+| Board / CPU | RK3326, Cortex-A35 (`CPU part 0xd04`), 4 cores, 964 MB |
+| GPU / driver | Mali-G31, Panfrost/Mesa, **GLES 2.0** |
+| Panel | 640x480; KMSDRM ignores the requested window size (ADR-035) |
+| SDL2 | 2.28.5 — **KMSDRM only**, no `dummy` and no `offscreen` video driver |
+| glibc | 2.38 |
+| SDL2_image / mixer / ttf | 2.8.2 / 2.6.3 / 2.22.0 |
+
+Two consequences worth knowing before writing a test for this class of device:
+
+* **`SDL_VIDEODRIVER=offscreen` silently skips everything.** The integration tests now
+  honour an existing value (`tests/common::set_headless_driver`), so run them here with
+  `SDL_VIDEODRIVER=kmsdrm` after freeing the console — otherwise every 3D test returns
+  "skipped" and the suite still reports `ok`.
+* **The `cargo test` harness does not start.** libtest references
+  `pidfd_spawnp@GLIBC_2.39` (weak, from std's process module) and glibc here is 2.38, so
+  the binary aborts with "version `GLIBC_2.39' not found". Validate on the device with
+  plain binaries: `giochi-net/examples/loopback_smoke`, `cube_demo --texture`,
+  `model_viewer`, and the C consumers — which is what `hardware-check.sh` runs.
 ```
 
 It cross-builds, deploys to `/opt/giochi`, frees DRM by parking the launcher,
