@@ -129,6 +129,17 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/main" "origin/${{ github.base_ref || 'main' }}"
           git -C "$RUNNER_TEMP/main" log -1 --oneline
 
+      - name: Prepare the base branch's cargo dirs
+        # O build aqui acontece FORA do repositorio (`$RUNNER_TEMP/main`, um
+        # worktree), entao o passo que cria `deps/` na raiz do repo nao cobre.
+        # E `cargo bench` usa o perfil release. Sem isto, o `sdl2-sys` falha ao
+        # copiar para `release/deps/` -- que e o mesmo defeito que derrubou os
+        # outros jobs, num diretorio diferente.
+        working-directory: ${{ runner.temp }}/main
+        run: |
+          mkdir -p target/release/deps
+          mkdir -p target/x86_64-unknown-linux-gnu/release/deps
+
       - name: Benchmark the base branch
         working-directory: ${{ runner.temp }}/main
         run: |
