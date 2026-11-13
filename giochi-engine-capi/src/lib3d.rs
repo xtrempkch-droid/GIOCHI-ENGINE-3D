@@ -682,6 +682,141 @@ pub extern "C" fn giochi_shader_destroy(shader: u64) -> i32 {
     })
 }
 
+/// One vertex for [`giochi_mesh_create`].
+///
+/// The layout is public because a C caller builds the array itself: 40 bytes, alignment
+/// 4, eight `float` fields in the order position, normal, texture coordinate, then two
+/// reserved words. It is deliberately **not** the crate's `Vertex` (32 bytes, no
+/// reserved): that type is internal and may gain a field, and this one may not.
+///
+/// `uv` is `0.0..=1.0`; a mesh built without UVs puts `(0, 0)` and samples one texel if
+/// it is drawn textured. A non-finite normal is zeroed, which shades the face with the
+/// ambient term instead of `NaN`; a non-finite position is rejected, because it cannot be
+/// projected.
+///
+/// # C ABI
+///
+/// ```c
+/// typedef struct GiochiVertex3D {
+///     float    position[3];
+///     float    normal[3];
+///     float    uv[2];
+///     uint32_t _reserved[2];
+/// } GiochiVertex3D;   /* size 40, align 4 */
+/// ```
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct GiochiVertex3D {
+    /// Model-space position.
+    pub position: [f32; 3],
+    /// Surface normal; normalised on upload. `(0, 0, 0)` means "let the engine leave it
+    /// flat", which is the ambient-only shade.
+    pub normal: [f32; 3],
+    /// Texture coordinate, `0.0..=1.0`.
+    pub uv: [f32; 2],
+    /// Reserved for ABI-compatible growth. Must be zero.
+    pub _reserved: [u32; 2],
+}
+
+/// Uploads a mesh from caller-provided vertices and indices.
+///
+/// This is the C counterpart of `RenderContext3D::create_mesh`: the way to draw geometry
+/// that is not a cube and does not come from an OBJ — terrain generated from a heightmap,
+/// a procedurally skinned shape, geometry produced by the game itself.
+///
+/// `indices` are triangle indices into `vertices` (`u32`, GLES 2.0 with
+/// `GL_OES_element_index_uint`, which every driver measured here exposes). Every index
+/// must be in range; one that is not is rejected rather than read out of bounds on the
+/// GPU.
+///
+/// Works on the most recently created engine on this thread (§10.5), like
+/// [`giochi_mesh_load_obj`].
+///
+/// # C ABI
+///
+/// ```c
+/// int32_t giochi_mesh_create(const GiochiVertex3D* vertices, uint32_t vertex_count,
+///                            const uint32_t* indices, uint32_t index_count,
+///                            GiochiMeshHandle* out);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_mesh_create(
+    vertices: *const GiochiVertex3D,
+    vertex_count: u32,
+    indices: *const u32,
+    index_count: u32,
+    out: *mut u64,
+) -> i32 {
+    guard(codes::INTERNAL, || {
+        if out.is_null() {
+            state::invalid_argument("out must not be NULL");
+            return codes::INVALID_ARGUMENT;
+        }
+        if vertices.is_null() {
+            state::invalid_argument("vertices must not be NULL");
+            return codes::INVALID_ARGUMENT;
+        }
+        if indices.is_null() {
+            state::invalid_argument("indices must not be NULL");
+            return codes::INVALID_ARGUMENT;
+        }
+        if vertex_count == 0 || index_count == 0 {
+            state::invalid_argument("a mesh needs at least one vertex and one index");
+            return codes::INVALID_ARGUMENT;
+        }
+        if index_count % 3 != 0 {
+            state::invalid_argument("index_count must describe whole triangles");
+            return codes::INVALID_ARGUMENT;
+        }
+
+        // SAFETY: non-NULL (checked above) and the C contract says the pointers cover
+        // `vertex_count` / `index_count` valid elements.
+        let (source_vertices, source_indices) = unsafe {
+            (
+                std::slice::from_raw_parts(vertices, vertex_count as usize),
+                std::slice::from_raw_parts(indices, index_count as usize),
+            )
+        };
+
+        let mut converted = Vec::with_capacity(source_vertices.len());
+        for (index, vertex) in source_vertices.iter().enumerate() {
+            if !vertex.position.iter().all(|value| value.is_finite()) {
+                state::set_last_error(&format!(
+                    "vertex {index} has a non-finite position and cannot be projected"
+                ));
+                return codes::INVALID_ARGUMENT;
+            }
+            let normal = if vertex.normal.iter().all(|value| value.is_finite()) {
+                vertex.normal
+            } else {
+                [0.0, 0.0, 0.0]
+            };
+            converted.push(giochi_engine_3d::mesh::Vertex::new(
+                vertex.position,
+                normal,
+                vertex.uv,
+            ));
+        }
+
+        match with_current(|engine| engine.render.create_mesh(&converted, source_indices)) {
+            Err(code) => {
+                if code == codes::NOT_INITIALIZED {
+                    state::set_last_error(
+                        "giochi_mesh_create needs a 3D engine; call giochi_engine3d_create first",
+                    );
+                }
+                code
+            }
+            Ok(Ok(handle)) => {
+                // SAFETY: `out` was checked for NULL above.
+                unsafe { *out = handle };
+                codes::OK
+            }
+            Ok(Err(err)) => fail3d(&err),
+        }
+    })
+}
+
 // ---- 10.3a GL textures ---------------------------------------------------
 
 /// Decodes an image file and uploads it as a GL texture for meshes.

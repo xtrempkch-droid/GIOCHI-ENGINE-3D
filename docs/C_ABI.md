@@ -382,7 +382,30 @@ it is not a crash either. `giochi_engine3d_destroy` releases the GL context and 
 window; handles you made become meaningless at that point, so free them first if you want
 the engine to report leaks — it logs a warning when objects outlive the context.
 
-### 9.6 Textures on 3D objects
+### 9.6 Building geometry yourself
+
+`giochi_mesh_load_obj` covers authored models. Geometry the game generates — terrain from
+a heightmap, a procedurally built creature — goes through `giochi_mesh_create`:
+
+```c
+GiochiVertex3D vertices[4];
+memset(vertices, 0, sizeof vertices);
+vertices[0] = (GiochiVertex3D){ .position = {0, 1, 0}, .normal = {0, 1, 0}, .uv = {0.5f, 1} };
+/* ... three more ... */
+static const uint32_t indices[12] = {0,1,2, 0,2,3, 0,3,1, 1,3,2};
+
+GiochiMeshHandle mesh;
+if (giochi_mesh_create(vertices, 4, indices, 12, &mesh) != GIOCHI_OK) {
+    fprintf(stderr, "%s\n", giochi_get_last_error());
+}
+```
+
+The struct is 40 bytes, public on purpose (the caller fills it), and `_reserved` must be
+zero. Indices are `u32` triangles; every index must be below `vertex_count`, and every
+position must be finite — both are rejected with a message instead of producing a GPU
+out-of-bounds read or a black frame.
+
+### 9.7 Textures on 3D objects
 
 Part II has its own texture type. `giochi_texture_create` returns a 2D
 `sdl2::render` texture, which raw GLES cannot sample; the 3D one is

@@ -113,9 +113,10 @@ the smoke tests exercise them without a display.
 The 3D crate has its own:
 
 ```bash
-cargo run -p giochi-engine-3d --example cube_demo    # one lit, textured cube
-cargo run -p giochi-engine-3d --example mini_fps     # F2 instancing, F3 render scale
-cargo run -p giochi-engine-3d --example ball_balance  # moving camera + physics-lite
+cargo run -p giochi-engine-3d --example cube_demo      # one lit, textured cube
+cargo run -p giochi-engine-3d --example model_viewer   # any .obj, framed automatically
+cargo run -p giochi-engine-3d --example mini_fps       # F2 instancing, F3 render scale
+cargo run -p giochi-engine-3d --example ball_balance    # moving camera + physics-lite
 ```
 
 They need a GL driver; `SDL_VIDEODRIVER=offscreen` runs them headless.
@@ -246,6 +247,56 @@ giochi_renderer3d_draw_mesh_textured(engine, cube, textured, tex,
 
 giochi_gl_texture_destroy(tex);
 ```
+
+### Your own 3D models (a dragon, a character, a level)
+
+Cubes and spheres are **convenience primitives** for examples and tests — they are not
+what the engine is limited to. Geometry comes from either of two places:
+
+| Source | API | Use |
+|---|---|---|
+| A Wavefront `.obj` file | `render.load_obj_mesh(path)` / `giochi_mesh_load_obj` | anything exported from Blender, Maya, ZBrush, Tinkercad… |
+| Raw vertices and indices | `render.create_mesh(&vertices, &indices)` / `giochi_mesh_create` | terrain, procedural geometry, a mesh generated at runtime |
+
+```bash
+# Any .obj you have. The camera frames it automatically from its bounding sphere.
+cargo run -p giochi-engine-3d --example model_viewer -- dragon.obj
+cargo run -p giochi-engine-3d --example model_viewer -- dragon.obj --texture dragon.png
+SDL_VIDEODRIVER=offscreen cargo run -p giochi-engine-3d --example model_viewer -- \
+    dragon.obj --frames 3 --quadro dragon.bmp
+```
+
+In code, the whole path is three lines:
+
+```rust
+let mesh    = render.load_obj_mesh(Path::new("assets/dragon.obj"))?;
+let shader  = render.create_builtin_shader(BuiltinShader::Phong)?;
+render.draw_mesh_colored(mesh, shader, &model, &camera, Color3D::new(0.8, 0.7, 0.6, 1.0))?;
+```
+
+**Exporting the OBJ** (Blender): `File → Export → Wavefront (.obj)`. Enable
+*Triangulate* or let the loader do it (it triangulates on load), and enable *Write
+Normals*. UVs are only needed if you will texture it — the loader keeps them.
+
+What the loader accepts and does:
+
+* **Triangles and quads.** Quads are triangulated on load.
+* **Several objects/groups** in one file (`o`/`g`) are merged into **one mesh**, which is
+  what lets one handle draw a whole character.
+* **Missing normals** are derived per face from the triangles; a `vn` that is `NaN` is
+  treated as missing rather than shading the model black.
+* **Missing UVs** become `(0, 0)`; a textured draw then samples one texel.
+* **A non-finite position** (a corrupt file) is refused with the file name and the vertex
+  index, instead of drawing nothing.
+* **One texture per file.** Materials from `.mtl` are not applied: split the model into
+  files if different parts need different images.
+* **No skeletal animation.** The engine uploads static geometry. An animated character is
+  either several meshes (one per pose/part) or geometry you transform yourself.
+
+Model size matters on the console: indices are `u32`, so a mesh may exceed 65 535
+vertices, but each vertex is 32 bytes — a 100 k-vertex dragon is ~3.2 MB of VBO plus
+indices. `render.mesh_vertex_count(handle)` and `mesh_index_count` report what was
+uploaded.
 
 ### 3D: instancing, static batching and upscaling
 

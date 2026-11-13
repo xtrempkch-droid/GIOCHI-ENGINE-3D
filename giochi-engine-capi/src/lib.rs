@@ -105,18 +105,20 @@ pub use lib3d::{
     giochi_camera3d_look_at, giochi_camera3d_new, giochi_engine3d_begin_frame,
     giochi_engine3d_create, giochi_engine3d_destroy, giochi_engine3d_end_frame,
     giochi_gl_texture_create, giochi_gl_texture_create_rgba, giochi_gl_texture_destroy,
-    giochi_gl_texture_height, giochi_gl_texture_width, giochi_mesh_create_cube,
+    giochi_gl_texture_height, giochi_gl_texture_width, giochi_mesh_create, giochi_mesh_create_cube,
     giochi_mesh_destroy, giochi_mesh_load_obj, giochi_renderer3d_clear,
     giochi_renderer3d_draw_mesh, giochi_renderer3d_draw_mesh_textured, giochi_renderer3d_set_light,
     giochi_shader_builtin, giochi_shader_destroy, giochi_shader_load,
     giochi_transform3d_from_translation, giochi_transform3d_identity, GiochiEngine3D,
+    GiochiVertex3D,
 };
 pub use net::{
     giochi_net_broadcast, giochi_net_client_join, giochi_net_destroy, giochi_net_host_create,
     giochi_net_host_snapshot, giochi_net_local_port, giochi_net_player_id, giochi_net_poll_global,
     giochi_net_poll_input, giochi_net_poll_snapshot, giochi_net_poll_snapshot_filtered,
     giochi_net_pump, giochi_net_send_input, giochi_net_set_area, giochi_net_set_camera_pos,
-    GiochiNetInimigo, GiochiNetInput, GiochiNetSnapshot, GIOCHI_NET_MAX_INIMIGOS,
+    GiochiNetGlobal, GiochiNetInimigo, GiochiNetInput, GiochiNetSnapshot, GIOCHI_NET_MAX_GLOBAL,
+    GIOCHI_NET_MAX_INIMIGOS,
 };
 pub use render::{
     giochi_camera_get, giochi_camera_set, giochi_render_clear, giochi_render_draw_rect,

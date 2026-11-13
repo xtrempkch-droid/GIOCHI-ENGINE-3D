@@ -19,12 +19,12 @@ use giochi::{
     giochi_engine3d_create, giochi_engine3d_destroy, giochi_engine3d_end_frame,
     giochi_get_last_error, giochi_gl_texture_create, giochi_gl_texture_create_rgba,
     giochi_gl_texture_destroy, giochi_gl_texture_height, giochi_gl_texture_width,
-    giochi_mesh_create_cube, giochi_mesh_destroy, giochi_mesh_load_obj, giochi_renderer3d_clear,
-    giochi_renderer3d_draw_mesh, giochi_renderer3d_draw_mesh_textured, giochi_renderer3d_set_light,
-    giochi_shader_builtin, giochi_shader_destroy, giochi_shader_load,
+    giochi_mesh_create, giochi_mesh_create_cube, giochi_mesh_destroy, giochi_mesh_load_obj,
+    giochi_renderer3d_clear, giochi_renderer3d_draw_mesh, giochi_renderer3d_draw_mesh_textured,
+    giochi_renderer3d_set_light, giochi_shader_builtin, giochi_shader_destroy, giochi_shader_load,
     giochi_transform3d_from_translation, giochi_transform3d_identity, GiochiCamera3D,
     GiochiColor3D, GiochiDirectionalLight, GiochiEngine3D, GiochiQuat, GiochiTransform3D,
-    GiochiVec3, GiochiWindowConfig, GIOCHI_ABI_VERSION, GIOCHI_ERROR_ASSET,
+    GiochiVec3, GiochiVertex3D, GiochiWindowConfig, GIOCHI_ABI_VERSION, GIOCHI_ERROR_ASSET,
     GIOCHI_ERROR_INVALID_ARGUMENT, GIOCHI_ERROR_INVALID_HANDLE, GIOCHI_ERROR_NOT_INITIALIZED,
     GIOCHI_ERROR_OK, GIOCHI_SHADER_FLAT, GIOCHI_SHADER_PHONG, GIOCHI_SHADER_TEXTURED,
 };
@@ -43,6 +43,14 @@ fn window_config() -> GiochiWindowConfig {
     config.width = 320;
     config.height = 240;
     config
+}
+
+fn vertex(position: [f32; 3], normal: [f32; 3], uv: [f32; 2]) -> GiochiVertex3D {
+    let mut v: GiochiVertex3D = unsafe { std::mem::zeroed() };
+    v.position = position;
+    v.normal = normal;
+    v.uv = uv;
+    v
 }
 
 fn color(r: f32, g: f32, b: f32, a: f32) -> GiochiColor3D {
@@ -459,6 +467,93 @@ fn a_gl_texture_created_from_c_draws_on_a_mesh() {
     );
     assert_eq!(giochi_mesh_destroy(mesh), GIOCHI_ERROR_OK);
     assert_eq!(giochi_shader_destroy(shader), GIOCHI_ERROR_OK);
+    giochi_engine3d_destroy(engine);
+}
+
+#[test]
+fn a_mesh_built_from_raw_vertices_is_uploaded() {
+    let Some(engine) = engine_or_skip() else {
+        return;
+    };
+
+    // A tetrahedron: four vertices, four triangles. Not a primitive the crate offers,
+    // which is the point — a C game generating terrain or a character uses this path.
+    let vertices = [
+        vertex([0.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.5, 1.0]),
+        vertex([-1.0, -1.0, 1.0], [-1.0, -1.0, 1.0], [0.0, 0.0]),
+        vertex([1.0, -1.0, 1.0], [1.0, -1.0, 1.0], [1.0, 0.0]),
+        vertex([0.0, -1.0, -1.0], [0.0, -1.0, -1.0], [0.5, 0.5]),
+    ];
+    let indices: [u32; 12] = [0, 1, 2, 0, 2, 3, 0, 3, 1, 1, 3, 2];
+
+    let mut mesh = 0u64;
+    assert_eq!(
+        giochi_mesh_create(
+            vertices.as_ptr(),
+            vertices.len() as u32,
+            indices.as_ptr(),
+            indices.len() as u32,
+            &mut mesh,
+        ),
+        GIOCHI_ERROR_OK,
+        "create failed: {}",
+        last_error()
+    );
+    assert_ne!(mesh, 0);
+    assert_eq!(giochi_mesh_destroy(mesh), GIOCHI_ERROR_OK);
+
+    // Argument checks: each names what is wrong and writes nothing.
+    let mut untouched = 1234u64;
+    assert_eq!(
+        giochi_mesh_create(
+            vertices.as_ptr(),
+            4,
+            indices.as_ptr(),
+            12,
+            std::ptr::null_mut()
+        ),
+        GIOCHI_ERROR_INVALID_ARGUMENT
+    );
+    assert_eq!(
+        giochi_mesh_create(std::ptr::null(), 4, indices.as_ptr(), 12, &mut untouched),
+        GIOCHI_ERROR_INVALID_ARGUMENT
+    );
+    assert_eq!(
+        untouched, 1234,
+        "a failed call must not write the out value"
+    );
+    assert_eq!(
+        giochi_mesh_create(vertices.as_ptr(), 0, indices.as_ptr(), 12, &mut untouched),
+        GIOCHI_ERROR_INVALID_ARGUMENT
+    );
+    assert_eq!(
+        giochi_mesh_create(vertices.as_ptr(), 4, indices.as_ptr(), 10, &mut untouched),
+        GIOCHI_ERROR_INVALID_ARGUMENT,
+        "a partial triangle is a caller bug"
+    );
+
+    // An index outside the array must be refused: on the GPU it is an out-of-bounds read
+    // that looks like a flickering surface, with no error.
+    let bad_indices: [u32; 3] = [0, 1, 99];
+    assert_eq!(
+        giochi_mesh_create(
+            vertices.as_ptr(),
+            4,
+            bad_indices.as_ptr(),
+            3,
+            &mut untouched
+        ),
+        GIOCHI_ERROR_INVALID_ARGUMENT
+    );
+
+    // A NaN position cannot be projected or bounded.
+    let mut broken = vertices;
+    broken[1].position[0] = f32::NAN;
+    assert_eq!(
+        giochi_mesh_create(broken.as_ptr(), 4, indices.as_ptr(), 12, &mut untouched),
+        GIOCHI_ERROR_INVALID_ARGUMENT
+    );
+
     giochi_engine3d_destroy(engine);
 }
 

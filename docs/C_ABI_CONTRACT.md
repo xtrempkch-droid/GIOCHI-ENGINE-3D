@@ -767,6 +767,13 @@ worth making impossible.
 typedef uint64_t GiochiMeshHandle;      /* 0 invalid */
 typedef uint64_t GiochiShaderHandle;    /* 0 invalid */
 typedef uint64_t GiochiGlTextureHandle; /* 0 invalid */
+
+typedef struct GiochiVertex3D {
+    float    position[3];   /* model space */
+    float    normal[3];     /* normalised on upload; (0,0,0) = flat/ambient only */
+    float    uv[2];         /* 0.0..=1.0; (0,0) if the mesh has none */
+    uint32_t _reserved[2];
+} GiochiVertex3D;           /* size 40, align 4 */
 ```
 
 Ownership: `giochi_mesh_destroy` and `giochi_shader_destroy` release them. Textures are
@@ -798,6 +805,9 @@ GiochiTransform3D giochi_transform3d_from_translation(GiochiVec3 translation);
 /* 10.3 Meshes and shaders */
 int32_t giochi_mesh_load_obj(const char* path, GiochiMeshHandle* out);
 int32_t giochi_mesh_create_cube(float size, GiochiMeshHandle* out);
+int32_t giochi_mesh_create(const GiochiVertex3D* vertices, uint32_t vertex_count,
+                           const uint32_t* indices, uint32_t index_count,
+                           GiochiMeshHandle* out);
 int32_t giochi_mesh_destroy(GiochiMeshHandle mesh);
 int32_t giochi_shader_load(const char* vert_path, const char* frag_path,
                            GiochiShaderHandle* out);
@@ -870,6 +880,23 @@ A NULL `light` is `GIOCHI_ERROR_INVALID_ARGUMENT` and leaves the current light u
 an engine pointer that is not the live one for this thread is `GIOCHI_ERROR_INVALID_HANDLE`.
 Both match §10.5.
 
+### 10.6a Building a mesh from vertices
+
+`giochi_mesh_create` is the C counterpart of `RenderContext3D::create_mesh`: it exists so
+a game can draw geometry it generated itself — terrain, a procedural shape — instead of
+only a cube or an imported OBJ. The vertex layout is public because the caller fills the
+array; the type is not the crate's internal `Vertex` (32 bytes, no reserved words), so
+the two can evolve independently.
+
+Rules, all enforced with `GIOCHI_ERROR_INVALID_ARGUMENT`:
+
+* `vertices` and `indices` non-NULL, both counts non-zero;
+* `index_count` a multiple of three (whole triangles only);
+* every index below `vertex_count` — an out-of-range index is an out-of-bounds GPU read
+  that renders as a flickering surface with no GL error;
+* every `position` finite. A `NaN`/infinite `normal` is zeroed instead of rejected: it
+  shades the face with the ambient term rather than turning it `NaN`.
+
 ### 10.7 Why `draw_mesh` takes a colour
 
 An earlier draft of this section did not have the `GiochiColor3D` parameter, on the
@@ -917,6 +944,8 @@ The same type the Rust side calls `WindowConfig`, so there is nothing to keep in
 | Every type this document names is in `giochi.h` | `scripts/gen-header.sh --check`. A type defined here but missing from `cbindgen.toml`'s `include` is silently not emitted; `GiochiDirectionalLight` was, until the third audit |
 | Every function in §10 exists and is exported | `scripts/ffi-smoke.sh` links each one from C. A documented-but-unimplemented function is a link error at the consumer, which is how the missing `giochi_renderer3d_set_light` would have been caught before shipping — and, later, the four `giochi_gl_texture_*` functions this section named before they existed |
 | A textured mesh actually samples the texture | `giochi-engine-3d/tests/textures_3d.rs` reads the framebuffer and requires both halves of a two-colour texture; `c_smoke_3d.c` links and calls the C path |
+| `GiochiVertex3D` is 40 bytes and a mesh built from it uploads | `c_smoke_3d.c` `_Static_assert`-free `sizeof` check plus `giochi_mesh_create`; `rust_ffi_3d.rs::a_mesh_built_from_raw_vertices_is_uploaded` covers the argument rejections |
+| An OBJ with more than a primitive draws | `giochi-engine-3d/tests/obj_models.rs` generates a torus knot at runtime and reads the framebuffer back |
 
 # Part III — Frame statistics (ABI version 3, phase 18)
 

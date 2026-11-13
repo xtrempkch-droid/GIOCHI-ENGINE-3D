@@ -56,7 +56,7 @@ pub fn load_obj(path: &Path) -> Result3D<(Vec<Vertex>, Vec<u32>)> {
 
     for model in &models {
         let mesh = &model.mesh;
-        append_mesh(mesh, &mut vertices, &mut indices);
+        append_mesh(path, mesh, &mut vertices, &mut indices)?;
     }
 
     if vertices.is_empty() || indices.is_empty() {
@@ -69,11 +69,23 @@ pub fn load_obj(path: &Path) -> Result3D<(Vec<Vertex>, Vec<u32>)> {
     Ok((vertices, indices))
 }
 
-fn append_mesh(mesh: &tobj::Mesh, vertices: &mut Vec<Vertex>, indices: &mut Vec<u32>) {
+fn append_mesh(
+    path: &Path,
+    mesh: &tobj::Mesh,
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u32>,
+) -> Result3D<()> {
     let base = vertices.len() as u32;
     let count = mesh.positions.len() / 3;
 
-    let has_normals = mesh.normals.len() >= count * 3;
+    // A `vn` that is `NaN` or infinite is worse than a missing one: `Vertex::normalized`
+    // deliberately leaves a non-finite normal alone, so it would reach the shader and
+    // shade the whole model black with no error. Treat it as absent and derive the face
+    // normals instead.
+    let has_normals = mesh.normals.len() >= count * 3
+        && mesh.normals[..count * 3]
+            .iter()
+            .all(|value| value.is_finite());
     let has_uvs = mesh.texcoords.len() >= count * 2;
 
     for i in 0..count {
@@ -82,6 +94,16 @@ fn append_mesh(mesh: &tobj::Mesh, vertices: &mut Vec<Vertex>, indices: &mut Vec<
             mesh.positions[i * 3 + 1],
             mesh.positions[i * 3 + 2],
         ];
+
+        // A non-finite position cannot be drawn, projected or put in a bounding box, and
+        // it propagates into every derived normal. Refusing the file names the problem
+        // instead of showing an empty frame.
+        if !position.iter().all(|value| value.is_finite()) {
+            return Err(Error3D::Asset(format!(
+                "OBJ file '{}' has a non-finite vertex position at index {i}",
+                path.display()
+            )));
+        }
 
         let normal = if has_normals {
             [
@@ -114,6 +136,8 @@ fn append_mesh(mesh: &tobj::Mesh, vertices: &mut Vec<Vertex>, indices: &mut Vec<
         // underflows `usize`.
         compute_face_normals(vertices, &indices[first_new_index..], base, count);
     }
+
+    Ok(())
 }
 
 /// Fills in normals by averaging the faces that share each vertex.
@@ -208,6 +232,57 @@ f 1 2 3
             let length = (x * x + y * y + z * z).sqrt();
             assert!((length - 1.0).abs() < 1e-5, "normal not unit: {vertex:?}");
             assert!(z.abs() > 0.99, "expected +Z normal, got {vertex:?}");
+        }
+    }
+
+    #[test]
+    fn a_nan_normal_is_treated_as_missing_and_derived() {
+        // A malformed `vn` used to pass straight through: `Vertex::normalized` leaves a
+        // non-finite normal untouched, so it reached the shader and shaded the model
+        // black with no error at all.
+        let path = std::env::temp_dir().join("giochi-nan-normal.obj");
+        let source = "\
+v 0.0 0.0 0.0
+v 1.0 0.0 0.0
+v 0.0 1.0 0.0
+vn NaN NaN NaN
+f 1//1 2//1 3//1
+";
+        std::fs::write(&path, source).expect("write");
+        let result = load_obj(&path);
+        let _ = std::fs::remove_file(&path);
+
+        let (vertices, _) = result.expect("the file is still loadable");
+        for vertex in &vertices {
+            assert!(
+                vertex.normal.iter().all(|value| value.is_finite()),
+                "a NaN normal must be replaced, got {vertex:?}"
+            );
+            assert!(vertex.normal[2].abs() > 0.99, "derived +Z normal expected");
+        }
+    }
+
+    #[test]
+    fn a_non_finite_position_is_refused_with_the_file_name() {
+        // It cannot be projected or bounded, and it poisons every derived normal, so
+        // the file is refused instead of producing an empty frame.
+        let path = std::env::temp_dir().join("giochi-nan-position.obj");
+        let source = "\
+v 0.0 0.0 0.0
+v inf 0.0 0.0
+v 0.0 1.0 0.0
+f 1 2 3
+";
+        std::fs::write(&path, source).expect("write");
+        let result = load_obj(&path);
+        let _ = std::fs::remove_file(&path);
+
+        match result {
+            Err(Error3D::Asset(message)) => {
+                assert!(message.contains("non-finite"), "{message}");
+                assert!(message.contains("nan-position"), "{message}");
+            }
+            other => panic!("expected an asset error, got {other:?}"),
         }
     }
 

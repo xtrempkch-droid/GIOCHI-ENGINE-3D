@@ -118,6 +118,15 @@ int main(void)
         CHECK_CODE(giochi_mesh_create_cube(1.0f, NULL), GIOCHI_ERROR_INVALID_ARGUMENT);
         CHECK_CODE(giochi_shader_builtin(GIOCHI_SHADER_FLAT, NULL),
                    GIOCHI_ERROR_INVALID_ARGUMENT);
+        {
+            GiochiVertex3D one;
+            memset(&one, 0, sizeof one);
+            const uint32_t index[3] = {0, 0, 0};
+            uint64_t before = 0;
+            CHECK_CODE(giochi_mesh_create(&one, 1, index, 3, &before),
+                       GIOCHI_ERROR_NOT_INITIALIZED);
+            CHECK(before == 0);
+        }
         CHECK_CODE(giochi_engine3d_begin_frame(NULL), GIOCHI_ERROR_INVALID_ARGUMENT);
         CHECK_CODE(giochi_engine3d_end_frame(NULL), GIOCHI_ERROR_INVALID_ARGUMENT);
     }
@@ -181,6 +190,49 @@ int main(void)
         CHECK_CODE(giochi_mesh_load_obj("/nonexistent/cube.obj", &missing),
                    GIOCHI_ERROR_ASSET);
         CHECK(missing == 0);
+    }
+
+    /* ---- a mesh built from raw vertices ----------------------------------- */
+    /* The C counterpart of `create_mesh`: geometry the game generates itself, which is
+     * what a dragon/terrain path needs when there is no .obj on disk. */
+    {
+        GiochiVertex3D verts[4];
+        memset(verts, 0, sizeof verts);
+        verts[0].position[1] = 1.0f;  verts[0].normal[1] = 1.0f;  verts[0].uv[0] = 0.5f; verts[0].uv[1] = 1.0f;
+        verts[1].position[0] = -1.0f; verts[1].position[1] = -1.0f; verts[1].position[2] = 1.0f;
+        verts[2].position[0] = 1.0f;  verts[2].position[1] = -1.0f; verts[2].position[2] = 1.0f;
+        verts[3].position[2] = -1.0f; verts[3].position[1] = -1.0f;
+        for (int v = 1; v < 4; v++) {
+            verts[v].normal[0] = verts[v].position[0];
+            verts[v].normal[1] = verts[v].position[1];
+            verts[v].normal[2] = verts[v].position[2];
+        }
+        static const uint32_t tetra[12] = {0, 1, 2, 0, 2, 3, 0, 3, 1, 1, 3, 2};
+
+        CHECK(sizeof(GiochiVertex3D) == 40);
+
+        uint64_t procedural = 0;
+        CHECK_CODE(giochi_mesh_create(verts, 4, tetra, 12, &procedural), GIOCHI_ERROR_OK);
+        CHECK(procedural != 0);
+        CHECK_CODE(giochi_mesh_destroy(procedural), GIOCHI_ERROR_OK);
+
+        /* Each argument check names what is wrong and writes nothing. */
+        uint64_t untouched = 1234;
+        CHECK_CODE(giochi_mesh_create(verts, 4, tetra, 12, NULL),
+                   GIOCHI_ERROR_INVALID_ARGUMENT);
+        CHECK_CODE(giochi_mesh_create(NULL, 4, tetra, 12, &untouched),
+                   GIOCHI_ERROR_INVALID_ARGUMENT);
+        CHECK(untouched == 1234);
+        CHECK_CODE(giochi_mesh_create(verts, 4, tetra, 10, &untouched),
+                   GIOCHI_ERROR_INVALID_ARGUMENT);
+
+        static const uint32_t bad[3] = {0, 1, 99};
+        CHECK_CODE(giochi_mesh_create(verts, 4, bad, 3, &untouched),
+                   GIOCHI_ERROR_INVALID_ARGUMENT);
+
+        verts[1].position[0] = NAN;
+        CHECK_CODE(giochi_mesh_create(verts, 4, tetra, 12, &untouched),
+                   GIOCHI_ERROR_INVALID_ARGUMENT);
     }
 
     /* ---- GL textures ------------------------------------------------------ */

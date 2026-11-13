@@ -8,6 +8,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`model_viewer` example: any Wavefront OBJ, framed automatically.** The 3D examples
+  only used the procedural primitives, which made the engine look like it could draw
+  nothing else. It always could — `load_obj_mesh` uploads any triangle mesh — but there
+  was no example or guide for it. The new example computes the model's bounding sphere
+  and places the camera, so a dragon or a level appears framed instead of off-screen.
+  `tests/obj_models.rs` generates a torus knot at runtime (4 680 vertices, not a
+  primitive) and asserts it loads with UVs/normals and renders textured.
+- **`giochi_mesh_create`: C can build its own geometry.** The ABI could only load an OBJ
+  or create a cube, so a C game had no way to draw terrain or anything generated at
+  runtime. The new function takes a `GiochiVertex3D` array (40 bytes, public layout) plus
+  `u32` triangle indices, and rejects out-of-range indices and non-finite positions with
+  a message instead of a GPU out-of-bounds read or a black frame.
+- **OBJ loader hardening.** A `vn` that is `NaN`/infinite is now treated as missing and
+  replaced by derived face normals; before, it reached the shader and shaded the model
+  black with no error. A non-finite vertex position is refused with the file name and
+  the vertex index instead of producing an empty frame.
 - **Textures on 3D meshes.** `RenderContext3D::create_texture` (file) and
   `create_texture_from_rgba` (procedural) upload a GL texture, and
   `draw_mesh_textured` binds it to `u_texture` (unit 0) with a tint. NPOT images get

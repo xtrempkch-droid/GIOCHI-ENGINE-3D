@@ -393,6 +393,40 @@ typedef struct GiochiTransform3D {
     uint32_t _reserved[4];
 } GiochiTransform3D;
 
+// One vertex for [`giochi_mesh_create`].
+//
+// The layout is public because a C caller builds the array itself: 40 bytes, alignment
+// 4, eight `float` fields in the order position, normal, texture coordinate, then two
+// reserved words. It is deliberately **not** the crate's `Vertex` (32 bytes, no
+// reserved): that type is internal and may gain a field, and this one may not.
+//
+// `uv` is `0.0..=1.0`; a mesh built without UVs puts `(0, 0)` and samples one texel if
+// it is drawn textured. A non-finite normal is zeroed, which shades the face with the
+// ambient term instead of `NaN`; a non-finite position is rejected, because it cannot be
+// projected.
+//
+// # C ABI
+//
+// ```c
+// typedef struct GiochiVertex3D {
+//     float    position[3];
+//     float    normal[3];
+//     float    uv[2];
+//     uint32_t _reserved[2];
+// } GiochiVertex3D;   /* size 40, align 4 */
+// ```
+typedef struct GiochiVertex3D {
+    // Model-space position.
+    float position[3];
+    // Surface normal; normalised on upload. `(0, 0, 0)` means "let the engine leave it
+    // flat", which is the ambient-only shade.
+    float normal[3];
+    // Texture coordinate, `0.0..=1.0`.
+    float uv[2];
+    // Reserved for ABI-compatible growth. Must be zero.
+    uint32_t _reserved[2];
+} GiochiVertex3D;
+
 // Linear-agnostic float RGBA colour, one `f32` per channel.
 //
 // # C ABI
@@ -1295,6 +1329,33 @@ int32_t giochi_shader_builtin(int32_t which, uint64_t *out);
 // int32_t giochi_shader_destroy(GiochiShaderHandle shader);
 // ```
 int32_t giochi_shader_destroy(uint64_t shader);
+
+// Uploads a mesh from caller-provided vertices and indices.
+//
+// This is the C counterpart of `RenderContext3D::create_mesh`: the way to draw geometry
+// that is not a cube and does not come from an OBJ — terrain generated from a heightmap,
+// a procedurally skinned shape, geometry produced by the game itself.
+//
+// `indices` are triangle indices into `vertices` (`u32`, GLES 2.0 with
+// `GL_OES_element_index_uint`, which every driver measured here exposes). Every index
+// must be in range; one that is not is rejected rather than read out of bounds on the
+// GPU.
+//
+// Works on the most recently created engine on this thread (§10.5), like
+// [`giochi_mesh_load_obj`].
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_mesh_create(const GiochiVertex3D* vertices, uint32_t vertex_count,
+//                            const uint32_t* indices, uint32_t index_count,
+//                            GiochiMeshHandle* out);
+// ```
+int32_t giochi_mesh_create(const struct GiochiVertex3D *vertices,
+                           uint32_t vertex_count,
+                           const uint32_t *indices,
+                           uint32_t index_count,
+                           uint64_t *out);
 
 // Decodes an image file and uploads it as a GL texture for meshes.
 //
