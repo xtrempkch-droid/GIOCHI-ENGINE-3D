@@ -73,6 +73,14 @@ o `udhcpd` anuncia `router 10.55.0.2` e `dns 10.55.0.2`, mas o aparelho não enc
 (`ip_forward=0`), não tem NAT e não roda DNS — então um PC cujo único adaptador seja o
 cabo perde a internet e o culpado parece ser o console.
 
+A imagem também está em construção, e isso muda o que se pede dela: dos itens
+apontados, a equipe já decidiu **adiar** os grupos de `/dev` (devtmpfs puro, sem
+`mdev` nem `eudev`; e sem usuário não-root o ganho é zero) e **encaminhar** os
+cabeçalhos pelo SDK, que já está configurado — falta rodar `make sdk` e publicar o
+tarball. Nenhum dos dois bloqueia a engine; §1.1 de
+[docs/REQUISITOS-IMAGEM.md](docs/REQUISITOS-IMAGEM.md) guarda o motivo de cada
+decisão para não ser reaberto sem contexto.
+
 ## Fase 18 — Flags ARM64 + CI de performance + C ABI v3
 Fases 15–18 concluídas (performance, batching, instancing/upscaling, C ABI v3).
 

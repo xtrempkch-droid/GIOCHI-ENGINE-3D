@@ -9,6 +9,13 @@ Medido em 2026-11-13 num **R35S** (RK3326 / Cortex-A35, Mali-G31 Panfrost,
 Buildroot 2024.02, glibc 2.38, SDL2 2.28.5, 640x480). Números de outros
 aparelhos em [KMSDRM.md](KMSDRM.md).
 
+> **A imagem também está em construção.** Os ❌ da tabela não são defeitos a
+> corrigir por conta de quem lê este documento: são itens que a equipe da imagem
+> já avaliou e colocou na fila — ou adiou, com critério. Onde há decisão tomada
+> ela está em §1.1, com o motivo. A engine funciona sem eles hoje; o que está
+> registrado aqui é o **custo** de continuar sem, para a decisão ser informada em
+> vez de descoberta em campo.
+
 ## 1. Resumo
 
 | # | Item | Estado | Se faltar |
@@ -25,11 +32,21 @@ aparelhos em [KMSDRM.md](KMSDRM.md).
 | 10 | `ldd` | ❌ | diagnóstico de biblioteca ausente vira adivinhação |
 | 11 | glibc ≥ 2.39 | ❌ | `cargo test` não roda no aparelho |
 | 12 | Driver de vídeo `dummy` no SDL2 | ❌ | teste automatizado precisa tomar o console |
-| 13 | `/dev/dri` e `/dev/input` para um grupo, não só root | ❌ | tudo tem de rodar como root |
-| 14 | Cabeçalhos e `.pc` do SDL2 na imagem | ❌ | não se compila nada no aparelho |
+| 13 | `/dev/dri` e `/dev/input` para um grupo, não só root | ❌ adiado | tudo roda como root; é decisão de política, não de código |
+| 14 | Cabeçalhos e `.pc` do SDL2 na imagem | ❌ SDK pronto | falha só `make sdk` no build da imagem |
 | 15 | Térmica com folga | ⚠️ | os números de frame time não valem depois de 10 min |
 
 Os itens 8 a 14 são de imagem; o 15 é de hardware e só se contorna no software.
+
+### 1.1 Decisões já tomadas pela equipe da imagem
+
+Resposta de 2026-11-13, sobre os dois itens que este documento tratava como
+carentes de detalhe:
+
+| Item | Decisão | Por quê |
+| --- | --- | --- |
+| 13. Grupos em `/dev/*` | **adiado** | não existe consumidor não-root, então o ganho é zero até a política mudar — e o custo não é de uma linha (§3.6) |
+| 14. Cabeçalhos e `.pc` | **encaminhado pelo SDK** | o SDK já está configurado no build; falta só rodar `make sdk` e publicar o tarball (§3.7) |
 
 ## 2. O que a imagem já entrega (medido)
 
@@ -82,7 +99,8 @@ com nome (`a`, `b`, `start`), não como números crus.
 
 **O que isso custa:** sem `libudev` não há *hotplug*. Controle embutido funciona;
 controle USB ligado depois do boot **não** aparece até a engine reabrir. Se um dia
-isso importar, a imagem precisa de `libudev`.
+isso importar, a imagem precisa de `libudev` — que vem junto com o `eudev` de
+§3.6, e é o segundo motivo para os dois itens serem decididos na mesma conversa.
 
 ### 2.3 Áudio
 
@@ -240,7 +258,7 @@ O driver `dummy` do SDL2 (`SDL_VIDEODRIVER=dummy`) resolve isso: janela sem
 é exatamente o que serve para testar lógica. **Não substitui** o teste em
 `kmsdrm` — os dois se complementam.
 
-### 3.6 `/dev/dri`, `/dev/input` e `/dev/snd` são só de root
+### 3.6 `/dev/dri`, `/dev/input` e `/dev/snd` são só de root — e não há quem mude isso
 
 ```sh
 ls -l /dev/dri/     # crw------- 1 root root 226, 0 card0
@@ -248,24 +266,60 @@ ls -l /dev/input/   # crw------- 1 root root 13, 64 event0
 ```
 
 Hoje funciona porque o launcher e a engine rodam como **root** — que também
-significa que qualquer jogo tem acesso total ao aparelho. Se a política for um
-usuário de jogo sem privilégio, a imagem precisa:
+significa que qualquer jogo tem acesso total ao aparelho.
 
-* grupo `video` (ou `render`) dono de `/dev/dri/*` com modo `0660`;
-* grupo `input` dono de `/dev/input/event*`;
-* grupo `audio` dono de `/dev/snd/*`;
-* uma regra de `mdev`/`udev` que aplique isso no boot, já que o `devtmpfs` cria
-  tudo como `0600 root:root`.
+A primeira versão deste documento dizia "basta uma regra de `mdev`/`udev`". A
+equipe da imagem mostrou que isso supõe um gerenciador que a imagem **não tem**:
+o gerenciamento de `/dev` é **devtmpfs puro**
+(`BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_DEVTMPFS=y`), o `mdev` **não** está
+selecionado (o applet está compilado, mas ninguém o habilita) e o `eudev` não
+existe. Ou seja, **não há nada no userspace que aplique modo/dono a nó criado** —
+e o `devtmpfs` cria tudo como `0600 root:root`.
 
-O modelo está em §3 de [KMSDRM.md](KMSDRM.md) (`crw-rw----+ root video`), mas ele
-não está aplicado nesta imagem.
+Grupos no skeleton: `video` (28) e `audio` (29) existem; **`input` e `render` não
+existem** e teriam de ser criados por `BR2_ROOTFS_USERS_TABLES`.
 
-### 3.7 Não se compila nada no aparelho
+Os três caminhos, nenhum de uma linha:
+
+| Caminho | Cobre hotplug? | Custo |
+| --- | --- | --- |
+| script de boot (`chgrp`/`chmod` num `S05`) | ❌ só o que existe no boot | baixo, mas parcial |
+| `mdev` + `/etc/mdev.conf` | ✅ | troca o gerenciador de `/dev` |
+| `eudev` + regras | ✅ | +15–25 MB, não incremental |
+
+Dois fatos de produto decidem a ordem: (a) como tudo roda como **root**, não há
+consumidor não-root e o ganho é zero até a política de usuário de jogo existir;
+(b) o `eudev` resolve este item **e** o `libudev` do §2.2 (hotplug de controle USB)
+de uma vez — pagar `mdev` agora e `eudev` depois seria pagar duas vezes.
+**Recomendação da equipe: não fazer agora**, e este documento concorda: sem
+usuário não-root, nem `mdev` nem `eudev` mudam o que a engine pode fazer.
+
+O modelo de permissões continua em §3 de [KMSDRM.md](KMSDRM.md)
+(`crw-rw----+ root video`); ele descreve **o alvo**, não o que esta imagem aplica.
+Quando a política mudar, é esse desenho que a imagem implementa.
+
+### 3.7 Não se compila nada no aparelho — o caminho é o SDK, e falta um passo
 
 A imagem é *runtime-only*: não há `/usr/include/SDL2`, nem `sdl2.pc`, nem
-`pkg-config`. Compilar no alvo exige montar um sysroot à mão — receita em
-[CROSS_COMPILE.md](CROSS_COMPILE.md). Para o fluxo normal (cross-compile no PC)
-está correto e economiza dezenas de MB. Só precisa estar documentado, e está.
+`pkg-config`. Para o fluxo normal (cross-compile no PC) está **correto** e
+economiza dezenas de MB no aparelho. O que estava errado era este documento
+sugerir copiar cabeçalhos à mão: o caminho é o SDK, e ele já está configurado.
+
+O que existe:
+
+* `BR2_PACKAGE_HOST_ENVIRONMENT_SETUP=y` no `common.fragment`;
+* o `build-device.sh` endurece o `environment-setup` com `PKG_CONFIG_SYSROOT_DIR`
+  e `LIBDIR`, e há um teste a fixar isso (`sdk-sysroot.test.mjs`).
+
+O que falta: **ninguém roda `make sdk`**. O sysroot só existe dentro de
+`work/<device>/build/staging`, que não sai da máquina de build. Acrescentar
+`make sdk` no fim do build e copiar `images/*-sdk.tar.gz` para `out/<device>/`
+resolve o item de verdade — alguns minutos e algumas centenas de MB por artefato.
+
+É o item mais barato desta lista depois do `ldd` (§3.3), porque o trabalho de
+configuração já está feito e testado; falta só publicar o artefato. Enquanto não
+sai, a receita manual de [CROSS_COMPILE.md](CROSS_COMPILE.md) é o que existe — é
+o que `scripts/hardware-check.sh --sysroot` usa.
 
 ### 3.8 Térmica: 70 °C em repouso
 

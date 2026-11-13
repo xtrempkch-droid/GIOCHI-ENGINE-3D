@@ -53,7 +53,9 @@ as well as on x86_64; see PROGRESS.md for the per-check results.
   and a socket without `IP_MULTICAST_IF` leaves by the default route and is seen by nobody.
   Measured both directions between a PC and an R35S over USB-Ethernet.
 - **`docs/REQUISITOS-IMAGEM.md`**: what the device image must provide, measured, with the
-  command that verifies each line — including the items it does **not** provide.
+  command that verifies each line — including the items it does **not** provide, and the
+  decisions the image team has already taken (device groups postponed until there is a
+  non-root consumer; headers shipped through `make sdk`).
 - **`loopback_smoke` example: the network, end to end, on the target.** A real host and a
   real client on one machine exercise handshake, input with the camera, AOI filtering and
   opaque global state, and exit non-zero on the first failure so it can gate a device run.
