@@ -61,7 +61,10 @@ sudo usermod -aG video,render "$USER"
 ```
 
 Check with `id` that both groups are present. On a locked-down console image, a
-udev rule granting the game user access to the card node is the usual alternative.
+udev rule granting the game user access to the card node is the usual alternative
+— but check that the image *has* a device manager first: the R35S class runs
+devtmpfs alone, with no `mdev` and no `eudev`, so there is nothing to apply a rule
+(see [REQUISITOS-IMAGEM.md](REQUISITOS-IMAGEM.md) §3.6).
 
 If the backend cannot open the device, the engine's error message names the
 devices that *are* present, which distinguishes "no permission" from "no device".
