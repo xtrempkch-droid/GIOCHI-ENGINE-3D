@@ -6,6 +6,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.4.0] - 2026-11-13
 
+Validated on an R35S (RK3326 / Cortex-A35, Mali-G31 Panfrost, KMSDRM, Buildroot 2024.02)
+as well as on x86_64; see PROGRESS.md for the per-check results.
+
 ### Added
 
 - **`model_viewer` example: any Wavefront OBJ, framed automatically.** The 3D examples
@@ -43,10 +46,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   implemented, so the `textured` shader had no way to receive a texture.
   `cube_demo --texture <image>` demonstrates it, and `tests/textures_3d.rs` proves both
   halves of a two-colour texture reach the framebuffer.
+- **`loopback_smoke` example: the network, end to end, on the target.** A real host and a
+  real client on one machine exercise handshake, input with the camera, AOI filtering and
+  opaque global state, and exit non-zero on the first failure so it can gate a device run.
+  It is an example rather than a `cargo test` binary because libtest links
+  `pidfd_spawnp@GLIBC_2.39` and the R35S ships glibc 2.38: the harness does not start
+  there, while a plain binary links only what the device provides.
 - **Networking (`giochi-net` + C ABI part IV).** Host-authoritative UDP transport with
   interest management, optional `laminar` reliability/ordering and optional mDNS
   discovery. ABI v4 adds 15 `giochi_net_*` functions and four `GiochiNet*` structs;
   see `docs/REDE.md` and `docs/C_ABI_CONTRACT.md` §16–§19.
+
+### Changed
+
+- **The 3D integration tests honour an existing `SDL_VIDEODRIVER`** instead of always
+  forcing `offscreen` (`tests/common::set_headless_driver`). A console's SDL2 exposes
+  KMSDRM only, so forcing `offscreen` made every test skip there while still reporting
+  success; with this, the same suite runs on the device with `SDL_VIDEODRIVER=kmsdrm`,
+  and CI behaviour is unchanged because the default is still `offscreen`.
+- **`scripts/hardware-check.sh`** gains `--features`/`--no-default-features` (so it can
+  build against the device's own SDL2 with `sdl2-system`), runs `model_viewer` and
+  `loopback_smoke`, and checks the textured cube by counting distinct colours in the
+  captured frame — a texture that never binds renders a flat quad, which no log reports.
 
 ### Fixed
 

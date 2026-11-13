@@ -28,7 +28,7 @@ const SIZE: u32 = 200;
 
 fn headless() -> Option<(MutexGuard<'static, ()>, Platform, Window, RenderContext3D)> {
     let guard = common::platform_guard();
-    std::env::set_var("SDL_VIDEODRIVER", "offscreen");
+    common::set_headless_driver();
     let platform = Platform::new().ok()?;
     context::configure_attributes(&platform, GlesVersion::Gles2).ok()?;
     let window = Window::new_opengl(&platform, WindowConfig::new(SIZE, SIZE), "obj").ok()?;
@@ -229,16 +229,20 @@ fn an_obj_model_draws_textured_with_its_own_geometry() {
     let error = render.take_gl_error();
     assert_eq!(error, 0, "GL error 0x{error:04x}");
 
-    let pixels = render.read_pixels(SIZE, SIZE).expect("read back");
+    // The drawable, not `SIZE`: KMSDRM ignores the requested window size and gives the
+    // panel (ADR-035), so a fixed region would sample a corner of the frame.
+    let (width, height) = render.drawable_size();
+    let pixels = render.read_pixels(width, height).expect("read back");
     let lit = covered(&pixels);
+    let area = width as usize * height as usize;
     // The knot occupies a ring-shaped band, not a solid square: it must cover a real
     // part of the frame without filling it (which is what a broken camera would do).
     assert!(
-        lit > SIZE as usize * SIZE as usize / 20,
-        "the model covered only {lit} pixels"
+        lit > area / 20,
+        "the model covered only {lit} of {area} pixels"
     );
     assert!(
-        lit < SIZE as usize * SIZE as usize * 8 / 10,
+        lit < area * 8 / 10,
         "{lit} pixels is most of the frame; the camera framing is wrong"
     );
 
@@ -304,8 +308,9 @@ fn a_mesh_with_zero_normals_is_lit_instead_of_undefined() {
         )
         .expect("draw");
 
-    let pixels = render.read_pixels(SIZE, SIZE).expect("read back");
-    let centre = ((SIZE / 2) * SIZE + SIZE / 2) as usize * 4;
+    let (width, height) = render.drawable_size();
+    let pixels = render.read_pixels(width, height).expect("read back");
+    let centre = ((height / 2) * width + width / 2) as usize * 4;
     let [r, g, b, a] = [
         pixels[centre],
         pixels[centre + 1],

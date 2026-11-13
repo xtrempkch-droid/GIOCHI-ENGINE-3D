@@ -27,7 +27,7 @@ const RIGHT: [u8; 3] = [0, 0, 255];
 
 fn headless() -> Option<(MutexGuard<'static, ()>, Platform, Window, RenderContext3D)> {
     let guard = common::platform_guard();
-    std::env::set_var("SDL_VIDEODRIVER", "offscreen");
+    common::set_headless_driver();
     let platform = Platform::new().ok()?;
     context::configure_attributes(&platform, GlesVersion::Gles2).ok()?;
     let window = Window::new_opengl(&platform, WindowConfig::new(SIZE, SIZE), "textures").ok()?;
@@ -100,7 +100,10 @@ fn a_procedural_texture_is_sampled_by_a_mesh() {
     let error = render.take_gl_error();
     assert_eq!(error, 0, "GL error 0x{error:04x} while drawing textured");
 
-    let pixels = render.read_pixels(SIZE, SIZE).expect("read back");
+    // The drawable, not `SIZE`: on KMSDRM the window is the whole panel and the engine
+    // ignores the requested size (ADR-035), so a fixed region would sample a corner.
+    let (width, height) = render.drawable_size();
+    let pixels = render.read_pixels(width, height).expect("read back");
     let red = count_colour(&pixels, LEFT);
     let blue = count_colour(&pixels, RIGHT);
     assert!(

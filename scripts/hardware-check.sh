@@ -41,6 +41,7 @@ frames=300
 skip_build=0
 skip_c_smoke=0
 force_low_battery=0
+cargo_features=
 
 usage() {
     cat <<'USAGE'
@@ -53,7 +54,13 @@ Validate the engine on a real console over SSH, then hand the screen back.
   --skip-build       reuse an existing target/aarch64-unknown-linux-gnu/release
   --skip-c-smoke     do not cross-compile and run the C consumer
   --force-low-battery  run even when the battery cannot carry the session
+  --no-default-features  build without the default features (combine with --features)
+  --features LIST    extra cargo features, e.g. sdl2-system when the device ships SDL2
   -h, --help         this text
+
+Building against the device's own SDL2 (`--no-default-features --features sdl2-system`)
+is the console path: `bundled` compiles a second copy and leaves two SDL2s in the
+process, which is the same trap `scripts/check-features.sh` guards against.
 USAGE
 }
 
@@ -71,6 +78,8 @@ while [[ $# -gt 0 ]]; do
         --skip-build) skip_build=1; shift ;;
         --skip-c-smoke) skip_c_smoke=1; shift ;;
         --force-low-battery) force_low_battery=1; shift ;;
+        --no-default-features) cargo_features+=" --no-default-features"; shift ;;
+        --features) cargo_features+=" --features ${2:-}"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
@@ -161,10 +170,11 @@ fi
 if [[ "$skip_build" == "0" ]]; then
     echo
     echo "==> cross-building for $target (release)"
+    # shellcheck disable=SC2086 # cargo_features is a list of arguments by design
     if [[ -n "$sysroot" ]]; then
-        CROSS_SYSROOT="$sysroot" scripts/build-aarch64.sh --release
+        CROSS_SYSROOT="$sysroot" scripts/build-aarch64.sh --release $cargo_features
     else
-        scripts/build-aarch64.sh --release
+        scripts/build-aarch64.sh --release $cargo_features
     fi
 else
     [[ -f "$target_dir/giochi-demo" ]] ||
@@ -318,11 +328,18 @@ fi
 
 # The 3D examples are separate binaries, not subcommands of giochi-demo: they
 # need a GL context and the 2D demo deliberately never asks for one.
-for example in cube_demo mini_fps ball_balance; do
+for example in cube_demo model_viewer mini_fps ball_balance; do
     [[ -x "$target_dir/examples/$example" ]] ||
         die "$target_dir/examples/$example is missing; build with 'scripts/build-aarch64.sh --release --examples'"
     scp -q -o BatchMode=yes "$target_dir/examples/$example" "$host:$dest/bin/$example"
 done
+
+# The networking smoke. It is an example and not a `cargo test` binary for a reason that
+# only shows up here: libtest links `pidfd_spawnp@GLIBC_2.39`, and the R35S ships glibc
+# 2.38, so the harness will not start on the device at all.
+[[ -x "$target_dir/examples/loopback_smoke" ]] ||
+    die "$target_dir/examples/loopback_smoke is missing; build with 'scripts/build-aarch64.sh --release --examples'"
+scp -q -o BatchMode=yes "$target_dir/examples/loopback_smoke" "$host:$dest/bin/loopback_smoke"
 
 echo "==> releasing the console (the launcher holds DRM master)"
 console_released=1
@@ -480,12 +497,102 @@ REMOTE
     then :; else failures=$((failures + 1)); fi
 fi
 
+# Networking runs first because it needs neither DRM nor GL: if it fails, the failure is
+# in the network, not in a console state left over from a previous step.
+report "net loopback_smoke (host + client on this device)"
+if remote "$dest" <<'REMOTE'
+cd "$1/bin" || exit 1
+./loopback_smoke 2>&1
+REMOTE
+then :; else failures=$((failures + 1)); fi
+
 report "3D cube_demo --frames $frames"
 if remote "$dest" "$frames" <<'REMOTE'
 cd "$1/bin" || exit 1
 ./cube_demo --frames "$2" 2>&1
 REMOTE
 then :; else failures=$((failures + 1)); fi
+
+# Loading a model is the path a real game uses, and it is the one that reads a file
+# from the device's own filesystem instead of building geometry in memory. The OBJ is
+# generated here so the archive carries no binary asset.
+report "3D model_viewer --frames $frames"
+model_log="$work/model.log"
+if remote "$dest" "$frames" <<'REMOTE' >"$model_log" 2>&1
+cd "$1/bin" || exit 1
+# A tetrahedron with no `vn`: the loader must derive the normals. Regenerated on the
+# device because the rootfs has no writable assets directory of its own.
+cat > /tmp/giochi-model.obj <<'OBJ'
+v 0.0 1.0 0.0
+v -1.0 -1.0 1.0
+v 1.0 -1.0 1.0
+v 0.0 -1.0 -1.0
+f 1 2 3
+f 1 3 4
+f 1 4 2
+f 2 4 3
+OBJ
+# Absolute: the binary runs from $dest/bin, so a relative `assets/...` would miss.
+./model_viewer /tmp/giochi-model.obj --frames "$2" --texture "$1/assets/checker.png" 2>&1
+REMOTE
+then
+    sed -e 's/^/  /' "$model_log"
+    if grep -q "no GL error" "$model_log"; then :; else
+        echo "  FAIL model_viewer reported a GL error" >&2
+        failures=$((failures + 1))
+    fi
+    if grep -q "textures left\|meshes" "$model_log"; then :; else
+        echo "  FAIL model_viewer did not report its teardown" >&2
+        failures=$((failures + 1))
+    fi
+else
+    failures=$((failures + 1))
+fi
+
+# Textures, proved by pixels rather than by the absence of an error. This is the one
+# 0.4.0 path `cargo test` cannot cover on this device: the libtest harness links
+# `pidfd_spawnp@GLIBC_2.39` (a weak symbol from std's process module) and the R35S
+# ships glibc 2.38, so the harness does not even start. A plain example links against
+# what the device provides, so the example is what runs here.
+report "3D cube_demo --texture assets/checker.png --quadro"
+texture_log="$work/texture.log"
+if remote "$dest" "$frames" <<'REMOTE' >"$texture_log" 2>&1
+cd "$1" || exit 1
+./bin/cube_demo --frames "$2" --texture assets/checker.png --quadro /tmp/giochi-texture.bmp 2>&1
+REMOTE
+then
+    sed -e 's/^/  /' "$texture_log"
+    if grep -q "no GL error" "$texture_log"; then :; else
+        echo "  FAIL the textured cube reported a GL error" >&2
+        failures=$((failures + 1))
+    fi
+    if grep -q "textured" "$texture_log"; then :; else
+        echo "  FAIL cube_demo did not report the textured shader" >&2
+        failures=$((failures + 1))
+    fi
+    # A texture that never binds renders a flat, single-colour quad. Counting distinct
+    # colours separates "bound" from "drew the tint", and needs no display.
+    textured_frame="$work/texture.bmp"
+    if scp -q -o BatchMode=yes "$host:/tmp/giochi-texture.bmp" "$textured_frame" 2>/dev/null; then
+        colours=$(od -An -v -tu1 -j54 "$textured_frame" | awk '
+            { for (i = 1; i <= NF; i++) { b[n % 3] = $i
+                if (n % 3 == 2) { key = b[0] "," b[1] "," b[2]
+                    if (!(key in seen)) { seen[key] = 1; c++ } }
+                n++ } }
+            END { print c + 0 }')
+        echo "  captured textured frame: $colours distinct colours"
+        if [[ "${colours:-0}" -gt 8 ]]; then :; else
+            echo "  FAIL the textured frame has only ${colours:-0} colours; the sampler" >&2
+            echo "       was probably never bound, which renders a flat quad" >&2
+            failures=$((failures + 1))
+        fi
+    else
+        echo "  FAIL no textured frame was captured" >&2
+        failures=$((failures + 1))
+    fi
+else
+    failures=$((failures + 1))
+fi
 
 report "3D mini_fps --frames $frames --auto"
 if remote "$dest" "$frames" <<'REMOTE'

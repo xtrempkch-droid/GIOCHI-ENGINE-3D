@@ -20,9 +20,9 @@ with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 > static batching and upscaling — the **networking crate** (`giochi-net`:
 > host-authoritative UDP, interest management, optional `laminar` transport and mDNS
 > discovery) and the **profiler** (frame statistics, `F1` overlay), with CI, release
-> packaging and the guides. Validated on a Rockchip PX30 (Mali-G31) up to 0.3.1; the
-> 0.4.0 additions are validated on x86_64 + AArch64 cross-compile. See
-> [PROGRESS.md](PROGRESS.md).
+> packaging and the guides. Validated on a Rockchip PX30 (Mali-G31) through 0.3.1, and
+> 0.4.0 — networking, textures and arbitrary OBJ models — on an **R35S (RK3326 /
+> Cortex-A35, Mali-G31 Panfrost, KMSDRM)**. See [PROGRESS.md](PROGRESS.md).
 
 
 ## Why "C-shaped" Rust?
@@ -381,7 +381,13 @@ to ~4 KB/s.
 ```bash
 cargo test -p giochi-net                    # 39 tests, zero dependencies
 cargo test -p giochi-net --all-features     # + laminar and mdns
+cargo run -p giochi-net --example loopback_smoke   # host + client end to end
 ```
+
+`loopback_smoke` is the same path a console runs: a real host, a real client, handshake,
+input, AOI filtering and opaque global state. It exists as an example because the libtest
+harness does not start on the R35S (it links a `GLIBC_2.39` weak symbol and the device has
+2.38) — plain binaries link only what the device offers.
 
 The C ABI exposes the whole loop as `giochi_net_*` (ABI v4): `host_create`,
 `client_join`, `pump`, `send_input`, `poll_input`, `host_snapshot`, `broadcast`,

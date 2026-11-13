@@ -7,16 +7,52 @@ O que 0.4.0 acrescenta, e o que foi **de fato** verificado:
 
 | Área | Entrega | Verificado em |
 |---|---|---|
-| Rede | crate `giochi-net`: protocolo binário, AOI, host/cliente, transporte `laminar` opcional, descoberta mDNS opcional | x86_64: 43 testes; AArch64: `cargo check` do workspace e das duas features |
-| C ABI | parte IV (`GIOCHI_ABI_VERSION 4`): 15 funções `giochi_net_*`, `GiochiNetSnapshot`/`Global`/`Input`/`Inimigo` | `c_smoke.c`, `python_smoke.py`, `rust_ffi.rs`, `ffi-smoke.sh` |
-| 3D | texturas por arquivo ou procedurais, `draw_mesh_textured` | x86_64 (driver Mesa/AMD em `offscreen`): `textures_3d.rs` lê o framebuffer |
-| 3D | geometria própria: `model_viewer` para qualquer OBJ, `giochi_mesh_create` para vértices crus | x86_64: `obj_models.rs` gera um torus knot de 4 680 vértices e lê o framebuffer |
-| Correções | 10 defeitos de rede/ABI e 4 de 3D encontrados em auditoria (porta efêmera, `poll_global`, `poll_snapshot`, câmera, ids, decoder, mDNS, normais, path UTF-8, SDL_image) | testes de regressão dedicados, cada um falhando sem a correção |
+| Rede | crate `giochi-net`: protocolo binário, AOI, host/cliente, transporte `laminar` opcional, descoberta mDNS opcional | x86_64: 43 testes; AArch64: `cargo check`; **R35S: `loopback_smoke`** (handshake, input, AOI, global, contadores) |
+| C ABI | parte IV (`GIOCHI_ABI_VERSION 4`): 15 funções `giochi_net_*`, `GiochiNetSnapshot`/`Global`/`Input`/`Inimigo` | `c_smoke.c`, `python_smoke.py`, `rust_ffi.rs`, `ffi-smoke.sh`; **`c_smoke`/`c_smoke_3d` no R35S** |
+| 3D | texturas por arquivo ou procedurais, `draw_mesh_textured` | x86_64 (`offscreen`): `textures_3d.rs`; **R35S: 2 125 cores distintas no quadro do `cube_demo --texture`** |
+| 3D | geometria própria: `model_viewer` para qualquer OBJ, `giochi_mesh_create` para vértices crus | x86_64: `obj_models.rs` (torus knot de 4 680 vértices); **R35S: `model_viewer` com OBJ + textura** |
+| Correções | 10 defeitos de rede/ABI e 4 de 3D encontrados em auditoria | testes de regressão dedicados, cada um falhando sem a correção |
 
-**Não validado em hardware nesta entrega.** O PX30 continua sendo a referência das fases
-0–18; a rede e as texturas 3D nunca rodaram num aparelho. O primeiro item da lista de
-pendências é justamente esse. Números de AOI em `docs/REDE.md` são aritmética, não
-medição; a descoberta mDNS foi medida só nesta máquina.
+### Validação em hardware — R35S (2026-11-13)
+
+Aparelho: `giochi-system-r35s`, **RK3326 / Cortex-A35** (`CPU part 0xd04`), **Mali-G31
+(Panfrost/Mesa)**, GLES 2.0, **640x480**, Buildroot 2024.02, glibc **2.38**, SDL2 **2.28.5**
+com KMSDRM (sem `dummy` nem `offscreen` de vídeo).
+
+```bash
+# sysroot levantado do próprio aparelho (4 .so do SDL2 + headers do host + .pc mínimo)
+scripts/hardware-check.sh --host root@10.55.0.2 --sysroot /tmp/r35s-sysroot \
+    --frames 120 --no-default-features --features <sdl2-system em todos os crates>
+```
+
+| Check | Resultado |
+|---|---|
+| `giochi-demo --verify` | 110 fps, textura viva 1, áudio ativo |
+| `giochi-demo --frames 120 --quadro` | 60.0 fps, quadro 640x480 capturado |
+| `mini_game` (Lua) | 59.7 fps, 0 texturas vivas |
+| `c_smoke` / `c_smoke_3d` | `OK (abi 4, engine 0.4.0)` / ok |
+| `loopback_smoke` (rede) | handshake jogador 1, input, AOI só o inimigo no raio, global 6 B, 0 inválidos |
+| `cube_demo` | GLES 2 Mali-G31, VAO sim, 0 erro de GL |
+| `cube_demo --texture` | textura 64x64, **2 125 cores distintas** no quadro |
+| `model_viewer` (OBJ + textura) | 120 quadros, 0 erro de GL, teardown limpo |
+| `mini_fps` | `GL_EXT_instanced_arrays`, 60 fps, batching 24→1 |
+| `ball_balance` | frame work p99 **4.51 ms**, 0/120 acima de 20 ms |
+
+Console devolvido ao launcher depois de cada execução (`DRM master: giochi-launcher`).
+
+**Duas limitações medidas no aparelho, e o que fazer com elas:**
+
+1. **O harness do `cargo test` não roda no R35S.** O libtest referencia
+   `pidfd_spawnp@GLIBC_2.39` (símbolo fraco do módulo de processo do std) e o aparelho
+   tem glibc 2.38: o binário de teste nem inicia. É por isso que a validação de rede e de
+   textura em hardware é feita por **exemplos** (`loopback_smoke`, `cube_demo --texture`,
+   `model_viewer`), que linkam apenas o que o aparelho oferece.
+2. **Não há driver `offscreen` nem `dummy` de vídeo.** Os testes de integração 3D agora
+   respeitam um `SDL_VIDEODRIVER` já definido (`tests/common::set_headless_driver`), então
+   a mesma suíte pode rodar num console com `SDL_VIDEODRIVER=kmsdrm`.
+
+A descoberta mDNS continua medida só nesta máquina de desenvolvimento; o multicast numa
+LAN real é o item que falta.
 
 ## Fase 18 — Flags ARM64 + CI de performance + C ABI v3
 Fases 15–18 concluídas (performance, batching, instancing/upscaling, C ABI v3).
