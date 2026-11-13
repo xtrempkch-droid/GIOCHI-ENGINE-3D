@@ -25,13 +25,14 @@
 //! * Handle é `u64` opaco; `0` nunca é válido.
 //! * Nenhum panic atravessa: tudo passa por [`state::guard`].
 //!
-//! # Uma exceção deliberada à regra "0 ou negativo"
+//! # As exceções deliberadas à regra "0 ou negativo"
 //!
-//! `giochi_net_poll_snapshot` devolve **`1`** ([`GIOCHI_NET_AGUARDE`]) quando não
-//! há snapshot novo. Isso não é erro — é o caso normal a 60 Hz, porque o host
-//! publica a 15 Hz. Devolver `0` com `total == 0` juntaria "ainda não chegou" com
-//! "chegou e não há inimigo nenhum", e o cliente precisa distinguir os dois para
-//! decidir se interpola ou se limpa a tela.
+//! `giochi_net_poll_snapshot` e `giochi_net_poll_global` devolvem **`1`**
+//! ([`GIOCHI_NET_AGUARDE`]) quando não há snapshot/estado novo. Isso não é erro —
+//! é o caso normal a 60 Hz, porque o host publica a 15 Hz. Devolver `0` com
+//! `total == 0` juntaria "ainda não chegou" com "chegou e não há inimigo nenhum",
+//! e o cliente precisa distinguir os dois para decidir se interpola ou se limpa
+//! a tela.
 
 use core::ffi::{c_char, CStr};
 
@@ -112,6 +113,48 @@ impl Default for GiochiNetSnapshot {
     }
 }
 
+/// Tamanho máximo do estado global que a ABI transporta.
+///
+/// `giochi_net::DATAGRAMA_MAX` (1200) menos o cabeçalho de versão, tag, tick e
+/// contador; usar o datagrama inteiro como teto é mais simples e nunca trunca o
+/// que o protocolo aceita.
+pub const GIOCHI_NET_MAX_GLOBAL: usize = 1200;
+
+// cbindgen só emite `#define` para um literal; a expressão cruzada ficava de
+// fora do header. Este assert mantém o valor colado em `DATAGRAMA_MAX`.
+const _: () = assert!(GIOCHI_NET_MAX_GLOBAL == giochi_net::DATAGRAMA_MAX);
+
+/// Estado global publicado pelo host (onda, torre, chefe).
+///
+/// Os bytes são opacos: a engine transporta, o jogo interpreta. Como no
+/// [`GiochiNetSnapshot`], `total` contra `escritos` diz se houve truncamento.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct GiochiNetGlobal {
+    /// Tick do host que produziu o estado.
+    pub tick: u32,
+    /// Tamanho real do payload.
+    pub total: u32,
+    /// Quantos bytes foram copiados para `dados`.
+    pub escritos: u32,
+    /// Quantos cabem em `dados`: sempre `GIOCHI_NET_MAX_GLOBAL`.
+    pub capacidade: u32,
+    /// O payload opaco.
+    pub dados: [u8; GIOCHI_NET_MAX_GLOBAL],
+}
+
+impl Default for GiochiNetGlobal {
+    fn default() -> Self {
+        Self {
+            tick: 0,
+            total: 0,
+            escritos: 0,
+            capacidade: GIOCHI_NET_MAX_GLOBAL as u32,
+            dados: [0; GIOCHI_NET_MAX_GLOBAL],
+        }
+    }
+}
+
 /// O input de um jogador, no sentido em que o cliente o envia.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -149,14 +192,24 @@ enum No {
     },
     Cliente {
         cliente: Cliente,
-        /// Câmera reposta por `giochi_net_set_camera_pos`.
+        /// Câmera reposta por `giochi_net_set_camera_pos`, consumida no próximo
+        /// input.
         ///
-        /// Quando presente, sobrepõe `camera_x`/`camera_z` do input. Serve para o
-        /// jogo que calcula a câmera separadamente do input e não quer repetir os
+        /// Quando presente, sobrepõe `camera_x`/`camera_z` daquele input. Serve
+        /// para o jogo que calcula a câmera separadamente e não quer repetir os
         /// valores em cada estrutura.
         camera: Option<(f32, f32)>,
         /// Último snapshot recebido, com o tick que o acompanha.
         ultimo: Option<(u32, Vec<SnapshotInimigo>)>,
+        /// Tick do último snapshot entregue por `poll_snapshot`.
+        ///
+        /// Sem isto, a segunda chamada devolvia `0` com o mesmo quadro, e o
+        /// contrato prometia [`GIOCHI_NET_AGUARDE`] até chegar um tick novo.
+        entregue: Option<u32>,
+        /// Último estado global recebido (tick, payload opaco).
+        global: Option<(u32, Vec<u8>)>,
+        /// Tick do último estado global entregue por `poll_global`.
+        global_entregue: Option<u32>,
     },
 }
 
@@ -228,8 +281,11 @@ fn erro_rede(contexto: &str, e: impl core::fmt::Display) -> i32 {
 #[no_mangle]
 pub extern "C" fn giochi_net_host_create(porta: u16) -> u64 {
     guard(0, || {
-        let porta = if porta == 0 { None } else { Some(porta) };
-        match Host::novo(porta) {
+        // `Host::novo(None)` binds `PORTA_PADRAO`, not an ephemeral port. The C
+        // contract says 0 delegates the choice to the OS, which is also what lets
+        // two hosts coexist (and what keeps concurrent tests from racing for
+        // 47721); bind explicitly so the documented meaning holds.
+        match Host::escutar(("0.0.0.0", porta)) {
             Ok(host) => REGISTRO.with(|r| {
                 r.borrow_mut().inserir(No::Host {
                     host,
@@ -276,6 +332,9 @@ pub extern "C" fn giochi_net_client_join(endereco: *const c_char) -> u64 {
                     cliente,
                     camera: None,
                     ultimo: None,
+                    entregue: None,
+                    global: None,
+                    global_entregue: None,
                 })
             }),
             Err(e) => {
@@ -373,19 +432,36 @@ pub extern "C" fn giochi_net_pump(handle: u64) -> i32 {
                 Ok(0)
             }
             No::Cliente {
-                cliente, ultimo, ..
+                cliente,
+                ultimo,
+                global,
+                ..
             } => {
                 for mensagem in cliente.processar(64) {
-                    if let Mensagem::Inimigos { tick, inimigos } = mensagem {
-                        // Guarda o mais novo: snapshot fora de ordem não pode
-                        // sobrescrever um mais recente.
-                        let novo = match ultimo {
-                            Some((t, _)) => tick > *t,
-                            None => true,
-                        };
-                        if novo {
-                            *ultimo = Some((tick, inimigos));
+                    match mensagem {
+                        Mensagem::Inimigos { tick, inimigos } => {
+                            // Guarda o mais novo: snapshot fora de ordem não pode
+                            // sobrescrever um mais recente.
+                            let novo = match ultimo {
+                                Some((t, _)) => tick > *t,
+                                None => true,
+                            };
+                            if novo {
+                                *ultimo = Some((tick, inimigos));
+                            }
                         }
+                        // Sem isto o `Global` era descartado e o cliente C nunca
+                        // via onda, torre nem chefe — embora o host os enviasse.
+                        Mensagem::Global { tick, dados } => {
+                            let novo = match global {
+                                Some((t, _)) => tick > *t,
+                                None => true,
+                            };
+                            if novo {
+                                *global = Some((tick, dados));
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 match cliente.estado() {
@@ -528,7 +604,10 @@ pub extern "C" fn giochi_net_send_input(handle: u64, input: *const GiochiNetInpu
                 // Câmera reposta por `set_camera_pos` sobrepõe a do input. É o que
                 // dá sentido àquela função: quem calcula a câmera à parte não
                 // precisa repetir os valores em cada input.
-                let (camera_x, camera_z) = camera.unwrap_or((copia.camera_x, copia.camera_z));
+                // `take`: o contrato diz "junto com o próximo input", não que a
+                // câmera reposta vale para todos os inputs seguintes.
+                let (camera_x, camera_z) =
+                    camera.take().unwrap_or((copia.camera_x, copia.camera_z));
                 let mensagem = Mensagem::Input {
                     tick: copia.tick,
                     mover_x: copia.mover_x,
@@ -725,6 +804,61 @@ pub extern "C" fn giochi_net_poll_snapshot_filtered(
     poll_snapshot(handle, out, max)
 }
 
+/// Lê o último estado global recebido pelo cliente (onda, torre, chefe).
+///
+/// É o par de [`giochi_net_broadcast`]: sem esta função o host publicava o estado
+/// e o cliente C não tinha como lê-lo.
+///
+/// Devolve [`GIOCHI_NET_AGUARDE`] (`1`) quando não há estado novo desde a última
+/// leitura, `0` quando escreveu, negativo em caso de erro.
+///
+/// # C ABI
+///
+/// ```c
+/// int32_t giochi_net_poll_global(uint64_t handle, GiochiNetGlobal* out);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_net_poll_global(handle: u64, out: *mut GiochiNetGlobal) -> i32 {
+    guard(GIOCHI_ERROR_NETWORK, || {
+        if out.is_null() {
+            return state::invalid_argument("giochi_net_poll_global: out is NULL");
+        }
+        com_no(handle, |no| match no {
+            No::Host { .. } => Err(state::invalid_argument(
+                "giochi_net_poll_global: only a client receives global state",
+            )),
+            No::Cliente {
+                global,
+                global_entregue,
+                ..
+            } => {
+                let Some((tick, dados)) = global.as_ref() else {
+                    return Ok(GIOCHI_NET_AGUARDE);
+                };
+                if *global_entregue == Some(*tick) {
+                    return Ok(GIOCHI_NET_AGUARDE);
+                }
+                let mut estado = GiochiNetGlobal {
+                    tick: *tick,
+                    total: dados.len() as u32,
+                    escritos: 0,
+                    capacidade: GIOCHI_NET_MAX_GLOBAL as u32,
+                    dados: [0; GIOCHI_NET_MAX_GLOBAL],
+                };
+                let n = dados.len().min(GIOCHI_NET_MAX_GLOBAL);
+                estado.dados[..n].copy_from_slice(&dados[..n]);
+                estado.escritos = n as u32;
+                // SAFETY: `out` was checked for NULL above and the C contract says
+                // it points to writable storage of this type.
+                unsafe { *out = estado };
+                *global_entregue = Some(*tick);
+                Ok(0)
+            }
+        })
+        .unwrap_or_else(|codigo| codigo)
+    })
+}
+
 fn poll_snapshot(handle: u64, out: *mut GiochiNetSnapshot, max: u32) -> i32 {
     guard(GIOCHI_ERROR_NETWORK, || {
         if out.is_null() {
@@ -735,10 +869,15 @@ fn poll_snapshot(handle: u64, out: *mut GiochiNetSnapshot, max: u32) -> i32 {
             No::Host { .. } => Err(state::invalid_argument(
                 "giochi_net_poll_snapshot: only a client receives snapshots",
             )),
-            No::Cliente { ultimo, .. } => {
-                let Some((tick, inimigos)) = ultimo else {
+            No::Cliente {
+                ultimo, entregue, ..
+            } => {
+                let Some((tick, inimigos)) = ultimo.as_ref() else {
                     return Ok(GIOCHI_NET_AGUARDE);
                 };
+                if *entregue == Some(*tick) {
+                    return Ok(GIOCHI_NET_AGUARDE);
+                }
                 let mut snapshot = GiochiNetSnapshot {
                     tick: *tick,
                     total: inimigos.len() as u32,
@@ -754,6 +893,7 @@ fn poll_snapshot(handle: u64, out: *mut GiochiNetSnapshot, max: u32) -> i32 {
                 // SAFETY: `out` was checked for NULL above and the C contract says it
                 // points to writable storage of this type.
                 unsafe { *out = snapshot };
+                *entregue = Some(*tick);
                 Ok(0)
             }
         })
@@ -779,6 +919,10 @@ mod testes {
             16 + GIOCHI_NET_MAX_INIMIGOS * 16
         );
         assert_eq!(core::mem::size_of::<GiochiNetInput>(), 32);
+        assert_eq!(
+            core::mem::size_of::<GiochiNetGlobal>(),
+            16 + GIOCHI_NET_MAX_GLOBAL
+        );
     }
 
     #[test]
@@ -797,6 +941,158 @@ mod testes {
         assert_eq!(giochi_net_destroy(handle), 0);
         // Depois de destruir, o handle não vale mais.
         assert_eq!(giochi_net_local_port(handle), GIOCHI_ERROR_NETWORK);
+    }
+
+    #[test]
+    fn porta_zero_delega_ao_so_e_dois_hosts_convivem() {
+        let primeiro = giochi_net_host_create(0);
+        assert_ne!(primeiro, 0, "primeiro host devia criar");
+        let segundo = giochi_net_host_create(0);
+        assert_ne!(
+            segundo, 0,
+            "porta 0 tem de delegar ao SO, não reusar a porta padrão"
+        );
+
+        let porta_primeiro = giochi_net_local_port(primeiro);
+        let porta_segundo = giochi_net_local_port(segundo);
+        assert!(porta_primeiro > 0 && porta_segundo > 0);
+        assert_ne!(porta_primeiro, porta_segundo);
+
+        assert_eq!(giochi_net_destroy(primeiro), 0);
+        assert_eq!(giochi_net_destroy(segundo), 0);
+    }
+
+    #[test]
+    fn snapshot_so_e_entregue_uma_vez_por_tick() {
+        // O contrato promete AGUARDE entre snapshots; devolver 0 com o mesmo
+        // quadro faria o jogo redesenhar estado velho a 60 Hz.
+        let host = giochi_net::Host::escutar(("127.0.0.1", 0)).expect("host local");
+        let cliente =
+            giochi_net::Cliente::entrar(host.endereco().expect("endereço")).expect("cliente");
+        let handle = REGISTRO.with(|r| {
+            r.borrow_mut().inserir(No::Cliente {
+                cliente,
+                camera: None,
+                ultimo: Some((
+                    7,
+                    vec![SnapshotInimigo {
+                        id: 1,
+                        x: 2.0,
+                        z: 3.0,
+                        hp: 10,
+                        tipo: 0,
+                        fase_chefe: 0,
+                    }],
+                )),
+                entregue: None,
+                global: None,
+                global_entregue: None,
+            })
+        });
+
+        let mut snapshot = GiochiNetSnapshot::default();
+        assert_eq!(giochi_net_poll_snapshot(handle, &mut snapshot), 0);
+        assert_eq!(snapshot.tick, 7);
+        assert_eq!(snapshot.escritos, 1);
+        assert_eq!(
+            giochi_net_poll_snapshot(handle, &mut snapshot),
+            GIOCHI_NET_AGUARDE,
+            "o mesmo tick não pode ser entregue duas vezes"
+        );
+
+        // Um tick novo volta a ser entregue.
+        REGISTRO.with(|r| {
+            if let Some(No::Cliente { ultimo, .. }) = r.borrow_mut().nos.get_mut(&handle) {
+                *ultimo = Some((8, Vec::new()));
+            }
+        });
+        assert_eq!(giochi_net_poll_snapshot(handle, &mut snapshot), 0);
+        assert_eq!(snapshot.tick, 8);
+        assert_eq!(snapshot.escritos, 0);
+
+        assert_eq!(giochi_net_destroy(handle), 0);
+    }
+
+    #[test]
+    fn estado_global_so_e_entregue_uma_vez_por_tick() {
+        // `giochi_net_broadcast` sem um poll correspondente deixava o cliente C
+        // sem onda, torre nem chefe. O par tem de entregar cada tick uma vez.
+        let host = giochi_net::Host::escutar(("127.0.0.1", 0)).expect("host local");
+        let cliente =
+            giochi_net::Cliente::entrar(host.endereco().expect("endereço")).expect("cliente");
+        let handle = REGISTRO.with(|r| {
+            r.borrow_mut().inserir(No::Cliente {
+                cliente,
+                camera: None,
+                ultimo: None,
+                entregue: None,
+                global: Some((5, vec![10, 20, 30])),
+                global_entregue: None,
+            })
+        });
+
+        let mut estado = GiochiNetGlobal::default();
+        assert_eq!(giochi_net_poll_global(handle, &mut estado), 0);
+        assert_eq!(estado.tick, 5);
+        assert_eq!(estado.total, 3);
+        assert_eq!(estado.escritos, 3);
+        assert_eq!(&estado.dados[..3], &[10, 20, 30]);
+        assert_eq!(
+            giochi_net_poll_global(handle, &mut estado),
+            GIOCHI_NET_AGUARDE
+        );
+
+        REGISTRO.with(|r| {
+            if let Some(No::Cliente { global, .. }) = r.borrow_mut().nos.get_mut(&handle) {
+                *global = Some((6, vec![7]));
+            }
+        });
+        assert_eq!(giochi_net_poll_global(handle, &mut estado), 0);
+        assert_eq!(estado.tick, 6);
+        assert_eq!(estado.escritos, 1);
+        assert_eq!(estado.dados[0], 7);
+
+        assert_eq!(giochi_net_destroy(handle), 0);
+    }
+
+    #[test]
+    fn broadcast_do_host_chega_ao_cliente_pela_abi() {
+        // Prova o caminho inteiro: handshake, broadcast (host → cliente) e o
+        // novo poll, não só o armazenamento interno.
+        let host = giochi_net_host_create(0);
+        assert_ne!(host, 0);
+        let porta = giochi_net_local_port(host);
+        assert!(porta > 0);
+        let endereco =
+            std::ffi::CString::new(format!("127.0.0.1:{porta}")).expect("endereço sem NUL");
+        let cliente = giochi_net_client_join(endereco.as_ptr());
+        assert_ne!(cliente, 0);
+
+        let payload = [9u8, 8, 7];
+        let mut estado = GiochiNetGlobal::default();
+        let prazo = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut recebeu = false;
+        while std::time::Instant::now() < prazo {
+            giochi_net_pump(host);
+            giochi_net_pump(cliente);
+            assert_eq!(
+                giochi_net_broadcast(host, payload.as_ptr(), payload.len() as u32),
+                0
+            );
+            if giochi_net_poll_global(cliente, &mut estado) == 0 {
+                recebeu = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+
+        assert!(recebeu, "o broadcast devia chegar ao cliente");
+        assert_eq!(estado.tick, 0, "o host ainda não publicou snapshot");
+        assert_eq!(estado.escritos, payload.len() as u32);
+        assert_eq!(&estado.dados[..payload.len()], &payload);
+
+        assert_eq!(giochi_net_destroy(cliente), 0);
+        assert_eq!(giochi_net_destroy(host), 0);
     }
 
     #[test]
@@ -837,6 +1133,16 @@ mod testes {
         assert_eq!(
             giochi_net_host_snapshot(host, std::ptr::null(), 5),
             GIOCHI_ERROR_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            giochi_net_poll_global(host, std::ptr::null_mut()),
+            GIOCHI_ERROR_INVALID_ARGUMENT
+        );
+        let mut global = GiochiNetGlobal::default();
+        assert_eq!(
+            giochi_net_poll_global(host, &mut global),
+            GIOCHI_ERROR_INVALID_ARGUMENT,
+            "host não recebe estado global"
         );
         assert_eq!(giochi_net_destroy(host), 0);
     }

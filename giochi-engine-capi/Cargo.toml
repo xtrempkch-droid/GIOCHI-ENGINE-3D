@@ -20,8 +20,8 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 # feature union and `--features sdl2-system` built SDL2 from source through CMake —
 # which is the one thing the console cross-compile cannot do.
 giochi-engine = { path = "../giochi-engine", version = "0.3.1", default-features = false }
-# Parts II and III of the ABI (`GIOCHI_ABI_VERSION 3`: 3D and frame statistics). The 3D
-# crate is the only thing here that
+# Part II of the ABI (3D); frame statistics (part III) come from `giochi-engine`.
+# The 3D crate is the only thing here that
 # links GLES, so a 2D-only consumer of `libgiochi.so` still pulls it in — that is the
 # price of one shared library, and the alternative (a second .so) would make a C program
 # that wants both link two things and keep two versions in step.

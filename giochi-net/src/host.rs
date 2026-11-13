@@ -237,8 +237,13 @@ impl Host {
             return;
         }
 
-        let id = self.proximo_id;
-        self.proximo_id = self.proximo_id.wrapping_add(1).max(1);
+        // Na volta de 255 para 1, o id gerado pode estar em uso: reutilizá-lo
+        // faria dois jogadores compartilharem o mesmo input e AOI.
+        let mut id = self.proximo_id;
+        while self.clientes.values().any(|c| c.id == id) {
+            id = id.wrapping_add(1).max(1);
+        }
+        self.proximo_id = id.wrapping_add(1).max(1);
         self.clientes.insert(
             de,
             Cliente {
@@ -412,6 +417,34 @@ mod testes {
             "primeiro cliente é 1, porque 0 é o host"
         );
         assert_eq!(host.clientes(), 1);
+    }
+
+    #[test]
+    fn id_nao_reusa_cliente_vivo_quando_o_contador_da_a_volta() {
+        let mut host = Host::escutar(("127.0.0.1", 0)).unwrap();
+        for (id, porta) in [(1u8, 1u16), (255u8, 2u16)] {
+            let addr = SocketAddr::from(([127, 0, 0, 1], porta));
+            host.clientes.insert(
+                addr,
+                Cliente {
+                    id,
+                    addr,
+                    ultimo_pacote: Instant::now(),
+                    camera_x: 0.0,
+                    camera_z: 0.0,
+                    raio: 0.0,
+                },
+            );
+        }
+        host.proximo_id = 255;
+
+        let novo = SocketAddr::from(([127, 0, 0, 1], 3));
+        host.responder_handshake(novo, VERSAO_PROTOCOLO, 0, Instant::now());
+        assert_eq!(
+            host.clientes.get(&novo).map(|c| c.id),
+            Some(2),
+            "255 e 1 estão em uso; o próximo id livre é 2"
+        );
     }
 
     #[test]

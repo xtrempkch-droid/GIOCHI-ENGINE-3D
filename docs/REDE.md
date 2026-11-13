@@ -5,10 +5,11 @@ Implementação do **Relatório 2** do
 rede P2P host-autoritativa com *Interest Management*, para o GIOCHI-OS em Linux
 ARM64.
 
-> **Estado: compilado e testado.** `cargo test -p giochi-net` dá **34/34**, e
-> **38/38** com `--features laminar`; `clippy -D warnings` e `fmt --check`
-> passam. O que **não** foi feito está na §3: a ABI C, o teste com dois
-> processos e a validação de cross-compile no CI.
+> **Estado: compilado e testado.** `cargo test -p giochi-net` dá **39/39**;
+> **43/43** com `--features laminar`; **43 + 1 ignorado** com `--features mdns`.
+> `clippy -D warnings` e `fmt --check` passam, e o cross-compile AArch64 compila
+> o workspace e as duas features opcionais. O que falta está na §3: teste com
+> dois processos e validação em hardware.
 
 ---
 
@@ -146,7 +147,7 @@ num endereço fixo: 30 linhas, sem dependência, funciona em LAN plana.
 
 ### O que sobrou da ABI C
 
-Nada. As 14 funções estão em `giochi-engine-capi/src/net.rs`, o header foi
+Nada. As 15 funções estão em `giochi-engine-capi/src/net.rs`, o header foi
 regerado com `cbindgen 0.27`, e o contrato ganhou §16–19. Verificado de C,
 Python e Rust no CI (`c_smoke: OK (abi 4, ...)`).
 
@@ -166,9 +167,10 @@ tamanho fixo. A saída foi array de 64 mais **dois contadores** (`total` e
 `escritos`), e `total > escritos` passou a ser o sinal de truncamento que o
 consumidor tem de olhar.
 
-Uma exceção deliberada à regra "0 ou negativo": `giochi_net_poll_snapshot`
-devolve `1` (`GIOCHI_NET_AGUARDE`) quando não há snapshot novo, porque o host
-publica a 15 Hz e o jogo chama a 60 Hz — esse é o caso normal, não erro.
+Uma exceção deliberada à regra "0 ou negativo": `giochi_net_poll_snapshot` e
+`giochi_net_poll_global` devolvem `1` (`GIOCHI_NET_AGUARDE`) quando não há
+snapshot/estado novo, porque o host publica a 15 Hz e o jogo chama a 60 Hz —
+esse é o caso normal, não erro.
 
 O teste de layout não foi tocado: ele prende as structs do 2D/3D, e a parte IV
 tem asserts próprios em `net.rs::tamanho_das_structs_e_estavel`.
@@ -177,14 +179,14 @@ tem asserts próprios em `net.rs::tamanho_das_structs_e_estavel`.
 
 ## 4. O que os testes cobrem
 
-`cargo test -p giochi-net` — **34 testes**; **38** com `--features laminar`;
-**37 + 1 ignorado** com `--features mdns`. Todos executados:
+`cargo test -p giochi-net` — **39 testes**; **43** com `--features laminar`;
+**43 + 1 ignorado** com `--features mdns`. Todos executados:
 
 | Configuração | Testes | Observação |
 | --- | --- | --- |
-| padrão | 34 | zero dependência |
-| `--features laminar` | 38 | +4 do transporte |
-| `--features mdns` | 37 | +3 do mDNS e 1 `#[ignore]` |
+| padrão | 39 | zero dependência |
+| `--features laminar` | 43 | +4 do transporte |
+| `--features mdns` | 43 | +4 do mDNS e 1 `#[ignore]` |
 
 O teste ignorado (`encontra_o_proprio_anuncio`) **é** executado, com
 `-- --ignored`: depende de multicast numa interface real, então não pode rodar
@@ -192,13 +194,13 @@ no CI. Medido nesta máquina: encontra o próprio anúncio em **1,03 s**.
 
 | Arquivo | Testes | O que fixa |
 | --- | --- | --- |
-| `wire.rs` | 8 | ida e volta das 10 variantes, versão errada recusada, truncado com offset, tag inválida, snapshot truncado sem corromper, quantização saturando, payload grande |
+| `wire.rs` | 10 | ida e volta das 10 variantes, versão errada recusada, truncado com offset, tag inválida, bytes arbitrários sem pânico, snapshot truncado sem corromper, contagem de inimigos maior que o pacote recusada sem alocar o pedido, quantização saturando, payload grande |
 | `aoi.rs` | 8 | centro vê a região e não o mundo, fora não vê nada, borda inclusiva, raio 0 desliga (não esconde), raio negativo/NaN, fórmula da tela, buffer reaproveitado, a conta do relatório |
 | `peer.rs` | 6 | abre em porta efêmera, **não bloqueia** (mede tempo), envia e recebe, lixo vira evento e não derruba o socket, orçamento limita |
-| `host.rs` | 5 | sobe e escuta, handshake atribui id 1, versão errada não cria cliente, input sem handshake ignorado, snapshot respeita taxa e AOI |
-| `client.rs` | 5 | entra e recebe id, input chega e snapshot volta filtrado, `enviar_input` recusa o que não é do cliente, pacote de outro endereço ignorado, RTT satura |
+| `host.rs` | 6 | sobe e escuta, handshake atribui id 1, versão errada não cria cliente, input sem handshake ignorado, snapshot respeita taxa e AOI, id não reusa jogador vivo na volta do contador |
+| `client.rs` | 7 | entra e recebe id, input chega e snapshot volta filtrado, `enviar_input` recusa o que não é do cliente, pacote de outro endereço ignorado, id 0 é recusado, host silencioso faz desistir, RTT satura |
 | `lib.rs` | 2 | versão/porta/taxa estáveis, datagrama cabe no MTU mínimo de IPv6 |
-| `descobrir.rs` (feature `mdns`) | 3 + 1 ignorado | nome de instância utilizável, tipo de serviço com o sufixo obrigatório, `ip_anunciavel` recusa loopback; o ignorado anuncia e encontra o próprio anúncio de verdade |
+| `descobrir.rs` (feature `mdns`) | 4 + 1 ignorado | nome de instância utilizável, tipo de serviço com o sufixo obrigatório, `ip_anunciavel` recusa loopback, anúncio só com loopback é descartado; o ignorado anuncia e encontra o próprio anúncio de verdade |
 
 O teste mais importante é o de `peer.rs`: ele **mede o tempo** de `drenar` sem
 pacote na fila. Se o socket voltasse a ser bloqueante, ele falha por timeout — é o

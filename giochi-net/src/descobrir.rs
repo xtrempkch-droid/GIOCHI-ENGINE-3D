@@ -35,7 +35,7 @@
 //! Medido nesta máquina: com `127.0.0.1` a descoberta dava `NAO ACHOU` em 15 s;
 //! com o IP da interface, resolveu em menos de 2 s.
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use mdns_sd::{Receiver, ServiceDaemon, ServiceEvent, ServiceInfo};
@@ -225,19 +225,25 @@ fn converter(info: &ServiceInfo) -> Option<Encontrado> {
     let ip = info
         .get_addresses()
         .iter()
-        .find(|a| matches!(a, IpAddr::V4(v4) if *v4 != Ipv4Addr::LOCALHOST))
-        .or_else(|| {
-            info.get_addresses()
-                .iter()
-                .find(|a| matches!(a, IpAddr::V4(_)))
+        .copied()
+        .find(|a| match a {
+            IpAddr::V4(v4) => !v4.is_loopback() && !v4.is_unspecified(),
+            IpAddr::V6(_) => false,
         })
         .or_else(|| {
-            // Só IPv6 global: aceitável, mas depois do IPv4.
-            info.get_addresses()
-                .iter()
-                .find(|a| !matches!(a, IpAddr::V6(v6) if *v6 == Ipv6Addr::LOCALHOST))
-        })
-        .copied()?;
+            // IPv6 só se não houver IPv4 útil. Link-local (`fe80::`) não conecta
+            // sem `%interface`, então também não serve.
+            info.get_addresses().iter().copied().find(|a| match a {
+                // `fe80::/10` escrito à mão: `is_unicast_link_local` só estabilizou
+                // no Rust 1.84 e o MSRV do workspace é 1.82.
+                IpAddr::V6(v6) => {
+                    !v6.is_loopback()
+                        && !v6.is_unspecified()
+                        && (v6.segments()[0] & 0xffc0) != 0xfe80
+                }
+                IpAddr::V4(_) => false,
+            })
+        })?;
 
     Some(Encontrado {
         nome: info.get_fullname().to_string(),
@@ -258,6 +264,23 @@ mod testes {
         // O mDNS não aceita espaço nem ponto no rótulo.
         assert!(!nome.contains(' '));
         assert!(!nome.contains('.'));
+    }
+
+    #[test]
+    fn anuncio_so_com_loopback_e_descartado() {
+        let info = ServiceInfo::new(
+            TIPO_SERVICO,
+            "so-loopback",
+            "so-loopback.local.",
+            "127.0.0.1",
+            47721,
+            None,
+        )
+        .expect("ServiceInfo de teste");
+        assert!(
+            converter(&info).is_none(),
+            "127.0.0.1 não é alcançável de outro aparelho"
+        );
     }
 
     #[test]

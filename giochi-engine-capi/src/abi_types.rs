@@ -304,9 +304,10 @@ const _: () = assert!(core::mem::align_of::<GiochiFrameStats>() == 8);
 /// que houve (porta ocupada, endereço inválido, host recusou, handle vencido).
 pub const GIOCHI_ERROR_NETWORK: i32 = -10;
 
-/// `giochi_net_poll_snapshot` não tinha nada novo para entregar.
+/// `giochi_net_poll_snapshot`/`giochi_net_poll_global` não tinham nada novo
+/// para entregar.
 ///
-/// **Positivo de propósito, e a única exceção à regra "0 ou negativo" da ABI.**
+/// **Positivo de propósito, e a exceção à regra "0 ou negativo" da ABI.**
 /// O host publica a 15 Hz e o jogo chama a função a 60 Hz, então "ainda não
 /// chegou" é o caso comum — não é erro. Devolver `0` juntaria "nada chegou" com
 /// "chegou e a área não tem inimigo", e o cliente precisa dos dois separados para

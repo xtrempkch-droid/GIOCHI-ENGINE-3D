@@ -1,7 +1,7 @@
 # GIOCHI-ENGINE — C ABI Contract
 
 **Contract version: `GIOCHI_ABI_VERSION 1` for part I (2D), `2` for part II (3D), `3` for
-part III (frame statistics).**
+part III (frame statistics), `4` for part IV (networking).**
 **Engine version: `0.3.1`**
 **Status: authoritative.** This document is the law of the project. If a Rust type
 cannot be expressed in the C form below, the *type* is redesigned — the contract
@@ -10,10 +10,10 @@ is never relaxed.
 Part I (§1–§7) is implemented and exported. Part II (§8–§12) specifies 3D and was
 written before the code on purpose; it shipped in phase 14 and bumped
 `GIOCHI_ABI_VERSION` to 2. Part III (§13) adds frame statistics in phase 18 and bumps it
-to 3. **Every part is additive: no signature from an earlier part has ever changed, and
-a consumer written against version 1 or 2 keeps working against version 3 unchanged.**
-That is why this contract tells consumers to test `giochi_abi_version() >= 1` rather than
-equality.
+to 3. Part IV (§16–§19) adds networking and bumps it to 4. **Every part is additive: no
+signature from an earlier part has ever changed, and a consumer written against version
+1, 2 or 3 keeps working against version 4 unchanged.** That is why this contract tells
+consumers to test `giochi_abi_version() >= 1` rather than equality.
 
 The header `giochi-engine-capi/include/giochi.h` is generated from the Rust crate
 by `cbindgen` and must match this document exactly; `scripts/gen-header.sh --check`
@@ -375,7 +375,7 @@ of `PROGRESS.md` that implemented it, kept as history; all of them are implement
 
 ```c
 /* Always available, safe to call before giochi_engine_init. */
-uint32_t    giochi_abi_version(void);      /* == GIOCHI_ABI_VERSION (3) */
+uint32_t    giochi_abi_version(void);      /* == GIOCHI_ABI_VERSION (4 now) */
 uint32_t    giochi_engine_version(void);   /* major<<16|minor<<8|patch */
 const char* giochi_get_last_error(void);   /* thread-local, never NULL */
 
@@ -980,7 +980,7 @@ half-update a struct the host is already displaying.
 
 | Requirement | Enforced by |
 |---|---|
-| `GIOCHI_ABI_VERSION == 3` and `giochi_abi_version()` agrees | `python_smoke.py`, `rust_ffi.rs`, `c_smoke.c` |
+| `giochi_abi_version() >= 3` and agrees with `GIOCHI_ABI_VERSION` | `python_smoke.py`, `rust_ffi.rs`, `c_smoke.c` |
 | `GiochiFrameStats` is 120 bytes, alignment 8, offsets stable | `_Static_assert` in `c_smoke.c`, `ctypes.sizeof`/`offset` in `python_smoke.py`, `const` asserts in `abi_types.rs` |
 | Reserved words are zeroed by the library | `c_smoke.c` and `python_smoke.py` memset the struct to `0xAB` first, then check all eight words |
 | `NULL` is rejected without writing | `c_smoke.c`, `python_smoke.py` |
@@ -1026,7 +1026,22 @@ typedef struct {
     uint32_t acoes;                     /* bitmask do jogo */
     float    camera_x, camera_z;
 } GiochiNetInput;         /* 32 bytes */
+
+#define GIOCHI_NET_MAX_GLOBAL 1200
+
+typedef struct {
+    uint32_t tick;        /* crescente; use para descartar estado velho */
+    uint32_t total;       /* tamanho real do payload */
+    uint32_t escritos;    /* quantos bytes foram copiados para `dados` */
+    uint32_t capacidade;  /* quantos cabem: sempre GIOCHI_NET_MAX_GLOBAL */
+    uint8_t  dados[GIOCHI_NET_MAX_GLOBAL]; /* opaco: o jogo interpreta */
+} GiochiNetGlobal;        /* 1216 bytes */
 ```
+
+`GiochiNetGlobal` é o par de `giochi_net_broadcast`: o host publica onda, torre,
+chefe e loja como bytes opacos, e o cliente lê o último estado recebido. Também
+aqui `total > escritos` significa truncamento; o protocolo mantém o payload
+abaixo de `GIOCHI_NET_MAX_GLOBAL`, então na prática não trunca.
 
 **`total` contra `escritos` é a parte que o consumidor não pode ignorar.**
 `GiochiNetSnapshot` tem tamanho fixo porque C não tem `Vec`, mas a engine pode ter
@@ -1053,12 +1068,14 @@ invisíveis. Reporte isso — HUD, log, o que for — em vez de assumir que `esc
 | `int32_t giochi_net_broadcast(uint64_t, const uint8_t*, uint32_t)` | host manda estado global | 0 / erro |
 | `int32_t giochi_net_poll_snapshot(uint64_t, GiochiNetSnapshot*)` | cliente lê o snapshot | 0 / `1` / erro |
 | `int32_t giochi_net_poll_snapshot_filtered(uint64_t, GiochiNetSnapshot*, uint32_t max)` | idem, com teto | 0 / `1` / erro |
+| `int32_t giochi_net_poll_global(uint64_t, GiochiNetGlobal*)` | cliente lê o estado global do host | 0 / `1` / erro |
 
-### A única exceção à regra "0 ou negativo"
+### As exceções à regra "0 ou negativo"
 
-`giochi_net_poll_snapshot` devolve **`1`** (`GIOCHI_NET_AGUARDE`) quando não há
-snapshot novo. O host publica a 15 Hz e o jogo chama a 60 Hz, então "ainda não
-chegou" é o caso **normal**, não erro.
+`giochi_net_poll_snapshot` e `giochi_net_poll_global` devolvem **`1`**
+(`GIOCHI_NET_AGUARDE`) quando não há snapshot/estado novo. O host publica a
+15 Hz e o jogo chama a 60 Hz, então "ainda não chegou" é o caso **normal**, não
+erro.
 
 A alternativa — devolver `0` com `total == 0` — juntaria "nada chegou" com "chegou
 e não há inimigo na área". O cliente precisa dos dois separados: no primeiro ele
@@ -1091,6 +1108,10 @@ while (rodando) {
         if (s.total > s.escritos) { log_truncado(s.total, s.escritos); }
         desenhar(s.inimigos, s.escritos);
     }
+    GiochiNetGlobal g;
+    if (giochi_net_poll_global(c, &g) == 0) {
+        aplicar_estado_global(g.dados, g.escritos);
+    }
 }
 ```
 
@@ -1103,8 +1124,8 @@ while (rodando) {
   a reimplementar a mesma máquina de estados.
 - **Sem NAT traversal, relay ou reconexão automática.** LAN apenas, como o
   relatório que originou isto declara no "fora de escopo".
-- **Sem mDNS nesta versão.** O cliente recebe o endereço pronto. Ver
-  `docs/REDE.md` §2.4.
+- **Sem mDNS na ABI C.** A descoberta existe em `giochi-net`, mas serve ao
+  launcher Rust: o cliente C recebe o endereço pronto. Ver `docs/REDE.md` §2.4.
 - **Sem predição no cliente.** Host-autoritativo puro: o cliente vê a própria
   posição com o atraso do RTT, que em LAN é 1–4 ms.
 - **A engine não conhece regra de jogo.** "Onda", "torre", "chefe" e "loja" viajam
@@ -1115,10 +1136,11 @@ while (rodando) {
 | Requisito | Como é verificado |
 |---|---|
 | `GIOCHI_ABI_VERSION == 4` | `lib.rs::abi_version_matches_contract` |
-| `GiochiNetInimigo` = 16 bytes, `GiochiNetSnapshot` = 1040, `GiochiNetInput` = 32 | `net.rs::tamanho_das_structs_e_estavel` |
+| `GiochiNetInimigo` = 16 bytes, `GiochiNetSnapshot` = 1040, `GiochiNetInput` = 32, `GiochiNetGlobal` = 1216 | `net.rs::tamanho_das_structs_e_estavel` |
 | Handle `0` nunca é válido | `net.rs::handle_zero_nunca_e_valido` |
 | `NULL` é recusado sem escrever | `net.rs::argumentos_null_sao_recusados` |
 | Papel errado é recusado com mensagem | `net.rs::papel_errado_e_recusado_com_mensagem` |
 | `total > escritos` sinaliza truncamento | `net.rs::snapshot_truncado_reporta_total_maior_que_escritos` |
+| O broadcast do host chega ao cliente por `giochi_net_poll_global` | `net.rs::broadcast_do_host_chega_ao_cliente_pela_abi` |
 | `GIOCHI_NET_AGUARDE` é positivo | `net.rs::codigo_de_espera_nao_e_erro` |
 | O header corresponde ao código | `scripts/gen-header.sh --check` no CI |

@@ -160,7 +160,8 @@ impl Cliente {
 
             match &mensagem {
                 Mensagem::HandshakeOk { versao, jogador } => {
-                    if *versao != VERSAO_PROTOCOLO {
+                    // Id 0 é o host; o protocolo nunca o atribui a um cliente.
+                    if *versao != VERSAO_PROTOCOLO || *jogador == 0 {
                         self.estado = Estado::Recusado;
                         continue;
                     }
@@ -195,8 +196,11 @@ impl Cliente {
                 .enviar(self.host, &Mensagem::Ping { enviado_ms: ms });
         }
 
+        // Vale também para `Conectando`: um host que nunca respondeu está tão
+        // morto quanto um que parou de responder, e sem isto o jogo esperaria
+        // para sempre por um id que não vem.
         if agora.duration_since(self.ultimo_pacote) > TIMEOUT_HOST
-            && matches!(self.estado, Estado::Conectado(_))
+            && !matches!(self.estado, Estado::Recusado)
         {
             self.estado = Estado::Recusado;
         }
@@ -383,6 +387,45 @@ mod testes {
             cliente.jogador(),
             Some(99),
             "pacote de outro endereço não vale"
+        );
+    }
+
+    #[test]
+    fn host_que_nunca_responde_faz_o_cliente_desistir() {
+        let host = Host::escutar(("127.0.0.1", 0)).unwrap();
+        let addr = host.endereco().unwrap();
+        let mut cliente = Cliente::entrar(addr).unwrap();
+        assert_eq!(cliente.estado(), Estado::Conectando);
+
+        // Recua o relógio do último pacote em vez de dormir seis segundos.
+        cliente.ultimo_pacote = Instant::now() - TIMEOUT_HOST - Duration::from_millis(1);
+        cliente.processar(0);
+        assert_eq!(cliente.estado(), Estado::Recusado);
+    }
+
+    #[test]
+    fn handshake_ok_com_id_zero_e_recusado() {
+        let mut host = crate::peer::Net::abrir("127.0.0.1:0", crate::peer::Modo::Host).unwrap();
+        let addr = host.local().unwrap();
+        let mut cliente = Cliente::entrar(addr).unwrap();
+
+        let porta = cliente.net.local().unwrap().port();
+        let cliente_addr = SocketAddr::from(([127, 0, 0, 1], porta));
+        host.enviar(
+            cliente_addr,
+            &Mensagem::HandshakeOk {
+                versao: VERSAO_PROTOCOLO,
+                jogador: 0,
+            },
+        )
+        .unwrap();
+
+        std::thread::sleep(Duration::from_millis(50));
+        cliente.processar(64);
+        assert_eq!(
+            cliente.estado(),
+            Estado::Recusado,
+            "0 é o host, nunca um jogador"
         );
     }
 

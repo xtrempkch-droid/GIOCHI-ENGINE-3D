@@ -1,5 +1,5 @@
 /*
- * GIOCHI-ENGINE C ABI, version 3.
+ * GIOCHI-ENGINE C ABI, version 4.
  *
  * Link against libgiochi.so (or libgiochi.a) and call giochi_engine_init() before
  * anything else. Every fallible function returns 0 on success and a negative code
@@ -20,6 +20,9 @@
  * Version 3 adds part III: giochi_engine_frame_stats() and GiochiFrameStats, section 13.
  * It is additive in the same way, so a version 1 or 2 consumer compiles and runs
  * unchanged.
+ *
+ * Version 4 adds part IV: networking (giochi_net_* and GiochiNet*), sections 16-19.
+ * Still additive: every earlier signature and layout is unchanged.
  *
  * The 3D engine is an opaque pointer the caller owns (ADR-039), unlike the 2D singleton.
  * giochi_mesh_* and giochi_shader_* take no engine: they act on the most recently created
@@ -109,9 +112,10 @@ typedef struct GiochiEngine3D GiochiEngine3D;
 // que houve (porta ocupada, endereço inválido, host recusou, handle vencido).
 #define GIOCHI_ERROR_NETWORK -10
 
-// `giochi_net_poll_snapshot` não tinha nada novo para entregar.
+// `giochi_net_poll_snapshot`/`giochi_net_poll_global` não tinham nada novo
+// para entregar.
 //
-// **Positivo de propósito, e a única exceção à regra "0 ou negativo" da ABI.**
+// **Positivo de propósito, e a exceção à regra "0 ou negativo" da ABI.**
 // O host publica a 15 Hz e o jogo chama a função a 60 Hz, então "ainda não
 // chegou" é o caso comum — não é erro. Devolver `0` juntaria "nada chegou" com
 // "chegou e a área não tem inimigo", e o cliente precisa dos dois separados para
@@ -125,6 +129,13 @@ typedef struct GiochiEngine3D GiochiEngine3D;
 // jogador raramente passa de 30, e 64 dá folga para o pior caso de um chefe
 // cercado.
 #define GIOCHI_NET_MAX_INIMIGOS 64
+
+// Tamanho máximo do estado global que a ABI transporta.
+//
+// `giochi_net::DATAGRAMA_MAX` (1200) menos o cabeçalho de versão, tag, tick e
+// contador; usar o datagrama inteiro como teto é mais simples e nunca trunca o
+// que o protocolo aceita.
+#define GIOCHI_NET_MAX_GLOBAL 1200
 
 // Opaque sound handle (short, fully decoded effect). `0` is invalid/null.
 //
@@ -478,6 +489,23 @@ typedef struct GiochiNetSnapshot {
     // Os inimigos.
     struct GiochiNetInimigo inimigos[GIOCHI_NET_MAX_INIMIGOS];
 } GiochiNetSnapshot;
+
+// Estado global publicado pelo host (onda, torre, chefe).
+//
+// Os bytes são opacos: a engine transporta, o jogo interpreta. Como no
+// [`GiochiNetSnapshot`], `total` contra `escritos` diz se houve truncamento.
+typedef struct GiochiNetGlobal {
+    // Tick do host que produziu o estado.
+    uint32_t tick;
+    // Tamanho real do payload.
+    uint32_t total;
+    // Quantos bytes foram copiados para `dados`.
+    uint32_t escritos;
+    // Quantos cabem em `dados`: sempre `GIOCHI_NET_MAX_GLOBAL`.
+    uint32_t capacidade;
+    // O payload opaco.
+    uint8_t dados[GIOCHI_NET_MAX_GLOBAL];
+} GiochiNetGlobal;
 
 // Opaque texture handle. `0` is invalid/null.
 //
@@ -1507,6 +1535,21 @@ int32_t giochi_net_poll_snapshot(uint64_t handle, struct GiochiNetSnapshot *out)
 int32_t giochi_net_poll_snapshot_filtered(uint64_t handle,
                                           struct GiochiNetSnapshot *out,
                                           uint32_t max);
+
+// Lê o último estado global recebido pelo cliente (onda, torre, chefe).
+//
+// É o par de [`giochi_net_broadcast`]: sem esta função o host publicava o estado
+// e o cliente C não tinha como lê-lo.
+//
+// Devolve [`GIOCHI_NET_AGUARDE`] (`1`) quando não há estado novo desde a última
+// leitura, `0` quando escreveu, negativo em caso de erro.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_net_poll_global(uint64_t handle, GiochiNetGlobal* out);
+// ```
+int32_t giochi_net_poll_global(uint64_t handle, struct GiochiNetGlobal *out);
 
 // Creates a texture by loading an image file (PNG, JPEG, BMP, …).
 //

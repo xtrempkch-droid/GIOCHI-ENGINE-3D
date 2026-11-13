@@ -260,8 +260,9 @@ into the engine's lifecycle functions.
 ## 9. Part II: 3D (ABI version 2)
 
 Everything above describes part I and is unchanged. Part II adds a 3D renderer on the
-same library and the same header; `giochi_abi_version()` returns `2`, and a part I
-program written against `1` keeps working unchanged.
+same library and the same header; `giochi_abi_version()` returns `2` for a part II
+consumer (the current value is `4`, after parts III and IV), and a part I program
+written against `1` keeps working unchanged.
 
 The difference that matters in practice: **the 3D engine is a pointer the caller owns**,
 not a process-wide singleton. It holds a GL context, so its layout is nobody's business
@@ -384,8 +385,8 @@ the engine to report leaks — it logs a warning when objects outlive the contex
 ## 10. Part III: frame statistics (ABI version 3)
 
 Part III is one function and one struct, and it is purely additive:
-`giochi_abi_version()` returns `3`, and a program written against `1` or `2` keeps
-working unchanged. The contract is part III of
+`giochi_abi_version()` returns `4` since part IV added networking, and a program
+written against `1` or `2` keeps working unchanged. The contract is part III of
 [C_ABI_CONTRACT.md](C_ABI_CONTRACT.md); this is the short version.
 
 ```c
@@ -407,7 +408,54 @@ not the same type: the C surface stays narrower so that an internal measurement 
 the engine does not widen the ABI. It is 120 bytes, alignment 8, and a C program
 allocates it itself — `c_smoke.c` and `python_smoke.py` assert the size and the offsets.
 
-## 11. Verification
+## 11. Part IV: networking (ABI version 4)
+
+Part IV adds host-authoritative networking and is additive like the others:
+`giochi_abi_version()` returns `4`, and parts I–III keep their signatures and
+layouts. The contract is part IV of [C_ABI_CONTRACT.md](C_ABI_CONTRACT.md).
+
+The API is a handle plus a pump/poll loop. The host owns the simulation; clients
+send input and read snapshots and opaque global state.
+
+```c
+/* Host: port 0 delegates the choice to the OS. */
+uint64_t host = giochi_net_host_create(0);
+printf("listening on %d\n", giochi_net_local_port(host));
+
+while (running) {
+    giochi_net_pump(host);
+    GiochiNetInput in; uint8_t who; uint32_t n;
+    while (giochi_net_poll_input(host, &in, &who, &n) == 0 && n == 1) {
+        simulate(who, &in);
+    }
+    simulate_world();
+    giochi_net_host_snapshot(host, enemies, enemy_count); /* AOI-filtered */
+    giochi_net_broadcast(host, wave_state, wave_size);    /* opaque bytes */
+}
+
+/* Client. */
+uint64_t client = giochi_net_client_join("192.168.1.10:47721");
+while (running) {
+    giochi_net_pump(client);
+    giochi_net_send_input(client, &my_input);
+
+    GiochiNetSnapshot snapshot;
+    if (giochi_net_poll_snapshot(client, &snapshot) == 0) {
+        draw_enemies(snapshot.inimigos, snapshot.escritos);
+    }
+    GiochiNetGlobal global;
+    if (giochi_net_poll_global(client, &global) == 0) {
+        apply_wave(global.dados, global.escritos);
+    }
+}
+```
+
+`giochi_net_poll_snapshot` and `giochi_net_poll_global` return **`1`**
+(`GIOCHI_NET_AGUARDE`) when there is nothing new; that is the normal case when
+the game runs at 60 Hz and the host publishes at 15 Hz. `total > escritos` means
+truncation — log it instead of drawing fewer enemies than the host sent.
+
+## 12. Verification
 
 ```bash
 cargo test -p giochi-engine-capi            # unit tests + rust_ffi.rs + rust_ffi_3d.rs

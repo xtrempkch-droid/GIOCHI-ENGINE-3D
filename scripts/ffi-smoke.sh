@@ -20,8 +20,9 @@ if [[ "${1:-}" == "--release" ]]; then
     cargo_flags+=(--release)
 fi
 
-# Phase 18c: build with the `profiling` feature to prove that `GIOCHI_ABI_VERSION 3`
-# reports real measurements through the C ABI and not just zeros. The consumers assert
+# Phase 18c: build with the `profiling` feature to prove that the frame statistics
+# (introduced in `GIOCHI_ABI_VERSION 3`, current value 4) report real measurements
+# through the C ABI and not just zeros. The consumers assert
 # both states without being told which one they are in, so the same script covers both.
 #
 #   GIOCHI_CAPI_FEATURES=profiling scripts/ffi-smoke.sh

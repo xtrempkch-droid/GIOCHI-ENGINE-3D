@@ -149,18 +149,26 @@ impl Mat4 {
     /// straight up with an unmodified up vector.
     pub fn look_at(eye: Vec3, center: Vec3, up: Vec3) -> Result<Self, &'static str> {
         let direction = center.to_glam() - eye.to_glam();
+        let up = up.to_glam();
+        // A NaN camera would otherwise produce a NaN matrix (or trip glam's
+        // `glam_assert` in debug builds) instead of the documented error.
+        if !direction.is_finite() || !up.is_finite() {
+            return Err("eye, center and up must be finite");
+        }
         if direction.length_squared() == 0.0 {
             return Err("eye and center are the same point");
         }
-        let up = up.to_glam();
         if up.length_squared() == 0.0 {
             return Err("up vector has no direction");
         }
         // The cross product vanishes when the two are parallel.
-        if direction.normalize().cross(up.normalize()).length_squared() < 1e-12 {
+        let up = up.normalize();
+        if direction.normalize().cross(up).length_squared() < 1e-12 {
             return Err("up vector is parallel to the view direction");
         }
 
+        // glam 0.34 requires a unit `up`: with `glam_assert` it panics, and without
+        // it the unnormalised vector scales the view basis.
         Ok(Self::from_glam(camera::rh::view::look_at_mat4(
             eye.to_glam(),
             center.to_glam(),
@@ -470,6 +478,24 @@ mod tests {
     }
 
     #[test]
+    fn look_at_accepts_a_non_unit_up_vector() {
+        // glam 0.34 requires a normalised `up`; passing a scaled one through would
+        // panic with `glam_assert` or silently scale the view basis.
+        let unit =
+            Mat4::look_at(Vec3::ZERO, Vec3::new(0.0, 0.0, -10.0), Vec3::UP).expect("valid view");
+        let scaled = Mat4::look_at(
+            Vec3::ZERO,
+            Vec3::new(0.0, 0.0, -10.0),
+            Vec3::new(0.0, 7.0, 0.0),
+        )
+        .expect("a scaled up vector still has a direction");
+
+        for (a, b) in unit.to_cols_array().iter().zip(scaled.to_cols_array()) {
+            assert_close(*a, b, "scaled up gives the same view");
+        }
+    }
+
+    #[test]
     fn look_at_rejects_a_degenerate_configuration() {
         assert!(
             Mat4::look_at(Vec3::ZERO, Vec3::ZERO, Vec3::UP).is_err(),
@@ -483,6 +509,24 @@ mod tests {
         assert!(
             Mat4::look_at(Vec3::ZERO, Vec3::new(0.0, 5.0, 0.0), Vec3::UP).is_err(),
             "up parallel to the view direction"
+        );
+        assert!(
+            Mat4::look_at(
+                Vec3::new(f32::NAN, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, -1.0),
+                Vec3::UP
+            )
+            .is_err(),
+            "NaN eye"
+        );
+        assert!(
+            Mat4::look_at(
+                Vec3::ZERO,
+                Vec3::new(0.0, 0.0, -1.0),
+                Vec3::new(f32::INFINITY, 0.0, 0.0)
+            )
+            .is_err(),
+            "infinite up"
         );
     }
 

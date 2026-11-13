@@ -4,6 +4,40 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Networking (`giochi-net` + C ABI part IV).** Host-authoritative UDP transport with
+  interest management, optional `laminar` reliability/ordering and optional mDNS
+  discovery. ABI v4 adds 15 `giochi_net_*` functions and four `GiochiNet*` structs;
+  see `docs/REDE.md` and `docs/C_ABI_CONTRACT.md` §16–§19.
+
+### Fixed
+
+- **The C client could not read the host's global state.** `giochi_net_broadcast` had
+  no client-side counterpart, so the wave/tower/boss bytes were discarded by
+  `giochi_net_pump`; `giochi_net_poll_global` now delivers them.
+- **`giochi_net_host_create(0)` used the fixed default port** instead of delegating to
+  the OS. Two hosts could not coexist, and concurrent tests raced for port 47721; port
+  0 now binds an ephemeral port as the header and the contract already promised.
+- **`giochi_net_poll_snapshot` returned the same snapshot forever** instead of
+  `GIOCHI_NET_AGUARDE` until a new tick arrived.
+- **`giochi_net_set_camera_pos` overrode every subsequent input**, not only the next
+  one as documented; the override is consumed by the next `giochi_net_send_input`.
+- **A client that never received a handshake stayed `Conectando` forever.** The host
+  timeout now applies to that state as well.
+- **A host could reuse a live player id when the `u8` counter wrapped**; ids in use are
+  skipped.
+- **The network decoder reserved the enemy count from the wire** before checking the
+  datagram length, so a 9-byte packet could request hundreds of KB.
+- **mDNS discovery could select `127.0.0.1`** or a link-local IPv6 address, neither
+  reachable from another device.
+- **`Mat4::look_at` accepted a non-unit `up` and non-finite cameras.** glam 0.34
+  requires a normalized `up` (it panics with `glam_assert` and scales the view basis
+  otherwise), and `NaN` produced a `NaN` matrix instead of the documented error.
+- **The C ABI header still announced version 3** while `GIOCHI_ABI_VERSION` was 4.
+
 ## [0.3.1] - 2026-11-09
 
 ### Fixed

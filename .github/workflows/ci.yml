@@ -77,6 +77,11 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --target x86_64-unknown-linux-gnu -- -D warnings
 
+      - name: Clippy with networking optional features
+        # The workspace build does not enable `laminar`/`mdns`; without this their code
+        # is only compiled by the aarch64 check, which never runs clippy.
+        run: cargo clippy -p giochi-net --all-targets --all-features --target x86_64-unknown-linux-gnu -- -D warnings
+
       - name: Build
         run: cargo build --workspace --target x86_64-unknown-linux-gnu
 
@@ -92,6 +97,11 @@ jobs:
         run: |
           cargo test -p giochi-engine --features profiling --target x86_64-unknown-linux-gnu
           cargo test -p giochi-engine-3d --features profiling --target x86_64-unknown-linux-gnu
+
+      - name: Test with the networking optional features
+        # `laminar` and `mdns` are off by default, so the workspace test step never
+        # reaches them. Their tests use loopback/multicast and are cheap.
+        run: cargo test -p giochi-net --all-features --target x86_64-unknown-linux-gnu
 
       - name: Docs
         run: cargo doc --workspace --no-deps --document-private-items

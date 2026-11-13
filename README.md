@@ -14,11 +14,13 @@ with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 > layer, the fixed-timestep loop, the 2D renderer with opaque texture handles,
 > keyboard/mouse/gamepad input, the asset cache, the audio mixer, the scene stack, the
 > `Engine` facade, the **C ABI** (`libgiochi.so` / `libgiochi.a` + generated `giochi.h`,
-> parts I–III, version 3), the **Lua binding** (`giochi` module + a complete reference
+> parts I–IV, version 4), the **Lua binding** (`giochi` module + a complete reference
 > game), the **3D crate** — GLES/EGL context, mesh pipeline, Blinn-Phong lighting,
-> `Camera3D` with a controller, instancing, static batching and upscaling — and the
-> **profiler** (frame statistics, `F1` overlay, C ABI v3), with CI, release packaging and
-> the guides. Validated on a Rockchip PX30 (Mali-G31). See [PROGRESS.md](PROGRESS.md).
+> `Camera3D` with a controller, instancing, static batching and upscaling — the
+> **networking crate** (`giochi-net`: host-authoritative UDP, interest management,
+> optional `laminar` transport and mDNS discovery) and the **profiler** (frame
+> statistics, `F1` overlay, C ABI v4), with CI, release packaging and the guides.
+> Validated on a Rockchip PX30 (Mali-G31). See [PROGRESS.md](PROGRESS.md).
 
 
 ## Why "C-shaped" Rust?

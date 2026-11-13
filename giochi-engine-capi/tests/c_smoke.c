@@ -380,6 +380,7 @@ int main(void)
         CHECK(sizeof(GiochiNetInimigo) == 16);
         CHECK(sizeof(GiochiNetSnapshot) == 16 + GIOCHI_NET_MAX_INIMIGOS * 16);
         CHECK(sizeof(GiochiNetInput) == 32);
+        CHECK(sizeof(GiochiNetGlobal) == 16 + GIOCHI_NET_MAX_GLOBAL);
         CHECK(GIOCHI_NET_MAX_INIMIGOS == 64);
         CHECK(GIOCHI_NET_AGUARDE > 0); /* positivo: "nada novo" não é erro */
         CHECK(GIOCHI_ERROR_NETWORK < 0);
@@ -414,6 +415,14 @@ int main(void)
 
             /* NULL é recusado e não escreve. */
             CHECK(giochi_net_poll_snapshot(net_host, NULL) ==
+                  GIOCHI_ERROR_INVALID_ARGUMENT);
+
+            /* O par de `broadcast` existe e recusa o papel errado. */
+            GiochiNetGlobal global;
+            memset(&global, 0, sizeof global);
+            CHECK(giochi_net_poll_global(net_host, &global) ==
+                  GIOCHI_ERROR_INVALID_ARGUMENT);
+            CHECK(giochi_net_poll_global(net_host, NULL) ==
                   GIOCHI_ERROR_INVALID_ARGUMENT);
 
             CHECK_CODE(giochi_net_destroy(net_host));
