@@ -1,8 +1,10 @@
 # Clippy configuration for the GIOCHI-ENGINE workspace.
 #
-# `msrv` mirrors the workspace `rust-version` so that clippy never suggests an
-# API that would silently break the declared minimum supported Rust version.
-msrv = "1.82"
+# No `msrv` key on purpose. Clippy reads `package.rust-version` from each crate's own
+# manifest, which is what this workspace needs: the 2D, 3D, C ABI and networking crates
+# declare 1.86 and the Lua binding declares 1.88, so a suggestion that needs 1.87 is
+# blocked in the first four and allowed in the fifth. A single value here would be wrong
+# for one of them — and clippy warns when it disagrees with Cargo.toml.
 
 # Tests and examples are allowed to unwrap/expect: an explicit panic there is
 # the clearest possible failure signal. Library code must use `?` instead.

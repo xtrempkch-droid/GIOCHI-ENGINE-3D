@@ -81,6 +81,30 @@ as well as on x86_64; see PROGRESS.md for the per-check results.
 
 ### Fixed
 
+- **The declared MSRV was 1.82 and is now two measured numbers: 1.86 and 1.88.** ADR-033
+  measured 1.82 against `mlua` 0.10; the dependency later moved to 0.12, whose `mlua-sys`
+  0.13 is an edition-2024 manifest that any cargo below 1.85 cannot even parse. Declaring
+  1.88 workspace-wide was the first attempt and it was wrong: Alpine 3.22, the current
+  stable, ships **rustc 1.87**, so the engine and the C ABI would have been declared
+  unsupported because of an *optional* binding. `[workspace.package] rust-version` is a
+  default, not a ceiling — the four core crates now declare **1.86** (`criterion` 0.8 as a
+  dev-dependency is the constraint; `glam` 0.34 needs only 1.85) and only
+  `giochi-engine-lua`/`giochi-demo` declare **1.88**. Verified with `cargo +1.86.0 test`
+  on the four, `cargo +1.87.0 check -p giochi-engine-lua` ("requires rustc 1.88") and a
+  full Alpine 3.22 build of the four against the distribution's own SDL2 (ADR-046).
+  `clippy.toml` lost its `msrv` key so clippy reads each crate's own floor — which also
+  caught the next point.
+- **A clippy-driven refactor silently raised the MSRV.** `chunks_exact_to_as_chunks` fired
+  across the workspace and the call sites were converted to `as_chunks`; `slice::as_chunks`
+  stabilised in **1.88**, so a style fix raised the floor of every crate it touched. The
+  1.86 build caught it (`E0658`); the conversions were reverted and the lint is now
+  correctly silent in the 1.86 crates and correctly firing in `giochi-demo`.
+- **`scripts/install-deps.sh` installed `clang` and `libclang-dev` for a `bindgen` that is
+  never compiled.** `sdl2-sys` 0.38 runs bindgen only under its `use-bindgen` feature,
+  which nothing here enables (`cargo tree -i bindgen` matches nothing), so the packages
+  cost ~100 MB and were the hardest requirement to meet on a musl distribution. The
+  script now also refuses politely on a non-`apt` system instead of failing inside
+  `apt-get`, and the README documents what is Debian-specific and what is not.
 - **mDNS announcement failed on any device without a default route.** `ip_anunciavel()`
   discovered the outbound address by `connect()`ing a UDP socket to a documentation
   address, which the kernel answers with `ENETUNREACH` when there is no default route —

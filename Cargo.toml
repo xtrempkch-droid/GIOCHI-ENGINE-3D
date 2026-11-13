@@ -12,11 +12,23 @@ members = [
 [workspace.package]
 version = "0.4.0"
 edition = "2021"
-# Verified floor, not an aspiration: mlua 0.10 needs 1.79, `size_of` in the prelude
-# (used by tests/abi_layout.rs) needs 1.80, and 1.82 is the oldest toolchain verified to
-# build the whole workspace. Checked with `cargo +<version> build --workspace`; raising a
-# dependency can raise this, so probe again when you bump one.
-rust-version = "1.82"
+# Verified floor, and deliberately not one number for the whole workspace.
+#
+# This value is the default for crates that do not override it: `giochi-engine-lua` and
+# `giochi-demo` (which depends on it). `mlua` 0.12 and its `mlua-sys` 0.13 declare 1.88,
+# and 1.87 is rejected:
+#
+#   cargo +1.87.0 check -p giochi-engine-lua
+#   -> "mlua-sys@0.13.0 requires rustc 1.88"
+#
+# The other four crates declare **1.86** in their own manifest, because a distribution's
+# packaged Rust is often a release or two behind and there is no reason for a C-ABI
+# consumer to need the Lua binding's floor. Measured on 1.86.0 with
+# `cargo +1.86.0 test -p giochi-engine -p giochi-engine-3d -p giochi-engine-capi
+#  -p giochi-net`; the constraint there is `criterion` 0.8 (1.86) as a dev-dependency —
+# `glam` 0.34 needs only 1.85. Raising a dependency can raise this, so probe again when
+# you bump one — ADR-046.
+rust-version = "1.88"
 license = "MIT"
 authors = ["GIOCHI-SYSTEM contributors"]
 repository = "https://github.com/xtrempkch-droid/GIOCHI-SYSTEM"

@@ -24,6 +24,31 @@ if [[ "$(id -u)" != "0" ]]; then
     exit 1
 fi
 
+# Deliberately Debian/Ubuntu-only: this is the exact package set CI installs, pinned in
+# one place. It is not how the engine builds. Failing here beats an "apt-get: command not
+# found" arriving after a list of packages the reader cannot install.
+if ! command -v apt-get >/dev/null 2>&1; then
+    cat >&2 <<'MSG'
+error: no apt-get here. This script installs Debian/Ubuntu packages; the engine does not
+need Debian. Whatever the local package names are, the components are:
+
+  - Rust stable -- 1.86+ for the engine/3D/C ABI/networking, 1.88+ if you build the Lua
+    binding -- plus a C toolchain, CMake >= 3.5, pkg-config
+  - SDL2_image, SDL2_mixer, SDL2_ttf development packages -- these are *always* system
+    libraries: `bundled` compiles SDL2 core only
+  - ALSA, libdrm, GBM, GL and EGL development packages (KMSDRM video, audio)
+  - X11 and Wayland development packages -- only when building bundled SDL2
+
+Fewer packages, and the SDL2 the distribution already ships:
+
+  cargo build --workspace --no-default-features --features \
+    giochi-engine/sdl2-system,giochi-engine-3d/sdl2-system,giochi-engine-capi/sdl2-system,giochi-engine-lua/sdl2-system,giochi-demo/sdl2-system
+
+See "Prerequisites" in README.md.
+MSG
+    exit 2
+fi
+
 # SDL2 is built from source by the `bundled` feature, so its *build* dependencies are
 # what matter here. The engine links SDL2_image/SDL2_mixer/SDL2_ttf + SDL2 itself at
 # runtime, but those come from the same `bundled`/system build.
@@ -32,9 +57,11 @@ packages=(
     build-essential
     cmake
     pkg-config
-    # bindgen, used by sdl2-sys
-    clang
-    libclang-dev
+    # No clang/libclang on purpose. `sdl2-sys` 0.38 runs bindgen only with its
+    # `use-bindgen` feature, which nothing in this workspace enables: `cargo tree -i
+    # bindgen` matches nothing and bindgen is absent from Cargo.lock, so it is never
+    # compiled. Keeping them cost ~100 MB installed and was the hardest requirement to
+    # meet on a musl distribution.
     # The `image`, `mixer` and `ttf` features of the sdl2 crate link the *system*
     # SDL2 satellites. `bundled` builds core SDL2 only, so these must be installed or
     # the link fails with "cannot find -lSDL2_mixer". This is the same requirement

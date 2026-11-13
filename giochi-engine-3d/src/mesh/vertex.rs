@@ -126,8 +126,8 @@ pub fn prepare_normals(vertices: &mut [Vertex], indices: &[u32]) {
         ];
 
         for corner in [a, b, c] {
-            for axis in 0..3 {
-                accumulated[corner][axis] += normal[axis];
+            for (total, component) in accumulated[corner].iter_mut().zip(normal) {
+                *total += component;
             }
         }
     }

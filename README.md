@@ -64,7 +64,7 @@ is authoritative.
 
 | Requirement | Notes |
 |---|---|
-| Rust stable | `rustup toolchain install stable`; the verified minimum is **1.82** (`rust-version` in `Cargo.toml`, driven by `mlua`) |
+| Rust stable | `rustup toolchain install stable`. The verified minimum is **1.86** for the engine, the 3D crate, the C ABI and networking, and **1.88** for the Lua binding — see the row below at `rust-version` (ADR-046) |
 | A C toolchain | `build-essential` (GCC or Clang) |
 | CMake ≥ 3.5 | SDL2 is built from source by the `bundled` feature, so a system SDL2 is **not** needed |
 | `pkg-config` | locates optional SDL2 backends |
@@ -84,6 +84,48 @@ On Ubuntu 24.04+ the bundled CMake files are older than the policy minimum CMake
 accepts. [`cmake/aarch64-linux-toolchain.cmake`](cmake/aarch64-linux-toolchain.cmake)
 and [`.cargo/config.toml`](.cargo/config.toml) work around this (ADR-014);
 `cargo build` needs no extra flags.
+
+### On another distribution
+
+`scripts/install-deps.sh` is a convenience for Debian/Ubuntu — it is the exact package set
+CI installs, pinned in one place so it cannot drift between jobs. It is **not** a
+component of the engine, and it now says so instead of dying inside `apt-get`. The crates
+read no distribution path, init system or user name (the only absolute path in the
+sources, `/dev/dri`, is listed to make a permission error legible): they need Rust, SDL2
+and a compiler. The same workspace therefore builds on any distribution that provides:
+
+| Component | Needed for |
+|---|---|
+| Rust **1.86+**, a C toolchain, CMake ≥ 3.5, `pkg-config` | every build |
+| Rust **1.88+** | only `giochi-engine-lua` and `giochi-demo` (they link `mlua` 0.12) |
+| `SDL2_image`, `SDL2_mixer`, `SDL2_ttf` development packages | **always system libraries** — `bundled` compiles SDL2 core only |
+| ALSA, libdrm, GBM, GL, EGL development packages | KMSDRM video and audio |
+| X11, Wayland development packages | only for SDL2's desktop backends |
+| `clang` / `libclang` | **not needed** — `sdl2-sys` runs `bindgen` only under its `use-bindgen` feature, which nothing here enables (`cargo tree -i bindgen` matches nothing) |
+
+How SDL2 itself is satisfied is a distribution question, and there are two answers.
+`--features sdl2-system` links the SDL2 the distribution ships — this is what a package
+maintainer wants, and it drops the X11/Wayland header requirement with it, since nothing
+then configures SDL2's backends. The default `sdl2-bundled` compiles SDL2 from source,
+which is what makes a build reproducible on a system that does not package it (a device
+image, a minimal container):
+
+```bash
+cargo build --workspace --no-default-features \
+  --features giochi-engine/sdl2-system,giochi-engine-3d/sdl2-system,giochi-engine-capi/sdl2-system,giochi-engine-lua/sdl2-system,giochi-demo/sdl2-system
+```
+
+Verified where: Ubuntu 24.04 (CI, every push) and 26.04 (development) on x86_64, plus
+`aarch64-unknown-linux-gnu` through `scripts/check-aarch64.sh` and a real R35S console.
+Beyond that, two clean containers were built by hand against the distribution's own SDL2:
+**Fedora 41** (rustc 1.91) compiles the whole workspace, and **Alpine 3.22** (rustc 1.87,
+musl) compiles the engine, 3D, C ABI and networking crates while the Lua binding reports
+"requires rustc 1.88" — which is why the two floors above exist. Nothing in CI runs
+either, so the honest status for an untried distribution is "expected to work", not
+"proven". The distribution-specific material in
+[docs/](docs/) (`KMSDRM.md`, `REQUISITOS-IMAGEM.md`) is a record of **what one device
+image turned out to provide**, offered as a checklist for the next port; it is not a
+requirement the engine imposes on the system it runs on.
 
 ### Native build
 

@@ -807,6 +807,10 @@ each failure names the file, the line and the rule.
 
 ## ADR-033 — The MSRV is verified, and it is not the one the prompt suggested
 
+> **Superseded in part by ADR-046:** the method stands, the number does not. Upgrading
+> `mlua` to 0.12 moved the Lua binding's floor to 1.88; the measurement below covered a
+> workspace that had a single floor, which is no longer the shape of the project.
+
 **Context.** The workspace declared `rust-version = "1.75"`. Nothing checked it. A
 declared MSRV is a promise to whoever is on an older toolchain: cargo will refuse to build
 with a clear message instead of failing somewhere inside a dependency.
@@ -1448,3 +1452,66 @@ ceiling; run in CI with and without `profiling`), `scripts/perf-compare.py` (sel
 `scripts/ffi-smoke.sh` consumers passing on ABI 3, a `RUSTC_WRAPPER` probe confirming
 `target-cpu=cortex-a35` reaches the compiler, and a SIGILL-free run of the resulting
 binary on the PX30.
+
+## ADR-046 — The MSRV is per crate: 1.86 for the engine, 1.88 for the Lua binding
+
+**Context.** ADR-033 measured the floor with `cargo +1.75/1.79/1.82` and published
+**1.82** for `mlua` 0.10. The workspace has since moved to `mlua` 0.12.2, and nobody
+re-probed — the comment in `Cargo.toml` still said "probe again when you bump one".
+
+Building on Alpine 3.21 (cargo 1.83.0) failed before compiling a single crate:
+
+```
+error: failed to parse manifest at .../mlua-sys-0.13.0/Cargo.toml
+Caused by: feature `edition2024` is required
+```
+
+`mlua-sys`'s manifest is edition-2024, so a cargo older than 1.85 cannot even parse it.
+Reading each dependency's `rust-version` out of the registry puts the real requirement
+higher still: `mlua` and `mlua-sys` declare **1.88**, `criterion` 0.8 declares 1.86,
+`glam` 0.34 declares 1.85.
+
+The obvious fix — set the workspace to 1.88 — was wrong for a reason that only appeared
+on the next try. Alpine 3.22, the current stable, ships **rustc 1.87**: one release short.
+Declaring 1.88 everywhere would tell an Alpine user that the engine is unsupported when
+only the Lua binding is. `[workspace.package] rust-version` is a *default*, not a ceiling:
+a crate may declare its own.
+
+**Decision.** Two floors, each measured rather than inferred:
+
+| Crates | Floor | Constraint |
+| --- | --- | --- |
+| `giochi-engine`, `giochi-engine-3d`, `giochi-engine-capi`, `giochi-net` | **1.86** | `criterion` 0.8 (dev-dependency) declares 1.86; `glam` 0.34 needs 1.85 |
+| `giochi-engine-lua`, `giochi-demo` | **1.88** | `mlua` 0.12 / `mlua-sys` 0.13 declare 1.88 |
+
+Verified:
+
+* `cargo +1.86.0 test -p giochi-engine -p giochi-engine-3d -p giochi-engine-capi
+  -p giochi-net` → all suites pass (213 + 10 + integration tests);
+* `cargo +1.87.0 check -p giochi-engine-lua` → `mlua-sys@0.13.0 requires rustc 1.88`;
+* `cargo +1.88.0 check --workspace --all-targets` → ok;
+* on Alpine 3.22 (rustc 1.87, musl) the four core crates build, so a distribution whose
+  packaged Rust is a release behind can still package the engine and the C ABI.
+
+`clippy.toml` deliberately has **no** `msrv` key: clippy reads each crate's own
+`rust-version`, so a suggestion that needs 1.87 is blocked in the four core crates and
+allowed in the Lua binding. A single value there would be wrong for one of them — and
+clippy emits a warning when it disagrees with `Cargo.toml`.
+
+**A trap this walked into.** Clippy's `chunks_exact_to_as_chunks` fired across the
+workspace and the first response was to convert the call sites. `slice::as_chunks`
+stabilised in **1.88**, so obeying the lint silently raised the floor of every crate it
+touched — caught immediately by the 1.86 build (`E0658: use of unstable library feature
+'slice_as_chunks'`). The conversions were reverted; with no `msrv` in `clippy.toml`, the
+lint now correctly stays quiet in the 1.86 crates and correctly fires in `giochi-demo`,
+which is the one place where `as_chunks` is legitimate.
+
+**Why not pin `mlua` back to keep 1.82.** Same reasoning as ADR-033: a lower number that
+no longer builds is worse than a higher number that does. Pinning the reference binding to
+an older release to protect a cosmetic claim trades a real capability for a number.
+
+**Consequences.** A consumer that only needs the C ABI — the case the whole "C-shaped
+Rust" design exists for — is no longer tied to the Lua binding's toolchain. Anyone on
+1.86–1.87 gets a working engine and cargo's clear "requires rustc 1.88" for the optional
+Lua crate. Anyone below 1.86 gets one clear message instead of a manifest parse error
+inside a dependency.

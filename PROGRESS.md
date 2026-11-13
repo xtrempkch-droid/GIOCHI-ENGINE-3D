@@ -81,6 +81,48 @@ tarball. Nenhum dos dois bloqueia a engine; §1.1 de
 [docs/REQUISITOS-IMAGEM.md](docs/REQUISITOS-IMAGEM.md) guarda o motivo de cada
 decisão para não ser reaberto sem contexto.
 
+### Portabilidade — o que o repositório exige de uma distribuição
+
+Pergunta do dono do projeto: *"esta ferramenta pode ser usada por qualquer
+distribuição?"* Pode, e agora há prova em vez de intenção. O workspace foi construído
+dentro de contêineres limpos, contra o SDL2 da própria distribuição:
+
+| Distribuição | Resultado |
+|---|---|
+| Ubuntu 26.04, x86_64 (desenvolvimento) | ok, SDL2 2.32 do sistema (2.8.8/2.8.1/2.24.0 para image/mixer/ttf) |
+| **Fedora 41** (`dnf`, SDL2 do sistema, rustc 1.91) | **workspace inteiro compilou**, `--all-targets` |
+| **Alpine 3.22** (`musl`, SDL2 do sistema, **rustc 1.87 empacotado**) | engine, 3D, C ABI e rede **compilam**; o crate Lua recusa com "requires rustc 1.88" — que é a mensagem certa |
+| Alpine 3.21 (rustc 1.83) | parou no parse do manifesto `mlua-sys` (edition 2024) |
+
+O que isso **não** prova: que qualquer distribuição funciona. CI roda em
+`ubuntu-latest`; Fedora e Alpine foram verificações pontuais, feitas à mão. O texto do
+README diz exatamente isso ("expected to work", não "proven").
+
+Duas coisas caíram dessas medições, ambas corrigidas:
+
+1. **O MSRV declarado era 1.82, e virou dois números medidos: 1.86 e 1.88.** `mlua`
+   subiu para 0.12 e o `mlua-sys` 0.13 é manifesto edition-2024: qualquer cargo abaixo de
+   1.85 nem *parseia* o manifesto. O primeiro reflexo — declarar 1.88 no workspace
+   inteiro — estava errado por um detalhe que só apareceu na tentativa seguinte: o Alpine
+   3.22, estável atual, traz **rustc 1.87**. Declarar 1.88 em tudo diria a um usuário
+   Alpine que a engine não serve, quando só o binding Lua não serve.
+   `[workspace.package] rust-version` é **default, não teto**: cada crate pode declarar o
+   seu. Ficou 1.86 para engine/3D/C ABI/rede (`criterion` 0.8, dev-dependency, exige
+   1.86; `glam` 0.34 exige 1.85) e 1.88 só para o Lua e o demo (ADR-046).
+   Medido: `cargo +1.86.0 test` nos quatro crates passa; `cargo +1.87.0 check -p
+   giochi-engine-lua` responde `mlua-sys@0.13.0 requires rustc 1.88`; no Alpine 3.22 os
+   quatro compilam com o rustc da distribuição.
+   **Armadilha registrada:** o clippy sugeriu `as_chunks` no workspace inteiro e a
+   primeira resposta foi obedecer — mas `slice::as_chunks` só estabilizou em **1.88**, ou
+   seja, a correção de estilo subiu o piso de todos os crates. O build em 1.86 pegou na
+   hora (`E0658`); as conversões foram revertidas e o `clippy.toml` perdeu a chave
+   `msrv`, para o clippy ler o `rust-version` de cada crate.
+2. **`install-deps.sh` instalava `clang`/`libclang-dev` para um `bindgen` que nunca é
+   compilado.** `sdl2-sys` 0.38 só roda bindgen com a feature `use-bindgen`, que nada
+   aqui liga (`cargo tree -i bindgen` não encontra nada). Eram ~100 MB e o requisito
+   mais difícil de satisfazer em musl. O script também passou a recusar com uma
+   mensagem útil num sistema sem `apt`, em vez de estourar dentro do `apt-get`.
+
 ## Fase 18 — Flags ARM64 + CI de performance + C ABI v3
 Fases 15–18 concluídas (performance, batching, instancing/upscaling, C ABI v3).
 

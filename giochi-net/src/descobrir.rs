@@ -156,7 +156,7 @@ fn ip_pelas_interfaces() -> Result<IpAddr, ErroDescoberta> {
             }
             if_addrs::IfAddr::V6(ref v6_addr) => {
                 let ip = v6_addr.ip;
-                if !ip.is_loopback() && !ip.is_unspecified() && !link_local_v6(&ip) {
+                if !ip.is_loopback() && !ip.is_unspecified() && !ip.is_unicast_link_local() {
                     // IPv6 só se não houver IPv4: funciona, mas exige que o outro lado
                     // também fale IPv6.
                     v6.get_or_insert(ip);
@@ -179,13 +179,6 @@ fn ip_pelas_interfaces() -> Result<IpAddr, ErroDescoberta> {
             )
         },
     )))
-}
-
-/// `fe80::/10`, escrito à mão: `Ipv6Addr::is_unicast_link_local` só entrou no
-/// Rust 1.84 e o MSRV do workspace é 1.82. É o equivalente do `169.254/16` em
-/// IPv4, e não é alcançável de outra máquina.
-fn link_local_v6(ip: &std::net::Ipv6Addr) -> bool {
-    (ip.segments()[0] & 0xffc0) == 0xfe80
 }
 
 /// Nome de instância do anúncio.
@@ -307,12 +300,8 @@ fn converter(info: &ServiceInfo) -> Option<Encontrado> {
             // IPv6 só se não houver IPv4 útil. Link-local (`fe80::`) não conecta
             // sem `%interface`, então também não serve.
             info.get_addresses().iter().copied().find(|a| match a {
-                // `fe80::/10` escrito à mão: `is_unicast_link_local` só estabilizou
-                // no Rust 1.84 e o MSRV do workspace é 1.82.
                 IpAddr::V6(v6) => {
-                    !v6.is_loopback()
-                        && !v6.is_unspecified()
-                        && (v6.segments()[0] & 0xffc0) != 0xfe80
+                    !v6.is_loopback() && !v6.is_unspecified() && !v6.is_unicast_link_local()
                 }
                 IpAddr::V4(_) => false,
             })
@@ -398,21 +387,25 @@ mod testes {
         assert!(!por_interface.is_unspecified());
         match por_interface {
             IpAddr::V4(v4) => assert!(!v4.is_link_local(), "169.254/16 não é alcançável"),
-            IpAddr::V6(v6) => assert!(!link_local_v6(&v6), "fe80::/10 não é alcançável"),
+            IpAddr::V6(v6) => {
+                assert!(!v6.is_unicast_link_local(), "fe80::/10 não é alcançável")
+            }
         }
     }
 
-    /// `fe80::/10` é reconhecido, e o vizinho `fec0::/10` não é confundido.
+    /// O predicado do std cobre `fe80::/10` e não confunde `fec0::/10`.
+    ///
+    /// Fica como teste porque a filtragem de link-local depende dele: se um dia a
+    /// semântica mudar, `converter` passaria a devolver endereço que não conecta sem
+    /// `%interface`, e isso não apareceria em nenhum outro teste.
     #[test]
-    fn link_local_v6_reconhece_fe80() {
+    fn fe80_e_link_local_e_fec0_nao() {
         use std::net::Ipv6Addr;
-        assert!(link_local_v6(&Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)));
-        assert!(link_local_v6(&Ipv6Addr::new(0xfebf, 1, 2, 3, 4, 5, 6, 7)));
+        assert!(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1).is_unicast_link_local());
+        assert!(Ipv6Addr::new(0xfebf, 1, 2, 3, 4, 5, 6, 7).is_unicast_link_local());
         // Fronteira: `fec0::` já é site-local (depreciado), não link-local.
-        assert!(!link_local_v6(&Ipv6Addr::new(0xfec0, 0, 0, 0, 0, 0, 0, 1)));
-        assert!(!link_local_v6(&Ipv6Addr::new(
-            0x2001, 0xdb8, 0, 0, 0, 0, 0, 1
-        )));
+        assert!(!Ipv6Addr::new(0xfec0, 0, 0, 0, 0, 0, 0, 1).is_unicast_link_local());
+        assert!(!Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1).is_unicast_link_local());
     }
 
     /// Descoberta de verdade: anuncia e encontra o próprio anúncio.

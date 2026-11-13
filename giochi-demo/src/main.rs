@@ -293,7 +293,10 @@ fn escrever_bmp(caminho: &str, largura: u32, altura: u32, pixels: &[u8]) -> Resu
     // errado.
     for y in (0..altura as usize).rev() {
         let linha = &pixels[y * largura as usize * 4..(y + 1) * largura as usize * 4];
-        for pixel in linha.chunks_exact(4) {
+        // `giochi-demo` links the Lua binding, so its floor is 1.88 and `as_chunks` is
+        // available here even though the engine crates cannot use it yet.
+        let (linha, _rest) = linha.as_chunks::<4>();
+        for pixel in linha {
             bmp.push(pixel[2]);
             bmp.push(pixel[1]);
             bmp.push(pixel[0]);
