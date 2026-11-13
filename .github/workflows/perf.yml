@@ -80,6 +80,9 @@ jobs:
     needs: regression-gate
     steps:
       - uses: actions/checkout@v7
+        with:
+          # `git worktree add` needs the base branch history, not a shallow tip.
+          fetch-depth: 0
 
       - name: Create cargo deps directories
         # Ver a nota em `ci.yml`: o build script do `sdl2-sys` copia para `deps/`
@@ -89,9 +92,6 @@ jobs:
           mkdir -p target/debug/deps target/release/deps
           mkdir -p target/x86_64-unknown-linux-gnu/debug/deps
           mkdir -p target/x86_64-unknown-linux-gnu/release/deps
-        with:
-          # `git worktree add` needs the base branch history, not a shallow tip.
-          fetch-depth: 0
 
       - name: Install Rust
         run: |
