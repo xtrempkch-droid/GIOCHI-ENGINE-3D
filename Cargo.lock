@@ -637,6 +637,7 @@ dependencies = [
  "anyhow",
  "bytemuck",
  "criterion",
+ "egui",
  "env_logger",
  "giochi-engine",
  "glam 0.34.3",

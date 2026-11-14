@@ -19,6 +19,9 @@ repository.workspace = true
 # callers who ask for nothing.
 giochi-engine = { path = "../giochi-engine", version = "0.4.0", default-features = false }
 rapier3d = { workspace = true, optional = true }
+# Phase 21 pendency: a HUD over the 3D scene. `egui` is the same version the 2D engine
+# uses, so a game that links both does not end up with two egui majors.
+egui = { workspace = true, optional = true }
 glow = { workspace = true }
 bytemuck = { workspace = true }
 tobj = { workspace = true }
@@ -79,8 +82,16 @@ hot_reload = ["giochi-engine/hot_reload"]
 # Fase 24a: mundo físico 3D. Traz o Rapier 3D, que é o custo real (~2 MB) desta fase;
 # fica desligado por omissão para que o caminho 2D não o ligue (ADR-057).
 physics-3d = ["dep:rapier3d"]
+# Fase 21 (pendência): HUD por egui sobre GLES 2.0. Traz o `egui` mas nenhum backend
+# gráfico — o painter é este crate (ADR-059).
+hud = ["dep:egui"]
 
 # Phase 24b. The demo needs the world it demonstrates.
+# Phase 21 pendency: the HUD needs the egui painter to exist at all.
+[[test]]
+name = "hud_render"
+required-features = ["hud"]
+
 [[example]]
 name = "physics_3d_demo"
 path = "examples/physics_3d_demo.rs"

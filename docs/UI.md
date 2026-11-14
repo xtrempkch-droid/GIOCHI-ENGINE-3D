@@ -230,3 +230,37 @@ pub struct Ui<'a> {
     pub fn used_rect(&self) -> Rect;
 }
 ```
+
+## 8. UI sobre 3D (feature `hud` do crate 3D)
+
+A pendência da Fase 21. O `giochi-engine/src/ui` desenha egui com `sdl2::render`, que o
+caminho 3D não usa (ADR-037); `giochi-engine-3d::ui::GlesHud` é o mesmo egui com outro
+pintor:
+
+```rust
+use giochi_engine_3d::ui::GlesHud;
+
+let mut hud = GlesHud::new(render.glow())?;
+// ... depois da cena, antes de `end_frame` ...
+hud.draw(render.glow(), (width, height), 1.0 / 60.0, &mut |ctx| {
+    egui::Window::new("giochi").show(ctx, |ui| ui.label("fps"));
+})?;
+hud.destroy(render.glow());
+```
+
+O pintor são 20 linhas de GLSL e dois buffers. Duas coisas exigem cuidado e estão
+resolvidas dentro dele:
+
+* **Sem índices `u32` em GLES 2.0** sem `OES_element_index_uint`: o `Mesh::split_to_u16` do
+  egui parte o que passa de 65 535 vértices.
+* **Sem VAO em GLES 2.0**: os ponteiros de atributo são ligados a cada chunk.
+
+O `Hud` **não traduz input** ainda: é um overlay de leitura. Um HUD clicável precisa do
+mapeamento de eventos que vive em `giochi-engine/src/ui/egui_integration.rs`, e movê-lo para
+um crate partilhado é trabalho para quando houver um consumidor que clique em algo.
+
+`cargo run -p giochi-engine-3d --features hud,physics-3d --example mini_fps -- --hud`
+mostra fps, posição do olho e, com `--physics`, o número de corpos e se o jogador está
+apoiado. `tests/hud_render.rs` desenha duas frames e exige mais de três cores não-fundo no
+canto superior esquerdo: um overlay que não pinta é indistinguível de um que funciona, do
+lado de fora.

@@ -6,6 +6,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Não publicado]
 
+### Adicionado — HUD sobre 3D (pendência da Fase 21)
+
+- **`giochi-engine-3d::ui::GlesHud`** (feature `hud`): um `egui::Context` pintado com GLES
+  2.0, para o caminho 3D que não usa `sdl2::render`. Um par de shaders, um VBO, um IBO e um
+  `glScissor` por desenho; `Mesh::split_to_u16` cobre a ausência de índices `u32` em GLES
+  2.0 e os ponteiros de atributo são religados a cada chunk porque não há VAO. O pintor
+  repõe todo o estado GL que muda, para o chamador poder continuar a desenhar.
+- `mini_fps --hud` mostra fps, posição do olho e, com `--physics`, o número de corpos e se o
+  jogador está apoiado. `tests/hud_render.rs` prova por pixels que o overlay pinta.
+- O HUD é de leitura: não traduz input (ADR-059).
+
 ### Adicionado — ABI C v6: partículas, animação, consola e hot reload
 
 - **Partes VI–IX da ABI C** (`GIOCHI_ABI_VERSION 6`, aditivas): `giochi_particles_*` com

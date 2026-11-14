@@ -1805,3 +1805,35 @@ units must sum to 0.5, with no drift on the other two axes.
 A character whose collider was created some other way (a game calling `attach_collider`
 after `create_character` replaces nothing) still works: the filter is optional and falls back
 to the unfiltered pipeline when the body has no collider.
+
+## ADR-059 — The 3D HUD is a GLES painter in the 3D crate, not a second egui backend crate
+
+**Context.** Phase 21 shipped egui over `sdl2::render`. That covers every 2D scene and
+nothing in the 3D one, because the 3D path deliberately does not touch `sdl2::render`
+(ADR-037) — which is why "UI over 3D" was recorded as a pendency instead of being claimed.
+
+**Decision.** `giochi-engine-3d::ui::GlesHud`, behind a `hud` feature, owns an
+`egui::Context` and paints its tessellated meshes with GLES 2.0: one shader pair, one VBO,
+one IBO and a `glScissor` per draw. It takes the `glow::Context`, not the whole renderer, so
+a caller can drive it from any place it already has GL.
+
+Two GLES 2.0 limits shape the implementation and are worth writing down:
+
+* `Mesh::split_to_u16` is mandatory, not defensive. egui emits `u32` indices and a
+  text-heavy HUD passes 65 535 vertices; without `OES_element_index_uint` the alternative
+  is a blank overlay on exactly the consoles this project targets.
+* Attribute pointers are set per chunk because GLES 2.0 has no VAOs. At HUD sizes the cost
+  is not measurable, and the alternative (`OES_vertex_array_object`) is another capability
+  probe for no gain.
+
+The painter restores every state bit it changes (blend, depth test, cull, scissor) so a
+caller can draw after it, and it applies `textures_delta.set` before painting and
+`textures_delta.free` after, which is what `egui::FullOutput` documents.
+
+**Consequences.** The 3D crate gains an optional `egui` dependency — the same version the
+2D engine uses, so a game that links both does not get two egui majors. The HUD is
+**display-only**: there is no pointer or keyboard translation. `giochi-engine`'s translation
+table is `pub(crate)` and keyed on `sdl2::Event`, which the 3D examples do read; lifting it
+into a shared crate is the right move when a caller needs to click something, and inventing
+a second translation table now would be two things to keep in step. Until then `--hud` shows
+numbers, which is what the phase-21 criterion asked for.

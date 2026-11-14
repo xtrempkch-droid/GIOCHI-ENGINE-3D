@@ -51,3 +51,13 @@ deliberately out of scope:
 - **Console commands registered from C.** `CommandRegistry::register` takes a Rust closure;
   a C callback would need a function-pointer type, a user-data void*, and a rule for what
   happens when the library outlives the callback. Worth doing with a real consumer.
+
+## 3D HUD — what is still missing
+
+- **Input for the 3D HUD.** `giochi-engine/src/ui/egui_integration.rs` translates SDL events
+  into `egui::Event`, but it is `pub(crate)` and keyed on the 2D engine's event type. A
+  clickable 3D HUD needs that table lifted into a crate both renderers can use — or a
+  `giochi-engine-3d` feature that depends on `giochi-engine`'s input module, which is
+  already a dependency, so the work is moving the code and not adding a dependency.
+- **A clipboard on KMSDRM.** egui asks for copy/paste; the platform has no clipboard, and
+  the request is logged rather than served.

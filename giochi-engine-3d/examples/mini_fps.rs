@@ -21,6 +21,9 @@
 //! - **F3** cycles the render scale 100 % → 75 % → 50 %, upscaling a smaller framebuffer
 //!   over the window.
 //! - `--particles` enables a Space-triggered 3D particle burst for phase 22.
+//! - `--hud` (feature `hud`, the phase-21 pendency) draws an egui overlay on top of the
+//!   3D scene: frame rate, eye position and, with `--physics`, the body count and whether
+//!   the player is grounded.
 //! - `--physics` (feature `physics-3d`, phase 24) replaces the free walker with a body:
 //!   the player is a kinematic capsule moved by `PhysicsWorld3D::move_character`, so walls
 //!   block it, gravity pulls it down, and the obstacle cubes are static colliders. The
@@ -57,6 +60,8 @@ use giochi_engine_3d::particles::BillboardParticleSystem;
 #[cfg(feature = "physics-3d")]
 use giochi_engine_3d::physics::{BodyDesc, ColliderShape, PhysicsWorld3D};
 use giochi_engine_3d::shader::BuiltinShader;
+#[cfg(feature = "hud")]
+use giochi_engine_3d::ui::GlesHud;
 use giochi_engine_3d::{DirectionalLight, RenderContext3D};
 use sdl2::keyboard::Keycode;
 
@@ -128,6 +133,8 @@ struct Options {
     particles: bool,
     /// Drive the player with Rapier instead of the free walker (phase 24).
     physics: bool,
+    /// Draw the egui overlay on top of the scene (phase 21 pendency).
+    hud: bool,
 }
 
 impl Default for Options {
@@ -146,6 +153,7 @@ impl Default for Options {
             cubes: 100,
             particles: false,
             physics: false,
+            hud: false,
         }
     }
 }
@@ -177,6 +185,8 @@ impl Options {
                 options.quadro = Some(value.to_string());
             } else if arg == "--bench" {
                 options.bench = true;
+            } else if arg == "--hud" {
+                options.hud = true;
             } else if arg == "--physics" {
                 options.physics = true;
             } else if arg == "--particles" {
@@ -203,7 +213,7 @@ impl Options {
                 options.scale = parse_number(next_value(&mut args, "--scale")?, "--scale")?;
             } else {
                 return Err(format!(
-                    "unknown argument '{arg}'; accepted: --frames N, --auto, --quadro PATH, --physics, \
+                    "unknown argument '{arg}'; accepted: --frames N, --auto, --quadro PATH, --physics, --hud, \
                      --instanced, --loop, --scale N, --bench, --width N, --height N, \
                      --cubes N, --particles"
                 ));
@@ -271,7 +281,6 @@ struct PhysicsWalker {
     eye_offset: f32,
     grounded: bool,
     jumps: u64,
-    dbg: u32,
 }
 
 #[cfg(feature = "physics-3d")]
@@ -335,7 +344,6 @@ impl PhysicsWalker {
             // ground at time zero and returns a zero translation.
             grounded: true,
             jumps: 0,
-            dbg: 0,
         })
     }
 
@@ -348,10 +356,6 @@ impl PhysicsWalker {
     /// bigger still), which is exactly what the first version of this did — the walker
     /// reached 270 units in four seconds and fell out of the world.
     fn step(&mut self, wanted_eye_delta: Vec3, delta: f32, jump: bool) -> Result<Vec3, String> {
-        let centre = self
-            .world
-            .position(self.body)
-            .map_err(|error| error.to_string())?;
         if jump && self.grounded {
             self.fall = Self::JUMP_SPEED;
             self.jumps += 1;
@@ -373,18 +377,6 @@ impl PhysicsWalker {
             .world
             .move_character(self.body, wanted, delta)
             .map_err(|error| error.to_string())?;
-        if self.jumps >= 1 && self.dbg < 5 && wanted.x.abs() > 0.0 {
-            self.dbg += 1;
-            eprintln!(
-                "DBG wanted=({:.4},{:.4}) got=({:.4},{:.4}) centre_before={:.3},{:.3}",
-                wanted.x,
-                wanted.y,
-                movement.translation.x,
-                movement.translation.y,
-                centre.x,
-                centre.y
-            );
-        }
         self.grounded = movement.grounded;
         if self.grounded && self.fall < 0.0 {
             self.fall = 0.0;
@@ -603,6 +595,19 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
+    #[cfg(feature = "hud")]
+    let mut hud = if options.hud {
+        Some(GlesHud::new(render.glow())?)
+    } else {
+        None
+    };
+    if options.hud && !cfg!(feature = "hud") {
+        eprintln!(
+            "--hud needs the `hud` feature; running without the overlay \
+             (cargo run -p giochi-engine-3d --features hud --example mini_fps -- --hud)"
+        );
+    }
+
     if options.physics && !cfg!(feature = "physics-3d") {
         eprintln!(
             "--physics needs the `physics-3d` feature; running the free walker instead \
@@ -620,6 +625,7 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     let mut field_calls: u32 = 0;
     let mut particle_calls: u32 = 0;
     let mut frames: u64 = 0;
+    let mut fps_display: f32 = 60.0;
     let mut fps_timer: f32 = 0.0;
     let mut fps_frames: u32 = 0;
     let started_at = std::time::Instant::now();
@@ -839,6 +845,48 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             render.set_wireframe(false);
         }
 
+        // The HUD goes last, on top of the scene and inside the render target. With
+        // `--scale` below 1 it is drawn into the small target and upscaled with the rest,
+        // which is the honest thing: the HUD costs what it costs at the resolution the
+        // frame is being rendered at.
+        #[cfg(feature = "hud")]
+        if let Some(hud) = hud.as_mut() {
+            let position = controller.position();
+            #[cfg(feature = "physics-3d")]
+            let physics_state = walker
+                .as_ref()
+                .map(|walker| (walker.world.body_count(), walker.grounded, walker.jumps));
+            #[cfg(not(feature = "physics-3d"))]
+            let physics_state: Option<(usize, bool, u64)> = None;
+
+            let draws = hud.draw(render.glow(), (width, height), 1.0 / 60.0, &mut |ctx| {
+                egui::Window::new("giochi")
+                    .anchor(egui::Align2::LEFT_TOP, egui::vec2(12.0, 12.0))
+                    .title_bar(false)
+                    .resizable(false)
+                    .show(ctx, |ui| {
+                        ui.label(format!("fps {fps_display:.0}  frame {frames}"));
+                        ui.label(format!(
+                            "eye {:.1}, {:.1}, {:.1}",
+                            position.x, position.y, position.z
+                        ));
+                        ui.label(if instanced {
+                            "field instanced"
+                        } else {
+                            "field per-cube"
+                        });
+                        if let Some((bodies, grounded, jumps)) = physics_state {
+                            ui.label(format!(
+                                "physics {bodies} bodies, grounded {grounded}, jumps {jumps}"
+                            ));
+                        }
+                    });
+            })?;
+            if frames == 60 {
+                println!("hud: {draws} draw calls, {} textures", hud.texture_count());
+            }
+        }
+
         let capture = options
             .quadro
             .as_deref()
@@ -878,9 +926,10 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             });
             #[cfg(not(feature = "physics-3d"))]
             let physics_note = String::new();
+            fps_display = fps_frames as f32 / fps_timer;
             println!(
                 "fps: {:.1} (frame {frames}, position {:.1},{:.1},{:.1}{physics_note})",
-                fps_frames as f32 / fps_timer,
+                fps_display,
                 controller.position().x,
                 controller.position().y,
                 controller.position().z,

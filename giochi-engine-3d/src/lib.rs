@@ -55,6 +55,8 @@ pub mod particles;
 pub mod physics;
 pub mod render3d;
 pub mod shader;
+#[cfg(feature = "hud")]
+pub mod ui;
 
 mod error;
 mod registry;

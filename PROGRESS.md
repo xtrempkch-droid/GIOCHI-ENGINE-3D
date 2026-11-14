@@ -8,7 +8,7 @@ Fases 0–18 concluídas. O Growth Pack começou em 2026-11-14.
 |---|---|---|
 | 19 — Hot Reload | **concluída** (2026-11-14) | 31 testes de unidade em `hot_reload`, `hot_reload_render` (textura no mesmo handle, pixel a pixel), `hot_reload_3d` (shader e malha, pixel a pixel), `hot_reload_lua` (geração avança, deleção não); demo com 14 recargas aplicadas |
 | 20 — Debug Tools | **concluída** (2026-11-14) | 69 testes de unidade em `devtools`, 6 de `c_shape`, `devtools_render` (consola desenha por pixels e fechada não desenha nada); `perf_regression` 0 alocações/frame com a feature compilada e a consola fechada |
-| 21 — UI System | **concluída com pendência** (2026-11-14) | 24 testes de unidade em `ui`, `ui_render` (desenha nos 3 temas, pixels diferentes entre temas, 0 alocações/frame sem UI); `ui_demo` roda. **UI sobre 3D não entregue** — ver pendências |
+| 21 — UI System | **concluída** (2026-11-14; a UI sobre 3D chegou depois, na feature `hud`) | 24 testes de unidade em `ui`, `ui_render` (desenha nos 3 temas, pixels diferentes entre temas, 0 alocações/frame sem UI); `ui_demo` roda. **UI sobre 3D não entregue** — ver pendências |
 | 22 — Particles | **concluída** (2026-11-14) | 12 testes 2D, 4 em 3D e aceitação de render: 1.000 partículas 2D → 1 draw call, tint validado por pixel; demos 2D/3D e `mini_fps --particles` executados por 120 frames; gates x86_64, docs e check ARM64 aprovados |
 | 23 — Animation | **concluída** (2026-11-14) | 13 testes de unidade em `animation`, `animation_render` (a câmara escolhe o frame certo do spritesheet, pixel a pixel), `perf_regression` com 256 tweens + 1 spritesheet a 0 alocações/frame; `animation_demo` em 120 frames; gates x86_64, features, docs e check ARM64 aprovados |
 | 24 — Physics + C ABI | **concluída com pendências** (2026-11-14) | 9 testes de unidade em `physics` 2D + 8 em 3D, 5 de integração (`tests/physics_2d.rs`), `physics_2d_demo` 1800 frames com a torre a `0.000` de velocidade, `physics_3d_demo` 420 frames com o jogador bloqueado pela parede e apoiado no chão; C ABI **v5** com 9 símbolos `giochi_physics_*` e testes C + Python a passar; gates x86_64, features, docs e ARM64 aprovados |
@@ -174,13 +174,26 @@ aqui para o estado do plano não prometer mais do que o código faz.
   consola (painel inferior) e cena (painel central).
 - `examples/ui_demo.rs`, `docs/UI.md`, ADR-055, `tests/ui_render.rs`.
 
-### Pendência da Fase 21 (não é "concluída" no critério do plano)
+### Pendência da Fase 21 — resolvida
 
-O plano pede **"UI sobre 3D funciona (HUD em FPS)"**. Não foi entregue: `mini_fps` e os
-outros exemplos 3D conduzem `RenderContext3D` diretamente, sem `Engine`/`Scene`, e o
-backend desta fase desenha com `sdl2::render` — que o caminho 3D não usa (ADR-037). Falta
-um backend egui em GLES (~250 linhas) no crate 3D. Registrado em `IDEAS.md`; a UI da Fase 21
-é a do renderer 2D, e `docs/UI.md` §7 diz isso explicitamente.
+O plano pedia **"UI sobre 3D funciona (HUD em FPS)"**. Na Fase 21 ficou por fazer: os
+exemplos 3D conduzem `RenderContext3D` directamente, sem `Engine`/`Scene`, e o backend dessa
+fase desenha com `sdl2::render`, que o caminho 3D não usa (ADR-037).
+
+Resolvido com `giochi-engine-3d::ui::GlesHud` (feature `hud`, ADR-059): o mesmo
+`egui::Context`, um pintor GLES 2.0 próprio — um par de shaders, um VBO, um IBO e um
+`glScissor` por desenho. `Mesh::split_to_u16` é obrigatório (egui emite índices `u32` e um
+HUD com texto passa os 65 535 vértices) e os ponteiros de atributo são ligados a cada chunk
+porque GLES 2.0 não tem VAO. O pintor repõe todo o estado que muda.
+
+`mini_fps --hud` (feature `hud`) mostra fps, posição do olho e, com `--physics`, corpos e
+`grounded`: 2 draw calls, 1 textura, sem erro GL. `tests/hud_render.rs` desenha duas frames
+e exige mais de três cores não-fundo no canto superior esquerdo — um overlay que não pinta é
+indistinguível de um que funciona, do lado de fora.
+
+O HUD é **de leitura**: não traduz input. Um HUD clicável precisa do mapeamento de eventos
+que vive em `giochi-engine/src/ui/egui_integration.rs`, e movê-lo para um crate partilhado é
+trabalho para quando houver um consumidor que clique em algo (registado em `IDEAS.md`).
 
 ### Gates da Fase 20
 
