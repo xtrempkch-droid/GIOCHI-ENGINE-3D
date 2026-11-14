@@ -13,8 +13,18 @@ repository.workspace = true
 # implicit default here would win the feature union for every Lua host.
 giochi-engine = { path = "../giochi-engine", version = "0.4.0", default-features = false }
 mlua = { workspace = true }
+log = { workspace = true }
 
 [features]
 default = ["sdl2-bundled"]
 sdl2-bundled = ["giochi-engine/sdl2-bundled"]
 sdl2-system = ["giochi-engine/sdl2-system"]
+# Fase 19: reinicia a VM quando o script muda no disco. Encaminha para o watcher do
+# core (`notify`); sem a feature, `watch_script` é um no-op e o script roda igual.
+hot_reload = ["giochi-engine/hot_reload"]
+
+# Phase 19. The reload needs the watcher, so a build without the feature does not even
+# compile the test.
+[[test]]
+name = "hot_reload_lua"
+required-features = ["hot_reload"]

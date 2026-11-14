@@ -668,6 +668,52 @@ The phase-18 build matrix was to include `cortex-a35` (PX30) in addition to
 table in `docs/CROSS_COMPILE.md`, selected with `GIOCHI_TARGET_CPU`. See "After Phase 18"
 above for the measured result.
 
+## After Phase 19 — hot reload
+
+### Release builds without the feature (R2)
+
+The feature is off by default, so the default release artifacts are compiled from exactly
+the same code as phase 18. Measured on this machine, x86_64, `[profile.release]`
+(`lto = "fat"`, `codegen-units = 1`, `strip = "symbols"`):
+
+| Artifact | Size |
+| --- | --- |
+| `target/release/libgiochi.so` (capi, no features) | 911 032 B |
+| `target/release/libgiochi_engine.rlib` | 1 626 088 B |
+| `target/release/libgiochi_engine_3d.rlib` | 1 336 962 B |
+
+`nm -D --defined-only target/release/libgiochi.so | grep -c ' T giochi_'` → **97**
+exported functions, the same set as phase 18: no symbol was added, removed or renamed.
+That is the check that matters, because a size comparison between two hosts is noise and a
+symbol diff is not.
+
+### Cost while the feature is compiled in and idle
+
+| Situation | Per-frame cost |
+| --- | --- |
+| `hot_reload` not compiled | none — the module and the `Engine` field do not exist |
+| compiled, `enabled = false` | one `Option::is_none` check |
+| compiled, enabled, nothing changing | one `try_recv` on an empty channel + one `Instant` comparison |
+| one settled change | one `canonicalize` per candidate texture + one image decode |
+
+The debounce and the coalescing are what keep the last row rare: an editor's save is
+usually 3–5 raw events and produces **one** decode. Measured on the demo: 14 edits → 14
+reloads, no duplicate decode per save.
+
+### Latency
+
+Debounce (150 ms, measured from the last raw event) + the next frame (≈16.7 ms at 60 fps)
+= **≈167 ms** end to end. The phase's criterion is < 200 ms. The 150 ms is a design
+constant, not a measurement: it is the smallest window that absorbed a VS Code save
+(write + chmod + rename) as one event in the tests here.
+
+### Uniform capture
+
+`Program::set_capture` costs one hash write per uniform per draw, and is **off** for the
+built-in shaders (the per-draw path `meshes_3d` measures) and **on** for shaders loaded
+from a file, which reload. No benchmark in the suite exercises the latter, and no existing
+benchmark changed.
+
 ## Conclusions
 
 - On x86_64 the baseline is dominated by per-sprite draw calls: 200 → 1000 sprites

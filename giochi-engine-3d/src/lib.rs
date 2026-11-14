@@ -46,6 +46,8 @@
 
 pub mod context;
 pub mod game;
+#[cfg(feature = "hot_reload")]
+pub mod hot_reload;
 pub mod math3d;
 pub mod mesh;
 pub mod render3d;

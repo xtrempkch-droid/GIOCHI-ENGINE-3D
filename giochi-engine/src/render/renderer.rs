@@ -1,5 +1,6 @@
 //! The 2D rendering context.
 
+use std::path::Path;
 use std::rc::Rc;
 
 use sdl2::render::{TextureCreator, WindowCanvas};
@@ -275,6 +276,74 @@ impl RenderContext {
     /// Pixel size of a texture, or `None` for an invalid handle.
     pub fn texture_size(&self, texture: TextureHandle) -> Option<(u32, u32)> {
         self.textures.dimensions(texture)
+    }
+
+    /// The file `texture` was loaded from, or `None` for a generated one.
+    pub fn texture_source(&self, texture: TextureHandle) -> Option<String> {
+        self.textures.source_path(texture)
+    }
+
+    /// Reloads `texture` from the file it came from, keeping the same handle.
+    ///
+    /// This is what the hot reloader calls. It does **not** flush the batch: queued
+    /// sprites hold handles, not pixels, so they draw the reloaded image on the frame
+    /// that is already in flight — which is exactly the behaviour a developer wants.
+    ///
+    /// # Errors
+    ///
+    /// [`GiochiError::Asset`] when the file is gone or no longer decodes (the old
+    /// texture is kept), [`GiochiError::InvalidArgument`] for a generated texture, and
+    /// [`GiochiError::InvalidHandle`] for an unknown handle.
+    pub fn reload_texture(&mut self, texture: TextureHandle) -> Result<(), GiochiError> {
+        self.textures.reload(texture)
+    }
+
+    /// Reloads every live texture that was loaded from `path`.
+    ///
+    /// Returns how many reloaded. `0` means no texture came from that file, which is
+    /// not an error: an edited asset that the running scene never loaded is the normal
+    /// case.
+    pub fn reload_texture_path(&mut self, path: &Path) -> usize {
+        let handles: Vec<TextureHandle> = self
+            .textures
+            .handles()
+            .into_iter()
+            .filter(|handle| {
+                self.textures
+                    .source_path(*handle)
+                    .is_some_and(|source| same_file(Path::new(&source), path))
+            })
+            .collect();
+
+        let mut reloaded = 0usize;
+        for handle in handles {
+            match self.textures.reload(handle) {
+                Ok(()) => {
+                    reloaded += 1;
+                    log::info!("reloaded texture {handle} from '{}'", path.display());
+                }
+                // A shared texture, or a file that no longer decodes: the old image
+                // stays on screen and the reason goes to the log. A developer tool must
+                // not take the game down.
+                Err(err) => log::warn!("texture {handle} was not reloaded: {err}"),
+            }
+        }
+        reloaded
+    }
+
+    /// Reloads the texture the resource cache holds for `path`, keeping its handle.
+    ///
+    /// This is the cache-aware reload: it asks [`ResourceManager`] which handle `path`
+    /// maps to, so a game that loaded assets through [`RenderContext::load_texture`] can
+    /// name a file and nothing else.
+    ///
+    /// # Errors
+    ///
+    /// [`GiochiError::InvalidArgument`] when the path is not cached, plus whatever the
+    /// texture reload reports. A failed reload evicts the cache entry so the next load
+    /// surfaces the real error.
+    pub fn reload_cached_texture(&mut self, path: &str) -> Result<TextureHandle, GiochiError> {
+        self.resources.reload_texture(&self.textures, path)
     }
 
     /// Number of live textures.
@@ -607,6 +676,23 @@ impl RenderContext {
 
     pub(crate) fn texture_creator(&self) -> TextureCreator<WindowContext> {
         self.canvas.texture_creator()
+    }
+}
+
+/// Whether `left` and `right` name the same file on disk.
+///
+/// The watcher reports canonical absolute paths while a texture was created from whatever
+/// string the game passed — usually a relative asset path. Comparing the raw strings means
+/// a reload never matches, so the comparison falls back to `canonicalize` when the cheap
+/// equality fails. Both are files the process already opened, so a failure to canonicalise
+/// is not an error worth reporting: the answer is simply "not the same file".
+fn same_file(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
     }
 }
 

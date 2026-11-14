@@ -322,20 +322,38 @@ fn run_lua(arguments: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     };
 
-    let lua = match giochi_engine_lua::new_vm() {
-        Ok(lua) => lua,
-        Err(error) => {
-            eprintln!("erro: não foi possível criar a VM Lua: {error}");
+    // Hot reload of a script is a *restart*: a Lua chunk cannot be patched in place, so
+    // the loop below rebuilds the VM. The watcher tells the scene to stop, and
+    // `take_reload_request` tells this loop whether stopping meant "quit" or "again".
+    #[cfg(feature = "hot_reload")]
+    {
+        if giochi_engine::hot_reload::HotReloadConfig::from_env().enabled {
+            if let Err(error) = giochi_engine_lua::watch_script(std::path::Path::new(script)) {
+                eprintln!("aviso: hot reload do script desactivado: {error}");
+            }
+        }
+    }
+
+    let mut runs = 0u32;
+    loop {
+        runs += 1;
+        let lua = match giochi_engine_lua::new_vm() {
+            Ok(lua) => lua,
+            Err(error) => {
+                eprintln!("erro: não foi possível criar a VM Lua: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+
+        if let Err(error) = giochi_engine_lua::run_file(&lua, script, &arguments[1..]) {
+            eprintln!("erro no script '{script}':\n{error}");
             return ExitCode::FAILURE;
         }
-    };
 
-    match giochi_engine_lua::run_file(&lua, script, &arguments[1..]) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("erro no script '{script}':\n{error}");
-            ExitCode::FAILURE
+        if !giochi_engine_lua::take_reload_request() {
+            return ExitCode::SUCCESS;
         }
+        eprintln!("script alterado: reiniciando '{script}' (execução {runs})");
     }
 }
 

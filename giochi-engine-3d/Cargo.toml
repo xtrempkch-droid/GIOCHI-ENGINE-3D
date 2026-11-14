@@ -53,6 +53,12 @@ path = "examples/ball_balance.rs"
 name = "model_viewer"
 path = "examples/model_viewer.rs"
 
+# Phase 19. Needs a GL driver and the reload module, so it is not part of a plain
+# `cargo test` run.
+[[test]]
+name = "hot_reload_3d"
+required-features = ["hot_reload"]
+
 [features]
 # Compila o SDL2 do código-fonte — o padrão, e o que o CI usa em x86_64.
 default = ["sdl2-bundled"]
@@ -65,3 +71,7 @@ sdl2-system = ["sdl2/use-pkgconfig", "giochi-engine/sdl2-system"]
 # Fase 15: contadores de draw calls/vértices no renderer 3D. Encaminha para a
 # feature homónima do core, que também liga o profiler e o overlay.
 profiling = ["giochi-engine/profiling"]
+# Fase 19: recompila shaders e recarrega malhas quando o arquivo muda. Encaminha
+# para o watcher do core (`notify`); sem esta feature o módulo `hot_reload` deste
+# crate não é compilado e o `RenderContext3D` não ganha campo nenhum.
+hot_reload = ["giochi-engine/hot_reload"]

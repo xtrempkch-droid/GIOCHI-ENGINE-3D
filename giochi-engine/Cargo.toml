@@ -12,9 +12,13 @@ repository.workspace = true
 sdl2 = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
+notify = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
+# The hot reload example prints what it reloaded; without a logger the demonstration is
+# silent even though it works.
+env_logger = { workspace = true }
 
 [[bench]]
 name = "sprites_2d"
@@ -25,6 +29,18 @@ harness = false
 [[bench]]
 name = "engine_overhead"
 harness = false
+
+# Phase 19. A texture reload needs a real renderer and a real file, so it only makes
+# sense when the module exists; `required-features` keeps `cargo test` from failing to
+# find `hot_reload` in a build that does not have it.
+[[test]]
+name = "hot_reload_render"
+required-features = ["hot_reload"]
+
+[[example]]
+name = "hot_reload_demo"
+path = "examples/hot_reload_demo.rs"
+required-features = ["hot_reload"]
 
 [features]
 # Compila o SDL2 do código-fonte — o padrão, e o que o CI usa em x86_64.
@@ -38,3 +54,7 @@ sdl2-system = ["sdl2/use-pkgconfig"]
 # Desligada por omissão: sem esta feature o profiler compila como no-op e o
 # renderer não incrementa contadores (ADR-042).
 profiling = []
+# Fase 19: recarrega texturas (e, no crate 3D, shaders e malhas) quando o arquivo
+# muda no disco. A feature traz o `notify`; desligada, o módulo `hot_reload` inteiro
+# não é compilado e o `Engine` não tem nenhum campo novo.
+hot_reload = ["dep:notify"]

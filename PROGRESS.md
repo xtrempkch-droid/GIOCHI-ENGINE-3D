@@ -1,5 +1,58 @@
 # Estado — GIOCHI-ENGINE
 
+## Growth Pack (Fases 19–24)
+
+Fases 0–18 concluídas. O Growth Pack começou em 2026-11-14.
+
+| Fase | Estado | Verificado |
+|---|---|---|
+| 19 — Hot Reload | **concluída** (2026-11-14) | 31 testes de unidade em `hot_reload`, `hot_reload_render` (textura no mesmo handle, pixel a pixel), `hot_reload_3d` (shader e malha, pixel a pixel), `hot_reload_lua` (geração avança, deleção não); demo com 14 recargas aplicadas |
+| 20 — Debug Tools | pendente | — |
+| 21 — UI System | pendente | — |
+| 22 — Particles | pendente | — |
+| 23 — Animation | pendente | — |
+| 24 — Physics + C ABI v4 | pendente | — |
+
+### Gates da Fase 19
+
+- [x] `cargo fmt --all -- --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo clippy --workspace --all-targets --features <hot_reload em 4 crates> -- -D warnings`
+- [x] `cargo test --workspace` (todas as suítes, 0 falhas)
+- [x] `cargo test --workspace --features <hot_reload>` (inclui os 3 testes novos)
+- [x] `cargo doc --workspace --no-deps`
+- [x] `cargo build --release -p giochi-engine -p giochi-engine-3d` sem features
+- [x] `libgiochi.so` release: 97 símbolos `giochi_*` exportados, mesmo conjunto da Fase 18
+- [x] `cargo run -p giochi-engine --example hot_reload_demo --features hot_reload -- --frames 600`
+      → `eventos: 14 | aplicados: 14 | falhas: 0 | ignorados: 0`, handles 1 e 2 do início ao fim
+- [x] `cargo check --workspace --target aarch64-unknown-linux-gnu --features hot_reload,devtools...`
+      → ok (`notify` 6.1.1 via `inotify` 0.9.6, sem dependência nativa; MSRV 1.60, não sobe o piso de 1.86)
+
+### Entregue na Fase 19
+
+- `giochi-engine/src/hot_reload/`: `watcher.rs` (notify 6 + debounce por caminho +
+  canonicalização), `registry.rs` (extensão → prioridade, ordem estável),
+  `mod.rs` (`HotReloader`, `HotReloadConfig`, `HotReloadEvent`, contadores, geração de
+  script).
+- `RenderContext::reload_texture` / `reload_texture_path` / `reload_cached_texture`;
+  `TextureRegistry` lembra o arquivo de origem e troca a textura sob o mesmo handle.
+- `Engine::enable_hot_reload` / `_with` / `disable` / `register_hot_reload_handler` /
+  `poll_hot_reload`, chamado antes de `update` em `run_frame`.
+- `giochi-engine-3d/src/hot_reload.rs`: `ShaderReloader` (shader + malha, mesmo handle);
+  `Program::set_capture` / `apply_retained` preservam uniformes constantes.
+- `giochi-engine-lua/src/reload.rs`: `watch_script`, `poll_script_changes`,
+  `take_reload_request`; `LuaScene` para o loop quando a geração muda; `giochi-demo lua`
+  reinicia a VM.
+- `examples/hot_reload_demo.rs`, `docs/HOT_RELOAD.md`, ADR-047 a ADR-050.
+
+### Defeito encontrado e corrigido
+
+O `notify` resolve o caminho que vigia e reporta eventos **absolutos**; o filtro comparava
+com o caminho relativo do chamador e nada casava — o watcher iniciava, não reportava nada e
+parecia saudável. Corrigido com canonicalização na instalação e `same_file` na comparação
+do reload; dois testes de regressão fixam.
+
+
 ## Última entrega: release 0.4.0 — rede (ABI v4), texturas e geometria própria em 3D
 Data: 2026-11-13
 

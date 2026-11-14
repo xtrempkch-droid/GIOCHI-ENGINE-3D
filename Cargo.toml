@@ -58,6 +58,10 @@ criterion = { version = "0.8", features = ["html_reports"] }
 glow = "0.18"
 bytemuck = { version = "1", features = ["derive"] }
 tobj = "4"
+# Phase 19. `notify` 6 rather than 7 or 8: it declares MSRV 1.60, so turning on
+# `hot_reload` does not raise the engine's measured 1.86 floor (ADR-046). The API used
+# here (`recommended_watcher`, `Watcher::watch`) has not changed since 5.
+notify = "6"
 
 # Phase 18a. Shipping build for the consoles.
 #

@@ -38,6 +38,17 @@ pub struct Program {
     /// shared reference: the handle registry hands out `Rc<Program>`, and this is
     /// the only interior mutability the type needs.
     uniforms: RefCell<HashMap<String, Option<glow::UniformLocation>>>,
+    /// Values written through the setters, kept only while [`Program::set_capture`] is
+    /// on.
+    ///
+    /// Recording is off by default because every setter runs once per uniform per draw,
+    /// and a hash insert on that path is exactly the kind of cost phase 18 measured. The
+    /// hot reloader turns it on for the programs it manages: there the point is to
+    /// re-apply a constant (`u_tint`, `u_bias`) after a recompile, which happens once per
+    /// edit rather than once per frame.
+    retained: RefCell<HashMap<String, RetainedUniform>>,
+    /// Whether the setters record into `retained`.
+    capture: std::cell::Cell<bool>,
     /// Kept for diagnostics: the driver reports which shader failed by object, and the
     /// source is what a human needs to see.
     vertex_source: String,
@@ -49,6 +60,20 @@ pub struct Program {
     /// answer we need is "will this program accept the attributes", not "does the file
     /// mention them".
     instanced: bool,
+}
+
+/// A uniform value recorded by a [`Program`] setter while capture is on.
+#[derive(Debug, Clone)]
+enum RetainedUniform {
+    Float(f32),
+    Vec3([f32; 3]),
+    Color([f32; 4]),
+    Matrix([f32; 16]),
+    /// The texture object, not a handle: it is what `bind_texture` needs to replay.
+    Texture {
+        texture: glow::Texture,
+        unit: u32,
+    },
 }
 
 impl std::fmt::Debug for Program {
@@ -84,6 +109,8 @@ impl Program {
         Ok(Self {
             handle: program,
             uniforms: RefCell::new(HashMap::new()),
+            retained: RefCell::new(HashMap::new()),
+            capture: std::cell::Cell::new(false),
             vertex_source: vertex_source.to_owned(),
             fragment_source: fragment_source.to_owned(),
             instanced,
@@ -206,10 +233,12 @@ impl Program {
     /// classic "my model is inside-out" bug.
     pub fn set_mat4(&self, gl: &glow::Context, name: &str, value: &Mat4) {
         if let Some(location) = self.location(gl, name) {
+            let columns = value.to_cols_array();
             // SAFETY: 16 floats, column-major, matching the uniform type.
             unsafe {
-                gl.uniform_matrix_4_f32_slice(Some(&location), false, &value.to_cols_array());
+                gl.uniform_matrix_4_f32_slice(Some(&location), false, &columns);
             }
+            self.retain(name, RetainedUniform::Matrix(columns));
         }
     }
 
@@ -218,6 +247,7 @@ impl Program {
         if let Some(location) = self.location(gl, name) {
             // SAFETY: 3 floats, matching the uniform type.
             unsafe { gl.uniform_3_f32(Some(&location), value.x, value.y, value.z) };
+            self.retain(name, RetainedUniform::Vec3([value.x, value.y, value.z]));
         }
     }
 
@@ -226,6 +256,7 @@ impl Program {
         if let Some(location) = self.location(gl, name) {
             // SAFETY: one float, matching the uniform type.
             unsafe { gl.uniform_1_f32(Some(&location), value) };
+            self.retain(name, RetainedUniform::Float(value));
         }
     }
 
@@ -235,6 +266,7 @@ impl Program {
             let [r, g, b, a] = color.to_array();
             // SAFETY: 4 floats, matching the uniform type.
             unsafe { gl.uniform_4_f32(Some(&location), r, g, b, a) };
+            self.retain(name, RetainedUniform::Color([r, g, b, a]));
         }
     }
 
@@ -253,6 +285,7 @@ impl Program {
         if let Some(location) = self.location(gl, name) {
             // SAFETY: a sampler uniform takes one integer, the texture unit index.
             unsafe { gl.uniform_1_i32(Some(&location), unit as i32) };
+            self.retain(name, RetainedUniform::Texture { texture, unit });
         }
     }
 
@@ -263,6 +296,102 @@ impl Program {
     /// because it shares no attribute numbering with the mesh pipeline.
     pub(crate) fn gl_name(&self) -> glow::Program {
         self.handle
+    }
+    /// Turns uniform recording on or off.
+    ///
+    /// Off by default. On means every setter keeps the value it just uploaded, so
+    /// [`Program::apply_retained`] can replay it into a recompiled program. The hot
+    /// reloader enables it for the programs it manages; nothing else should, because the
+    /// recording costs a hash write per uniform per draw.
+    pub fn set_capture(&self, on: bool) {
+        self.capture.set(on);
+    }
+
+    /// Whether the setters are recording values.
+    pub fn capture_enabled(&self) -> bool {
+        self.capture.get()
+    }
+
+    /// How many uniform values are recorded.
+    pub fn retained_count(&self) -> usize {
+        self.retained.borrow().len()
+    }
+
+    /// Re-applies every recorded uniform to this program.
+    ///
+    /// Called on a **freshly linked** program after a reload. Textures are re-bound as
+    /// well as re-pointed: a sampler without its texture unit is a black surface with no
+    /// GL error, which is the failure mode this exists to avoid.
+    ///
+    /// Returns how many values were applied. `0` is normal for a program whose uniforms
+    /// are all written by the draw call itself.
+    pub fn apply_retained(&self, gl: &glow::Context) -> usize {
+        let retained = self.retained.borrow();
+        for (name, value) in retained.iter() {
+            let Some(location) = self.location(gl, name) else {
+                // The recompiled shader no longer reads this uniform; re-applying is
+                // impossible and harmless.
+                log::debug!("uniform '{name}' is gone after the reload");
+                continue;
+            };
+            match value {
+                RetainedUniform::Float(value) => {
+                    // SAFETY: one float, matching the uniform type.
+                    unsafe { gl.uniform_1_f32(Some(&location), *value) };
+                }
+                RetainedUniform::Vec3(value) => {
+                    // SAFETY: 3 floats, matching the uniform type.
+                    unsafe { gl.uniform_3_f32(Some(&location), value[0], value[1], value[2]) };
+                }
+                RetainedUniform::Color(value) => {
+                    // SAFETY: 4 floats, matching the uniform type.
+                    unsafe {
+                        gl.uniform_4_f32(Some(&location), value[0], value[1], value[2], value[3]);
+                    }
+                }
+                RetainedUniform::Matrix(value) => {
+                    // SAFETY: 16 floats, column-major, matching the uniform type.
+                    unsafe { gl.uniform_matrix_4_f32_slice(Some(&location), false, value) };
+                }
+                RetainedUniform::Texture { texture, unit } => {
+                    // SAFETY: core GLES 2.0; the object outlives the program (textures
+                    // belong to the render context, not to a shader).
+                    unsafe {
+                        gl.active_texture(glow::TEXTURE0 + *unit);
+                        gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
+                        gl.uniform_1_i32(Some(&location), *unit as i32);
+                    }
+                }
+            }
+        }
+        retained.len()
+    }
+
+    /// Copies the recording state and retained values from `previous` into `self`.
+    ///
+    /// Used by a reload: the new program is linked first, then told everything the old
+    /// one knew, then asked to apply it. Doing it in this order means a compile error
+    /// leaves the old program — and its state — untouched.
+    pub(crate) fn inherit_retained(&self, previous: &Program) {
+        self.capture.set(previous.capture.get());
+        if !previous.capture.get() {
+            return;
+        }
+        let inherited: HashMap<String, RetainedUniform> = previous
+            .retained
+            .borrow()
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect();
+        *self.retained.borrow_mut() = inherited;
+    }
+
+    /// Records `value` under `name`, when capture is on.
+    fn retain(&self, name: &str, value: RetainedUniform) {
+        if !self.capture.get() {
+            return;
+        }
+        self.retained.borrow_mut().insert(name.to_owned(), value);
     }
 
     /// The vertex source this program was built from, for diagnostics.

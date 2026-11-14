@@ -49,6 +49,11 @@ pub struct RenderContext3D {
     /// The one light every draw in the frame is shaded with.
     light: DirectionalLight,
     meshes: HandleRegistry<Mesh>,
+    /// The OBJ file each mesh came from, when it came from one.
+    ///
+    /// Kept so a reload can rebuild the mesh without the caller tracking paths; a mesh
+    /// built from vertices in memory has no entry and cannot be reloaded.
+    mesh_sources: std::cell::RefCell<std::collections::HashMap<MeshHandle, std::path::PathBuf>>,
     shaders: HandleRegistry<Program>,
     /// Textures a mesh can sample. Separate from the 2D engine's `TextureRegistry`:
     /// those belong to a `sdl2::render` canvas, and this context draws with raw GLES
@@ -116,6 +121,7 @@ impl RenderContext3D {
             drawable_size: (1, 1),
             light: DirectionalLight::sun(),
             meshes: HandleRegistry::new(),
+            mesh_sources: std::cell::RefCell::new(std::collections::HashMap::new()),
             shaders: HandleRegistry::new(),
             textures: HandleRegistry::new(),
             render_scale: None,
@@ -506,9 +512,55 @@ impl RenderContext3D {
     }
 
     /// Loads an OBJ file and uploads it.
+    ///
+    /// The path is remembered, which is what makes [`Self::reload_mesh`] possible.
     pub fn load_obj_mesh(&mut self, path: &std::path::Path) -> Result3D<MeshHandle> {
         let (vertices, indices) = crate::mesh::load_obj(path)?;
-        self.create_mesh(&vertices, &indices)
+        let handle = self.create_mesh(&vertices, &indices)?;
+        self.mesh_sources
+            .borrow_mut()
+            .insert(handle, path.to_path_buf());
+        Ok(handle)
+    }
+
+    /// The OBJ file `handle` was loaded from, or `None` for a generated mesh.
+    pub fn mesh_source(&self, handle: MeshHandle) -> Option<std::path::PathBuf> {
+        self.mesh_sources.borrow().get(&handle).cloned()
+    }
+
+    /// Rebuilds `handle` from the OBJ file it was loaded from, keeping the handle.
+    ///
+    /// The new geometry is parsed and uploaded **before** the old mesh is released, so a
+    /// half-written file leaves the previous mesh on screen.
+    ///
+    /// # Errors
+    ///
+    /// [`Error3D::Asset`] when the file cannot be read or parsed,
+    /// [`Error3D::InvalidArgument`](crate::Error3D::InvalidArgument) for a generated
+    /// mesh, and [`Error3D::GlObject`] for an unknown handle.
+    pub fn reload_mesh(&mut self, handle: MeshHandle) -> Result3D<()> {
+        let Some(path) = self.mesh_source(handle) else {
+            return Err(Error3D::Asset(
+                "mesh was not loaded from a file, so it cannot be reloaded".to_owned(),
+            ));
+        };
+
+        let (vertices, indices) = crate::mesh::load_obj(&path)?;
+        let replacement = Mesh::from_vertices_indices(self.gl.glow(), &vertices, &indices)?;
+
+        let Some(previous) = self.meshes.replace(handle, replacement) else {
+            return Err(Error3D::GlObject(format!(
+                "mesh handle {handle} is not live"
+            )));
+        };
+
+        match std::rc::Rc::try_unwrap(previous) {
+            Ok(previous) => previous.destroy(self.gl.glow()),
+            Err(_) => log::warn!(
+                "mesh {handle} is still referenced elsewhere; the previous GL objects leaked"
+            ),
+        }
+        Ok(())
     }
 
     /// Releases a mesh. Returns `false` for `0` or an already-destroyed handle.
@@ -529,6 +581,7 @@ impl RenderContext3D {
                 log::warn!("mesh {handle} is still referenced elsewhere; GL objects leaked");
             }
         }
+        self.mesh_sources.borrow_mut().remove(&handle);
 
         true
     }
@@ -577,6 +630,77 @@ impl RenderContext3D {
         Ok(self.shaders.insert(program))
     }
 
+    /// Recompiles a shader in place from new sources on disk, keeping the handle.
+    ///
+    /// This is the reload primitive. It compiles the **new** program first and only
+    /// then swaps it into the registry, so a shader with a syntax error leaves the
+    /// previous program alive and the frame continues — which is the difference between
+    /// a hot reload and a crash.
+    ///
+    /// Uniform values recorded by the old program (when capture is on) are replayed into
+    /// the new one; see [`crate::shader::Program::set_capture`].
+    ///
+    /// # Errors
+    ///
+    /// [`Error3D::Asset`] when a file cannot be read, [`Error3D::Shader`] with the
+    /// driver's complete log when compilation or linking fails, and [`Error3D::GlObject`]
+    /// for an unknown handle. On every error path the previous program is untouched.
+    pub fn reload_shader_sources(
+        &mut self,
+        handle: ShaderHandle,
+        vertex_path: &std::path::Path,
+        fragment_path: &std::path::Path,
+    ) -> Result3D<()> {
+        let Some(previous) = self.shaders.get(handle) else {
+            return Err(Error3D::GlObject(format!(
+                "shader handle {handle} is not live"
+            )));
+        };
+
+        let vertex = std::fs::read_to_string(vertex_path).map_err(|err| {
+            Error3D::Asset(format!(
+                "failed to read vertex shader '{}': {err}",
+                vertex_path.display()
+            ))
+        })?;
+        let fragment = std::fs::read_to_string(fragment_path).map_err(|err| {
+            Error3D::Asset(format!(
+                "failed to read fragment shader '{}': {err}",
+                fragment_path.display()
+            ))
+        })?;
+
+        // Compile before touching the registry: `?` here leaves the old program in use.
+        let program = Program::from_source(self.gl.glow(), &vertex, &fragment)?;
+        program.inherit_retained(&previous);
+        program.bind(self.gl.glow());
+        let applied = program.apply_retained(self.gl.glow());
+        if applied > 0 {
+            log::debug!("shader {handle}: {applied} uniform(s) re-applied after the reload");
+        }
+
+        // Release our clone before swapping, otherwise the registry's reference is the
+        // second one and `try_unwrap` below can never succeed.
+        drop(previous);
+
+        let Some(previous) = self.shaders.replace(handle, program) else {
+            return Err(Error3D::GlObject(format!(
+                "shader handle {handle} disappeared during the reload"
+            )));
+        };
+
+        // The old GL program has to be deleted explicitly; dropping the Rust value would
+        // leak the driver object. A clone held by a draw call that outlived the frame is
+        // the only case where that is impossible, and it is worth a warning.
+        match std::rc::Rc::try_unwrap(previous) {
+            Ok(previous) => previous.destroy(self.gl.glow()),
+            Err(_) => log::warn!(
+                "shader {handle} is still referenced elsewhere; the previous GL program leaked"
+            ),
+        }
+        Ok(())
+    }
+
     /// Compiles a vertex/fragment pair read from disk.
     ///
     /// R10: a user shader is a file, never a string embedded in the caller's binary.
@@ -599,6 +723,10 @@ impl RenderContext3D {
         })?;
 
         let program = Program::from_source(self.gl.glow(), &vertex, &fragment)?;
+        // A shader that came from a file is a shader somebody edits, so it is also the
+        // one hot reload replays uniforms into. Capture is off for the built-ins, which
+        // never reload and sit on the per-draw path (ADR-048).
+        program.set_capture(true);
         Ok(self.shaders.insert(program))
     }
 
@@ -623,6 +751,36 @@ impl RenderContext3D {
     /// Number of live shader programs.
     pub fn shader_count(&self) -> usize {
         self.shaders.len()
+    }
+
+    /// Turns uniform recording on or off for one shader.
+    ///
+    /// Shaders loaded with [`Self::load_shader`] record by default, because they are the
+    /// ones a reload has to replay constants into. Turning it off saves a hash write per
+    /// uniform per draw on a program that will never be reloaded. Returns `false` for an
+    /// unknown handle.
+    pub fn set_shader_capture(&mut self, handle: ShaderHandle, on: bool) -> bool {
+        match self.shaders.get(handle) {
+            Some(program) => {
+                program.set_capture(on);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Whether `handle` records its uniforms, or `None` for an unknown handle.
+    pub fn shader_captures_uniforms(&self, handle: ShaderHandle) -> Option<bool> {
+        self.shaders
+            .get(handle)
+            .map(|program| program.capture_enabled())
+    }
+
+    /// How many uniform values `handle` has recorded, or `None` for an unknown handle.
+    pub fn shader_retained_uniforms(&self, handle: ShaderHandle) -> Option<usize> {
+        self.shaders
+            .get(handle)
+            .map(|program| program.retained_count())
     }
 
     // ---- textures --------------------------------------------------------

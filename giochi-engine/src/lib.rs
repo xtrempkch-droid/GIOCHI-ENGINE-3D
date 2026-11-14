@@ -44,6 +44,8 @@ pub mod assets;
 pub mod audio;
 pub mod core;
 pub mod error;
+#[cfg(feature = "hot_reload")]
+pub mod hot_reload;
 pub mod input;
 pub mod math;
 pub mod perf;

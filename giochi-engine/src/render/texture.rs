@@ -1,5 +1,7 @@
 //! Opaque texture handles and the registry that owns them.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use sdl2::image::LoadTexture;
@@ -62,6 +64,12 @@ impl TextureSize {
 #[repr(C)]
 pub struct TextureRegistry {
     registry: HandleRegistry<Texture>,
+    /// The file each texture was loaded from, when it came from one.
+    ///
+    /// Kept so [`TextureRegistry::reload`] can rebuild a texture without the caller
+    /// having to remember the path. A texture created from memory has no entry, and
+    /// reloading it is an error rather than a silent no-op.
+    sources: RefCell<HashMap<TextureHandle, String>>,
     creator: TextureCreator<WindowContext>,
     _reserved: [u32; 4],
 }
@@ -91,6 +99,7 @@ impl TextureRegistry {
 
         Self {
             registry: HandleRegistry::new(),
+            sources: RefCell::new(HashMap::new()),
             creator,
             _reserved: [0; 4],
         }
@@ -101,11 +110,22 @@ impl TextureRegistry {
     /// The registry does not cache by path — that is
     /// [`ResourceManager`](crate::assets::ResourceManager)'s job. Returns
     /// [`GiochiError::Asset`] when the file is missing or not a supported image.
+    ///
+    /// The path is **remembered**, which is what makes [`TextureRegistry::reload`]
+    /// possible without the caller keeping a table of its own.
     pub fn create_texture(&self, path: &str) -> Result<TextureHandle, GiochiError> {
         if path.trim().is_empty() {
             return Err(GiochiError::InvalidArgument("texture path is empty"));
         }
 
+        let texture = self.load_texture_file(path)?;
+        let handle = self.registry.insert(texture);
+        self.sources.borrow_mut().insert(handle, path.to_owned());
+        Ok(handle)
+    }
+
+    /// Decodes `path` into a texture, without registering it.
+    fn load_texture_file(&self, path: &str) -> Result<Texture, GiochiError> {
         let mut texture = self
             .creator
             .load_texture(path)
@@ -114,8 +134,47 @@ impl TextureRegistry {
         // Blend mode is set before the texture is wrapped in an `Rc`, because
         // `Rc` grants shared access only.
         texture.set_blend_mode(BlendMode::Blend);
+        Ok(texture)
+    }
 
-        Ok(self.registry.insert(texture))
+    /// The file `handle` was loaded from, or `None` for a generated texture.
+    pub fn source_path(&self, handle: TextureHandle) -> Option<String> {
+        self.sources.borrow().get(&handle).cloned()
+    }
+
+    /// Every live handle, in unspecified order.
+    ///
+    /// Used by the hot reloader, which has a path and needs the handles that came from
+    /// it — the reverse of what [`Self::source_path`] answers.
+    pub fn handles(&self) -> Vec<TextureHandle> {
+        self.registry.handles()
+    }
+
+    /// Replaces the pixels of `handle` with the file it was loaded from.
+    ///
+    /// The **handle stays the same**, so every sprite, batch and script reference keeps
+    /// working — that is the point of a reload. On failure the previous texture is
+    /// left untouched and the error is returned, which is what makes an editor save a
+    /// half-written file harmless.
+    ///
+    /// # Errors
+    ///
+    /// * [`GiochiError::InvalidArgument`] for a generated texture (no source path);
+    /// * [`GiochiError::Asset`] when the file is missing or no longer decodes;
+    /// * [`GiochiError::InvalidHandle`] when `handle` is unknown or currently resolved
+    ///   by the renderer (an `Rc` clone outlives the swap).
+    pub fn reload(&self, handle: TextureHandle) -> Result<(), GiochiError> {
+        let Some(path) = self.source_path(handle) else {
+            return Err(GiochiError::InvalidArgument(
+                "texture was not loaded from a file, so it cannot be reloaded",
+            ));
+        };
+
+        // Decode first, swap second: on a parse error nothing is touched.
+        let replacement = self.load_texture_file(&path)?;
+        self.registry
+            .with_mut(handle, |texture| *texture = replacement)
+            .ok_or(GiochiError::InvalidHandle(handle))
     }
 
     /// Creates a texture of `width`x`height` from raw RGBA8 pixels.
@@ -187,7 +246,11 @@ impl TextureRegistry {
     /// Returns `false` when the handle is `0` or was already destroyed; a double
     /// destroy is reported, never a silent success.
     pub fn destroy_texture(&self, handle: TextureHandle) -> bool {
-        self.registry.remove(handle)
+        let removed = self.registry.remove(handle);
+        if removed {
+            self.sources.borrow_mut().remove(&handle);
+        }
+        removed
     }
 
     /// Returns `true` when `handle` refers to a live texture.
@@ -273,6 +336,7 @@ impl TextureRegistry {
     /// Destroys every texture. Used on shutdown.
     pub fn clear(&self) {
         self.registry.clear();
+        self.sources.borrow_mut().clear();
     }
 }
 

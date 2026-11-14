@@ -96,6 +96,21 @@ impl<T> HandleRegistry<T> {
         self.entries.borrow().len()
     }
 
+    /// Swaps the value behind `handle`, keeping the handle.
+    ///
+    /// Returns the previous value, or `None` when the handle is unknown. This is what
+    /// hot reload needs: a game, a scene and a batch all hold the *handle*, so replacing
+    /// the resource under the same number is the only way to reload without asking every
+    /// holder to re-resolve it.
+    pub(crate) fn replace(&self, handle: Handle, value: T) -> Option<Rc<T>> {
+        if handle == NULL_HANDLE {
+            return None;
+        }
+        let mut entries = self.entries.borrow_mut();
+        let slot = entries.get_mut(&handle)?;
+        Some(std::mem::replace(slot, Rc::new(value)))
+    }
+
     /// Returns `true` when nothing is registered.
     pub(crate) fn is_empty(&self) -> bool {
         self.len() == 0

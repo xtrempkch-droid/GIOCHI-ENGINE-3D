@@ -90,6 +90,70 @@ impl ResourceManager {
         self.cached_handle(registry, path).is_some()
     }
 
+    /// The cached path for `handle`, if the manager loaded it.
+    ///
+    /// The reverse of [`ResourceManager::get_texture`], which the hot reloader needs:
+    /// the file watcher reports a path, and the renderer reloads by handle.
+    pub fn path_for_handle(&self, handle: TextureHandle) -> Option<String> {
+        if handle == 0 {
+            return None;
+        }
+        self.textures
+            .borrow()
+            .iter()
+            .find(|(_, cached)| **cached == handle)
+            .map(|(path, _)| path.clone())
+    }
+
+    /// Reloads the texture cached for `path` from disk, keeping its handle.
+    ///
+    /// Returns the handle on success. Returns [`GiochiError::InvalidArgument`] when the
+    /// path is not cached — the running game never loaded it, so there is nothing to
+    /// refresh and nothing to invent.
+    ///
+    /// A failed reload **evicts** the cache entry: the file on disk is now the truth,
+    /// and the next `load_texture` must report the real error rather than handing back a
+    /// handle to an image that no longer matches the file.
+    pub fn reload_texture(
+        &mut self,
+        registry: &TextureRegistry,
+        path: &str,
+    ) -> Result<TextureHandle, GiochiError> {
+        let Some(handle) = self.cached_handle(registry, path) else {
+            return Err(GiochiError::InvalidArgument(
+                "texture is not cached, so there is nothing to reload",
+            ));
+        };
+
+        match registry.reload(handle) {
+            Ok(()) => {
+                log::debug!("reloaded cached texture '{path}' -> {handle}");
+                Ok(handle)
+            }
+            Err(err) => {
+                self.textures.borrow_mut().remove(path);
+                Err(err)
+            }
+        }
+    }
+
+    /// Reloads the texture behind `handle` from the path it was cached under.
+    ///
+    /// # Errors
+    ///
+    /// [`GiochiError::InvalidHandle`] when no cached path maps to `handle`, plus
+    /// whatever [`ResourceManager::reload_texture`] reports.
+    pub fn reload_texture_handle(
+        &mut self,
+        registry: &TextureRegistry,
+        handle: TextureHandle,
+    ) -> Result<(), GiochiError> {
+        let Some(path) = self.path_for_handle(handle) else {
+            return Err(GiochiError::InvalidHandle(handle));
+        };
+        self.reload_texture(registry, &path).map(|_| ())
+    }
+
     /// Number of distinct paths currently cached.
     ///
     /// Counts entries whose texture may already have been destroyed; use

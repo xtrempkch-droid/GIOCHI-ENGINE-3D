@@ -95,6 +95,14 @@ impl<T> HandleRegistry<T> {
         self.entries.borrow().len()
     }
 
+    /// The live handles, in unspecified order.
+    ///
+    /// The hot reloader needs this: it has a changed *path* and has to find the handles
+    /// that came from it, which means walking the registry rather than resolving one.
+    pub(crate) fn handles(&self) -> Vec<Handle> {
+        self.entries.borrow().keys().copied().collect()
+    }
+
     /// Returns `true` when no entry is live.
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.borrow().is_empty()

@@ -51,12 +51,19 @@ mod app;
 mod caps;
 mod handles;
 mod keys;
+mod reload;
 mod values;
 
 use std::path::Path;
 
 use giochi_engine::GiochiError;
 use mlua::{Lua, Table};
+
+pub use crate::reload::{
+    generation as script_generation, poll_changes as poll_script_changes,
+    request_reload as request_script_reload, take_reload_request, unwatch as unwatch_script,
+    watch_dir as watch_script_dir, watch_script, watched_paths as watched_script_paths,
+};
 
 /// Semantic version of the binding, as declared in `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

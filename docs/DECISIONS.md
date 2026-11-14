@@ -1515,3 +1515,89 @@ Rust" design exists for — is no longer tied to the Lua binding's toolchain. An
 1.86–1.87 gets a working engine and cargo's clear "requires rustc 1.88" for the optional
 Lua crate. Anyone below 1.86 gets one clear message instead of a manifest parse error
 inside a dependency.
+
+## ADR-047 — Hot reload dispatches on the main thread; the watcher only forwards
+
+**Context.** `notify` 6 reports changes from its own thread, and every useful reaction to a
+change needs `&mut RenderContext` (or `&mut RenderContext3D`): textures, shaders and meshes
+are `Rc`-owned by registries that are not `Sync`, and SDL's canvas is not `Send`. Phase 19's
+plan described `watch(paths, cb)` with a callback, which reads as "call the callback from
+the watch thread". That cannot compile without `unsafe impl Send` on half the engine, and
+would be a data race even then.
+
+**Decision.** Three layers, each independently useful:
+
+1. `FileWatcher` — the `notify` backend, a `mpsc` channel, and a debounce that coalesces
+   per path. Its callback does nothing but `send`. `poll()` drains on the caller's thread.
+2. `AssetReloadRegistry` — which extensions reload and in what order.
+3. `HotReloader` — the two together; `Engine::run_frame` calls `poll_hot_reload()` once per
+   frame, **before** `update`, so the scene sees the reloaded asset in the same frame.
+
+The debounce is measured from the *last* event for a path (150 ms), so an editor's
+write/chmod/rename burst becomes one reload. `Delete`+`Create` inside a window is reported
+as `Modified`, which is what a save actually is.
+
+**A defect this exposed.** `notify` resolves the path it watches, so events arrive absolute
+while the caller usually passed a relative path. The first implementation filtered events
+against the relative string, which matched nothing: the watcher started, reported zero
+events, and looked healthy — the worst failure mode for a developer tool. `watch_files`/
+`watch_dirs` canonicalise on install, and the texture reload compares canonicalised paths
+(`same_file`) because game code keeps the relative string. Two regression tests pin it.
+
+**Consequences.** Reload latency is debounce + one frame (~166 ms at 60 fps), inside phase
+19's 200 ms budget. A host that owns its own loop can use `HotReloader` directly without
+`Engine`. Phase 24's `giochi_hot_reload_*` will drive this same object, not a second one.
+
+## ADR-048 — `EngineConfig` does not grow a `hot_reload` field until ABI v4
+
+**Context.** Phase 19's plan asks for `EngineConfig { hot_reload: bool }`. `EngineConfig` is
+`#[repr(C)]`, 112 bytes, with `_reserved: [u32; 8]` documented as "must be zero", and
+`tests/abi_layout.rs` locks that size. R3 forbids changing the C ABI before phase 24, and
+"reuse a reserved word" would break the contract's own promise to a C caller.
+
+**Decision.** Hot reload is configured by `HotReloadConfig` passed to
+`Engine::enable_hot_reload_with`, or by `HotReloadConfig::from_env()`. `EngineConfig` is
+untouched through phase 23. Phase 24c, which bumps `GIOCHI_ABI_VERSION` to 4 and is allowed
+to extend the struct, adds the flag and consumes one reserved word — documented there.
+
+The same reasoning applies to every other new type in phases 19–23: `#[repr(C)]` with
+`_reserved: [u32; N]` so the v4 header can expose it without a second layout, but nothing is
+*exported* to C before phase 24.
+
+## ADR-049 — Hot reload costs nothing when the feature is off, and a `bool` when it is idle
+
+**Context.** R2 requires that `cargo build --release` without features produce the phase 18
+binary, and that overhead while disabled stay under 5%.
+
+**Decision.** Every new module is behind a feature (`hot_reload`, and later `devtools`,
+`physics-2d`, `physics-3d`). Behind the feature, `Engine::hot_reload` is an `Option` that
+stays `None` unless the game asks, so an idle-but-compiled engine pays one `Option` check
+per frame. `HotReloader::poll` returns immediately when `enabled` is false, and
+`enabled` defaults to `cfg!(debug_assertions)` — a release build with the feature compiled
+in still does nothing until asked.
+
+Uniform capture for shader reload follows the same rule: `Program::set_capture` is off for
+the built-in shaders (the per-draw hot path) and on only for shaders loaded from files,
+which are the ones that reload.
+
+**Consequences.** `cargo build -p giochi-engine --release` without features was compared
+against the pre-phase binary by size; see `docs/PERF_LOG.md`, "After Phase 19".
+
+## ADR-050 — A Lua script reloads by restarting the VM, not by patching it
+
+**Context.** Phase 19 asks for `.lua` reload and permits the simpler option: "se complexo,
+só reinicia, documentar". Globals cannot be carried across a reload without a serialisation
+format, and there is no supported way to replace a running chunk's body.
+
+**Decision.** A `.lua` change is a *program* change. The watcher lives in
+`giochi-engine-lua` (it is the crate that knows what to do with a script), the scene polls
+it in `transition`, and stopping the loop records `request_script_reload()`. The host reads
+`take_reload_request()` after `app:run` and restarts with a fresh VM. Script globals do not
+survive; a script that needs state across a reload writes it to a file.
+
+The generation counter is `giochi_engine::hot_reload::script_epoch()`, so a host that also
+enables the engine's own hot reload sees one number, not two.
+
+**Consequences.** `giochi-demo lua <script>` restarts the script when it is saved (with the
+`hot_reload` feature). Deleting a script does **not** restart — there is nothing to run —
+and the generation is deliberately not advanced in that case.

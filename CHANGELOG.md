@@ -4,6 +4,35 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Não publicado]
+
+### Adicionado — Fase 19: hot reload
+
+- **`giochi-engine::hot_reload` (feature `hot_reload`)**: `FileWatcher` (notify 6 +
+  debounce de 150 ms por caminho), `AssetReloadRegistry` (extensão → prioridade) e
+  `HotReloader`, que drena as mudanças dentro do frame. O callback do `notify` só
+  encaminha para um canal: SDL e os registros de recurso não são `Send` (ADR-047).
+- **Textura recarregada no mesmo handle**: `RenderContext::reload_texture`,
+  `reload_texture_path` e `reload_cached_texture`; `TextureRegistry` passa a lembrar o
+  arquivo de origem de cada textura. Um arquivo que não decodifica mantém a imagem
+  anterior.
+- **`Engine::enable_hot_reload`** e `register_hot_reload_handler` (extensão → callback do
+  jogo), com `GIOCHI_HOT_RELOAD=0` para desligar e padrão `cfg!(debug_assertions)`.
+- **`giochi-engine-3d::hot_reload::ShaderReloader`**: recompila `.vert`/`.frag` e
+  recarrega `.obj` no mesmo handle. Um shader que não compila mantém o programa anterior e
+  reporta o log do driver. `Program::set_capture` preserva uniformes constantes entre
+  recargas.
+- **`giochi-engine-lua::watch_script`**: salvar um `.lua` reinicia a VM — globais não
+  sobrevivem (ADR-050). `giochi-demo lua <script>` reinicia sozinho.
+- `examples/hot_reload_demo.rs` e `docs/HOT_RELOAD.md`.
+
+### Corrigido
+
+- O watcher comparava eventos com o caminho **relativo** que o chamador passou, mas
+  `notify` resolve os caminhos e reporta absolutos: a vigilância iniciava, não reportava
+  nada e parecia saudável. Os caminhos são canonicalizados na instalação, e o reload de
+  textura compara formas canônicas. Dois testes de regressão fixam o comportamento.
+
 ## [0.4.0] - 2026-11-13
 
 Validated on an R35S (RK3326 / Cortex-A35, Mali-G31 Panfrost, KMSDRM, Buildroot 2024.02)

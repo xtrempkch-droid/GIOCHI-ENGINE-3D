@@ -31,6 +31,12 @@ SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" \
     run cargo test -p giochi-engine --features profiling --target x86_64-unknown-linux-gnu
 SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" \
     run cargo test -p giochi-engine-3d --features profiling --target x86_64-unknown-linux-gnu
+# Phase 19. `hot_reload` is off by default, so without this line the watcher, the texture
+# reload and the shader reload are only type-checked, never run — and the three
+# integration tests are skipped by `required-features`.
+SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" \
+    run cargo test --workspace --features giochi-engine/hot_reload,giochi-engine-3d/hot_reload,giochi-engine-lua/hot_reload,giochi-demo/hot_reload --target x86_64-unknown-linux-gnu
+run cargo clippy --workspace --all-targets --features giochi-engine/hot_reload,giochi-engine-3d/hot_reload,giochi-engine-lua/hot_reload,giochi-demo/hot_reload -- -D warnings
 # `laminar` and `mdns` are optional, so a default-feature build never compiles or tests
 # their code outside the aarch64 cross-check. Test them here, where the loopback tests
 # can actually run.

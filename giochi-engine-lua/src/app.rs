@@ -248,6 +248,12 @@ pub(crate) struct LuaScene {
     /// Set when a callback raised, so the loop stops instead of spinning on a script
     /// that is now broken.
     failed: bool,
+    /// The script generation this scene was built for.
+    ///
+    /// A `.lua` file cannot be patched in place: the running body is the program. When
+    /// the generation moves, the loop stops so the host can build a new VM and run the
+    /// edited file (see `crate::reload`).
+    generation: u32,
 }
 
 impl LuaScene {
@@ -257,6 +263,7 @@ impl LuaScene {
             update,
             render,
             failed: false,
+            generation: crate::reload::generation(),
         }
     }
 
@@ -310,10 +317,20 @@ impl Scene for LuaScene {
         //
         // `giochi.quit()` also stops it; `app:run` clears the flag before the next run.
         if self.failed || take_quit_request() {
-            SceneTransition::Quit
-        } else {
-            SceneTransition::Continue
+            return SceneTransition::Quit;
         }
+
+        // Draining the script watcher here is what makes a reload take effect on the
+        // next frame instead of only after the window closes. `??` is not used because
+        // the generation only ever moves forward.
+        let generation = crate::reload::poll_changes();
+        if generation != self.generation {
+            crate::reload::request_reload();
+            log::info!("script changed; stopping the loop to reload");
+            return SceneTransition::Quit;
+        }
+
+        SceneTransition::Continue
     }
 }
 

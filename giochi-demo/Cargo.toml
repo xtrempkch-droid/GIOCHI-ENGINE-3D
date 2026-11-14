@@ -22,6 +22,9 @@ sdl2-bundled = ["giochi-engine/sdl2-bundled", "giochi-engine-lua/sdl2-bundled"]
 sdl2-system = ["giochi-engine/sdl2-system", "giochi-engine-lua/sdl2-system"]
 # Encaminha a feature de profiling do core para que o exemplo possa usá-la.
 profiling = ["giochi-engine/profiling"]
+# Fase 19: reiniciar o script Lua quando o arquivo muda. Sem ela o demo roda igual,
+# só não recarrega.
+hot_reload = ["giochi-engine-lua/hot_reload"]
 
 [[example]]
 name = "profiler_demo"

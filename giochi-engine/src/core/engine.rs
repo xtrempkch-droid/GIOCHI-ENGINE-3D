@@ -23,6 +23,8 @@ use crate::audio::AudioSystem;
 use crate::core::game_loop::{GameLoop, MAX_FRAME_TIME};
 use crate::core::time::{FrameClock, Time};
 use crate::error::GiochiError;
+#[cfg(feature = "hot_reload")]
+use crate::hot_reload::{HotReloadConfig, HotReloadEvent, HotReloader};
 use crate::input::keyboard::KEY_F1;
 use crate::input::Input;
 use crate::math::Color;
@@ -32,7 +34,23 @@ use crate::platform::{quit_signal, Platform};
 use crate::render::RenderContext;
 use crate::scene::{Scene, SceneManager, SceneTransition};
 
+#[cfg(feature = "hot_reload")]
+use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+/// A game's own reaction to a changed file, registered with
+/// [`Engine::register_hot_reload_handler`].
+///
+/// The callback receives the renderer and the path, and returns whether it applied the
+/// change. Returning `false` leaves the event counted as a failure in
+/// [`crate::hot_reload::HotReloadStats`], which is how a game notices that its custom
+/// format stopped parsing.
+///
+/// It is not `Send`: it runs on the engine's thread, inside the frame, not on the watch
+/// thread. See the [`crate::hot_reload`] module docs for why that is the only sound
+/// design.
+#[cfg(feature = "hot_reload")]
+pub type HotReloadHandler = Box<dyn FnMut(&mut RenderContext, &Path) -> bool>;
 
 /// Capacity of [`EngineConfig::title`], in bytes, including the trailing NUL.
 pub const ENGINE_TITLE_CAPACITY: usize = 64;
@@ -224,6 +242,15 @@ pub struct Engine {
     frame_limit: Option<u64>,
     profiler: Profiler,
     overlay: DebugOverlay,
+    /// Watches assets when the `hot_reload` feature is on and the game asked for it.
+    ///
+    /// `Option` rather than a flag inside a live reloader so a build that never enables
+    /// it allocates no `inotify` state and the per-frame cost is one `None` check.
+    #[cfg(feature = "hot_reload")]
+    hot_reload: Option<HotReloader>,
+    /// Per-extension callbacks a game registered, checked before the built-in ones.
+    #[cfg(feature = "hot_reload")]
+    hot_reload_handlers: Vec<(String, HotReloadHandler)>,
     _reserved: [u32; 4],
 }
 
@@ -315,6 +342,10 @@ impl Engine {
             frame_limit: None,
             profiler: Profiler::new(),
             overlay: DebugOverlay::new(),
+            #[cfg(feature = "hot_reload")]
+            hot_reload: None,
+            #[cfg(feature = "hot_reload")]
+            hot_reload_handlers: Vec::new(),
             _reserved: [0; 4],
         })
     }
@@ -450,6 +481,10 @@ impl Engine {
         if self.input.key_pressed(KEY_F1) {
             self.overlay.toggle();
         }
+        // Before `update`, so the scene sees the reloaded asset on the same frame the
+        // reload happened and a script that is about to restart has already left.
+        #[cfg(feature = "hot_reload")]
+        self.apply_hot_reload();
         for event in &events {
             self.game_loop.handle_quit_signal(quit_signal(event));
         }
@@ -701,6 +736,232 @@ impl Engine {
     /// The fixed-timestep policy.
     pub fn game_loop(&self) -> &GameLoop {
         &self.game_loop
+    }
+
+    /// The resource cache used by the renderer, mutably.
+    ///
+    /// Note that [`ResourceManager`]'s own reload methods take the registry as an
+    /// argument, and calling them through this accessor while also borrowing
+    /// [`Engine::render`] does not type-check. Use
+    /// [`RenderContext::reload_cached_texture`] instead; see `docs/HOT_RELOAD.md`.
+    pub fn resources_mut(&mut self) -> &mut ResourceManager {
+        self.render.resources_mut()
+    }
+}
+
+/// Hot reload: watching, polling and dispatch.
+///
+/// All of it is behind the `hot_reload` feature. Without it these methods do not exist,
+/// so a caller cannot depend on the module by accident.
+#[cfg(feature = "hot_reload")]
+impl Engine {
+    /// Starts watching `paths` for changes, using [`HotReloadConfig::from_env`].
+    ///
+    /// A path that names a directory is watched recursively; a path that names a file is
+    /// watched individually (through its parent, so an editor's rename-over-original
+    /// save is still seen). Returns how many paths were newly watched.
+    ///
+    /// Calling it twice replaces the previous set: the second call is "watch these now",
+    /// not "also watch these".
+    ///
+    /// ```no_run
+    /// # use giochi_engine::{Engine, EngineConfig};
+    /// # use std::path::PathBuf;
+    /// # fn example(engine: &mut Engine) -> Result<(), giochi_engine::GiochiError> {
+    /// engine.enable_hot_reload(&[PathBuf::from("assets")])?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// [`GiochiError::Asset`] when the watch backend cannot be started. A configuration
+    /// that disables hot reload returns `Ok(0)` and watches nothing — the call is a
+    /// no-op rather than an error, so a game can enable it unconditionally in debug and
+    /// let `GIOCHI_HOT_RELOAD=0` turn it off.
+    pub fn enable_hot_reload(&mut self, paths: &[PathBuf]) -> Result<usize, GiochiError> {
+        self.enable_hot_reload_with(HotReloadConfig::from_env(), paths)
+    }
+
+    /// Starts watching `paths` with an explicit configuration.
+    ///
+    /// # Errors
+    ///
+    /// [`GiochiError::Asset`] when the watch backend cannot be started.
+    pub fn enable_hot_reload_with(
+        &mut self,
+        config: HotReloadConfig,
+        paths: &[PathBuf],
+    ) -> Result<usize, GiochiError> {
+        let mut reloader = HotReloader::new(config);
+        let mut watched = 0usize;
+        let mut files = Vec::new();
+        let mut dirs = Vec::new();
+        for path in paths {
+            if path.is_dir() {
+                dirs.push(path.clone());
+            } else {
+                files.push(path.clone());
+            }
+        }
+        if !dirs.is_empty() {
+            watched += reloader.watch_dirs(&dirs)?;
+        }
+        if !files.is_empty() {
+            watched += reloader.watch_files(&files)?;
+        }
+        log::info!(
+            "hot reload {}: {watched} path(s) watched",
+            if reloader.is_enabled() { "on" } else { "off" }
+        );
+        self.hot_reload = Some(reloader);
+        Ok(watched)
+    }
+
+    /// Stops watching and drops the reloader.
+    pub fn disable_hot_reload(&mut self) {
+        if self.hot_reload.take().is_some() {
+            log::info!("hot reload disabled");
+        }
+    }
+
+    /// Whether a reloader exists and is watching.
+    pub fn is_hot_reload_enabled(&self) -> bool {
+        self.hot_reload
+            .as_ref()
+            .is_some_and(HotReloader::is_enabled)
+    }
+
+    /// The reloader, for its registry and its counters.
+    pub fn hot_reload(&self) -> Option<&HotReloader> {
+        self.hot_reload.as_ref()
+    }
+
+    /// The reloader, mutably.
+    pub fn hot_reload_mut(&mut self) -> Option<&mut HotReloader> {
+        self.hot_reload.as_mut()
+    }
+
+    /// Registers a callback for one extension, replacing the built-in behaviour.
+    ///
+    /// The extension is lower-cased and a leading dot is optional. Returns `false` for an
+    /// empty extension. A handler for `"png"` takes over texture reloading, which is what
+    /// a game does when its "texture" is a nine-slice definition that has to be re-sliced.
+    ///
+    /// Handlers run inside the frame, on the engine's thread, before the built-in path,
+    /// and only for events whose extension matches.
+    pub fn register_hot_reload_handler(
+        &mut self,
+        extension: &str,
+        handler: HotReloadHandler,
+    ) -> bool {
+        let extension = extension
+            .trim()
+            .trim_start_matches('.')
+            .to_ascii_lowercase();
+        if extension.is_empty() {
+            return false;
+        }
+        self.hot_reload_handlers
+            .retain(|(known, _)| known != &extension);
+        self.hot_reload_handlers.push((extension, handler));
+        true
+    }
+
+    /// Polls the watcher and applies what settled. Returns how many events applied.
+    ///
+    /// The engine already calls this once per frame; calling it again mid-frame is
+    /// harmless and mostly useful to a host that drives [`Engine::step`] itself.
+    pub fn poll_hot_reload(&mut self) -> usize {
+        self.apply_hot_reload()
+    }
+
+    /// Shared implementation of the per-frame hook and [`Self::poll_hot_reload`].
+    fn apply_hot_reload(&mut self) -> usize {
+        // Take the events out first: `poll` needs `&mut` on the reloader, and the
+        // dispatch below needs `&mut self.render`, so the two borrows must not overlap.
+        let events = match self.hot_reload.as_mut() {
+            Some(reloader) => reloader.poll(),
+            None => return 0,
+        };
+        if events.is_empty() {
+            return 0;
+        }
+
+        let mut applied = 0u64;
+        let mut failed = 0u64;
+        for event in events {
+            if !self.apply_hot_reload_event(&event) {
+                failed += 1;
+            } else {
+                applied += 1;
+            }
+        }
+
+        if let Some(reloader) = self.hot_reload.as_mut() {
+            reloader.note_applied(applied);
+            reloader.note_failed(failed);
+        }
+        (applied + failed) as usize
+    }
+
+    /// Applies one event, through a registered handler or the built-in path.
+    fn apply_hot_reload_event(&mut self, event: &HotReloadEvent) -> bool {
+        let extension = event
+            .extension()
+            .map(str::to_ascii_lowercase)
+            .unwrap_or_default();
+
+        // The game's handler wins: it knows what its format means.
+        if let Some((_, handler)) = self
+            .hot_reload_handlers
+            .iter_mut()
+            .find(|(known, _)| known == &extension)
+        {
+            let ok = handler(&mut self.render, event.path());
+            if ok {
+                log::info!("reloaded '{}' (custom handler)", event.path().display());
+            } else {
+                log::warn!(
+                    "custom reload handler for .{extension} failed on '{}'",
+                    event.path().display()
+                );
+            }
+            return ok;
+        }
+
+        match extension.as_str() {
+            // A generated texture has no source and a deleted file cannot be decoded;
+            // both are reported by the texture path itself and neither is fatal.
+            "png" | "bmp" | "jpg" | "jpeg" => {
+                let reloaded = self.render.reload_texture_path(event.path());
+                if reloaded == 0 {
+                    log::debug!(
+                        "'{}' is not loaded by this scene; nothing to reload",
+                        event.path().display()
+                    );
+                }
+                reloaded > 0
+            }
+            // A script is the program, not a resource: the Lua binding restarts its VM
+            // when the epoch moves. Bumping it is all the engine can do here.
+            "lua" => {
+                if event.is_deleted() {
+                    log::warn!(
+                        "'{}' was deleted; the running script keeps its last version",
+                        event.path().display()
+                    );
+                    return false;
+                }
+                let epoch = crate::hot_reload::bump_script_epoch();
+                log::info!(
+                    "script '{}' changed; script generation is now {epoch}",
+                    event.path().display()
+                );
+                true
+            }
+            _ => false,
+        }
     }
 }
 
