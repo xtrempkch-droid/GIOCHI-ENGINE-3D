@@ -647,6 +647,8 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             if quit_signal(event) != QuitSignal::None {
                 finish(
                     &mut render,
+                    #[cfg(feature = "hud")]
+                    &mut hud,
                     &mesh_handles,
                     &[shader, instanced_shader],
                     frames,
@@ -948,6 +950,8 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             if frames >= limit {
                 finish(
                     &mut render,
+                    #[cfg(feature = "hud")]
+                    &mut hud,
                     &mesh_handles,
                     &[shader, instanced_shader],
                     frames,
@@ -995,6 +999,7 @@ fn mouse_delta(input: &Input) -> (f32, f32) {
 
 fn finish(
     render: &mut RenderContext3D,
+    #[cfg(feature = "hud")] hud: &mut Option<GlesHud>,
     meshes: &[u64],
     shaders: &[u64],
     frames: u64,
@@ -1005,6 +1010,16 @@ fn finish(
         "{frames} frames rendered, no GL error (wireframe {wireframe}); \
          {crates_drawn} low crates on the last frame"
     );
+
+    // The HUD owns a program, two buffers and egui's atlas. `destroy` needs the context,
+    // so it cannot be a `Drop`; the example is the documentation for how to use it, and a
+    // leaked GL object here would be copied by every reader.
+    #[cfg(feature = "hud")]
+    if let Some(hud) = hud.take() {
+        let textures = hud.texture_count();
+        hud.destroy(render.glow());
+        println!("hud released: program, buffers and {textures} textures");
+    }
 
     for mesh in meshes {
         render.destroy_mesh(*mesh);
