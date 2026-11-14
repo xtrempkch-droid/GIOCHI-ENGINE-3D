@@ -12,6 +12,34 @@ Fases 0–18 concluídas. O Growth Pack começou em 2026-11-14.
 | 22 — Particles | **concluída** (2026-11-14) | 12 testes 2D, 4 em 3D e aceitação de render: 1.000 partículas 2D → 1 draw call, tint validado por pixel; demos 2D/3D e `mini_fps --particles` executados por 120 frames; gates x86_64, docs e check ARM64 aprovados |
 | 23 — Animation | **concluída** (2026-11-14) | 13 testes de unidade em `animation`, `animation_render` (a câmara escolhe o frame certo do spritesheet, pixel a pixel), `perf_regression` com 256 tweens + 1 spritesheet a 0 alocações/frame; `animation_demo` em 120 frames; gates x86_64, features, docs e check ARM64 aprovados |
 | 24 — Physics + C ABI | **concluída com pendências** (2026-11-14) | 9 testes de unidade em `physics` 2D + 8 em 3D, 5 de integração (`tests/physics_2d.rs`), `physics_2d_demo` 1800 frames com a torre a `0.000` de velocidade, `physics_3d_demo` 420 frames com o jogador bloqueado pela parede e apoiado no chão; C ABI **v5** com 9 símbolos `giochi_physics_*` e testes C + Python a passar; gates x86_64, features, docs e ARM64 aprovados |
+| 25 — Release 0.5.0 | **concluída** (2026-11-14) | `check-version.sh` consistente em 0.5.0 (7 referências), `cargo build --release --workspace --examples`, artefacto empacotado e `verify-release-artifact.sh` verde: binários, `giochi.h` e `libgiochi` concordam em 0.5.0, `c_smoke` reporta `abi 6, engine 0.5.0`, demo + `mini_game.lua` correm com e sem PNGs |
+
+### Gates da Fase 25 — release 0.5.0
+
+- [x] `scripts/check-version.sh` — 0.5.0 consistente em `Cargo.toml`, nos seis membros,
+      em `docs/C_ABI_CONTRACT.md`, `docs/LUA_BINDING.md`, `README.md`, `giochi.h`,
+      `CHANGELOG.md` e `Cargo.lock`
+- [x] `cargo fmt --all -- --check`
+- [x] `cargo clippy --workspace --all-targets --features physics-2d,physics-3d,hud,devtools,hot_reload -- -D warnings`
+- [x] `cargo test --workspace` e com a matriz de features — 0 falhas
+- [x] `cargo doc --workspace --no-deps` — mantém o warning pré-existente em
+      `giochi-engine-3d/src/render3d/texture.rs:65`
+- [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
+- [x] `cargo build --release --workspace` e `--workspace --examples`
+- [x] `scripts/ffi-smoke.sh` — `c_smoke` e `python_smoke` a passar com `abi 6`
+- [x] `scripts/verify-release-artifact.sh` — arquivo de 19 MB verificado: `giochi-demo
+      --verify`, `mini_game.lua --auto --frames 60`, `c_smoke`, header e biblioteca de
+      acordo em 0.5.0, e tudo outra vez com os PNGs apagados
+
+### Entregue na Fase 25
+
+- Versão 0.5.0 em todo o lado: `Cargo.toml` do workspace, `VERSION_MINOR` do engine, os
+  seis membros, o exemplo `0x0005_0000` no comentário do header, README, `C_ABI_CONTRACT`,
+  `LUA_BINDING` e o `CHANGELOG` (a secção `[Não publicado]` passou a `[0.5.0]`).
+- `/dist/` e os `giochi-engine-*.tar.gz` passam a estar no `.gitignore`: são saída do
+  empacotamento, não fonte.
+- O artefacto é o que o workflow de release produz, verificado localmente antes de existir
+  um rascunho de release.
 
 ### Gates da Fase 24
 

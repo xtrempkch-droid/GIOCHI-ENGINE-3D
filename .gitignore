@@ -6,3 +6,7 @@
 .idea/
 .vscode/
 __pycache__/
+
+# Release packaging output (scripts/verify-release-artifact.sh, the release workflow).
+/dist/
+/giochi-engine-*.tar.gz

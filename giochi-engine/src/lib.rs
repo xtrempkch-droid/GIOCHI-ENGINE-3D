@@ -69,7 +69,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Major component of [`VERSION`].
 pub const VERSION_MAJOR: u32 = 0;
 /// Minor component of [`VERSION`].
-pub const VERSION_MINOR: u32 = 4;
+pub const VERSION_MINOR: u32 = 5;
 /// Patch component of [`VERSION`].
 pub const VERSION_PATCH: u32 = 0;
 
@@ -132,6 +132,6 @@ mod tests {
 
     #[test]
     fn version_is_packed_as_major_minor_patch() {
-        assert_eq!(version_packed(), 0x00_04_00);
+        assert_eq!(version_packed(), 0x00_05_00);
     }
 }

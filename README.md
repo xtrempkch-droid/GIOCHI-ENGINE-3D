@@ -10,7 +10,8 @@ language through a C ABI. **2D** through `sdl2::render`, and **3D** through Open
 over EGL in a separate crate. Primary target: `aarch64-unknown-linux-gnu` (Linux consoles
 with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 
-> **Status: 0.4.0.** Phases 0–18, plus the networking layer and ABI v4. The workspace,
+> **Status: 0.5.0.** Phases 0–24: the Growth Pack (hot reload, devtools, UI, particles,
+> animation, physics) plus the networking layer, and **C ABI v6**. The workspace,
 > the SDL2 platform layer, the fixed-timestep loop, the 2D renderer with opaque texture
 > handles, keyboard/mouse/gamepad input, the asset cache, the audio mixer, the scene
 > stack, the `Engine` facade, the **C ABI** (`libgiochi.so` / `libgiochi.a` + generated
@@ -22,7 +23,9 @@ with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 > discovery) and the **profiler** (frame statistics, `F1` overlay), with CI, release
 > packaging and the guides. Validated on a Rockchip PX30 (Mali-G31) through 0.3.1, and
 > 0.4.0 — networking, textures and arbitrary OBJ models — on an **R35S (RK3326 /
-> Cortex-A35, Mali-G31 Panfrost, KMSDRM)**. See [PROGRESS.md](PROGRESS.md).
+> Cortex-A35, Mali-G31 Panfrost, KMSDRM)**. 0.5.0 adds the Growth Pack: hot reload,
+> devtools, the widget UI and the 3D HUD, particles, animation, Rapier physics and
+> **C ABI v6**. See [PROGRESS.md](PROGRESS.md).
 
 
 ## Why "C-shaped" Rust?

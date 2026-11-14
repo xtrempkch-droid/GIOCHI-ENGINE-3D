@@ -4,7 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Não publicado]
+## [0.5.0] — 2026-11-14
+
+O Growth Pack: reload, ferramentas, UI, partículas, animação e física — cada fase aditiva,
+com os seus gates, guias e um exemplo executável. **C ABI v6.**
+
+
 
 ### Adicionado — HUD sobre 3D (pendência da Fase 21)
 
