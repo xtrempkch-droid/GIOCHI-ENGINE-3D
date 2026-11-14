@@ -22,6 +22,8 @@ use crate::assets::ResourceManager;
 use crate::audio::AudioSystem;
 use crate::core::game_loop::{GameLoop, MAX_FRAME_TIME};
 use crate::core::time::{FrameClock, Time};
+#[cfg(feature = "devtools")]
+use crate::devtools::DevTools;
 use crate::error::GiochiError;
 #[cfg(feature = "hot_reload")]
 use crate::hot_reload::{HotReloadConfig, HotReloadEvent, HotReloader};
@@ -251,6 +253,14 @@ pub struct Engine {
     /// Per-extension callbacks a game registered, checked before the built-in ones.
     #[cfg(feature = "hot_reload")]
     hot_reload_handlers: Vec<(String, HotReloadHandler)>,
+    /// Console, debug draw and the expanded overlay.
+    #[cfg(feature = "devtools")]
+    devtools: DevTools,
+    /// Multiplier applied to the frame time before the fixed-step accumulator.
+    ///
+    /// 1.0 unless `time_scale` changed it. Kept here rather than in `DevTools` so a build
+    /// without the feature still has the field and the same behaviour.
+    time_scale: f32,
     _reserved: [u32; 4],
 }
 
@@ -346,6 +356,9 @@ impl Engine {
             hot_reload: None,
             #[cfg(feature = "hot_reload")]
             hot_reload_handlers: Vec::new(),
+            #[cfg(feature = "devtools")]
+            devtools: DevTools::new(),
+            time_scale: 1.0,
             _reserved: [0; 4],
         })
     }
@@ -477,6 +490,10 @@ impl Engine {
         let _ = self.audio.take_profile_time_ns();
 
         let events = self.platform.poll_events();
+        // The devtools see every event first, and the ones they consume never reach
+        // `Input`: typing `w` in the console must not walk the player forward.
+        #[cfg(feature = "devtools")]
+        let events = self.filter_devtools_events(events);
         self.input.update(&events);
         if self.input.key_pressed(KEY_F1) {
             self.overlay.toggle();
@@ -490,7 +507,7 @@ impl Engine {
         }
 
         self.profiler.begin_scope("update");
-        let steps = self.game_loop.advance(frame_time);
+        let steps = self.game_loop.advance(frame_time * self.time_scale);
         for _ in 0..steps {
             self.time.advance(self.game_loop.fixed_timestep());
             let time = self.time;
@@ -523,8 +540,24 @@ impl Engine {
             Duration::from_secs_f32(frame_time),
             self.render.frame_counters(),
         );
+        // After `end_frame`, for the same reason as the overlay: a debug tool must not
+        // inflate the numbers it reports. The tools run before the overlay so the panel
+        // stays on top of the debug geometry.
+        #[cfg(feature = "devtools")]
+        self.draw_devtools(frame_time);
         // After `end_frame`, so the panel's own texture copy is excluded from the
         // numbers it shows; the next frame resets the counters before the scene draws.
+        #[cfg(feature = "devtools")]
+        {
+            // A closure, not a `Vec`: the panel refreshes at 1 Hz and building the lines
+            // on the other 59 frames is nine allocations each, which the frame-budget
+            // test reported as a regression the moment this was a `Vec`.
+            let devtools = &self.devtools;
+            let mut extra = || devtools.overlay_lines();
+            self.overlay
+                .draw_with(&mut self.render, &self.profiler, &mut extra);
+        }
+        #[cfg(not(feature = "devtools"))]
         self.overlay.draw(&mut self.render, &self.profiler);
 
         self.render.present();
@@ -738,6 +771,30 @@ impl Engine {
         &self.game_loop
     }
 
+    /// The simulation speed multiplier.
+    ///
+    /// `1.0` is real time, `0.0` pauses the fixed-step accumulator (the world stops but
+    /// the window keeps rendering, which is what a debugger's pause looks like), and
+    /// values above 1 fast-forward. The console's `time_scale` command sets it.
+    pub fn time_scale(&self) -> f32 {
+        self.time_scale
+    }
+
+    /// Sets the simulation speed multiplier, clamped to the same range the console uses.
+    ///
+    /// With `devtools` compiled in this and the console's `time_scale` are the same
+    /// value: setting one is visible in the other.
+    pub fn set_time_scale(&mut self, scale: f32) {
+        let scale = if scale.is_finite() {
+            scale.clamp(0.0, crate::core::engine::MAX_TIME_SCALE)
+        } else {
+            1.0
+        };
+        #[cfg(feature = "devtools")]
+        self.devtools.set_time_scale(scale);
+        self.time_scale = scale;
+    }
+
     /// The resource cache used by the renderer, mutably.
     ///
     /// Note that [`ResourceManager`]'s own reload methods take the registry as an
@@ -746,6 +803,84 @@ impl Engine {
     /// [`RenderContext::reload_cached_texture`] instead; see `docs/HOT_RELOAD.md`.
     pub fn resources_mut(&mut self) -> &mut ResourceManager {
         self.render.resources_mut()
+    }
+}
+
+/// Developer tools: input filtering, drawing and the expanded overlay.
+#[cfg(feature = "devtools")]
+impl Engine {
+    /// The devtools state.
+    pub fn devtools(&self) -> &DevTools {
+        &self.devtools
+    }
+
+    /// The devtools state, mutably — where a game registers commands and reads flags.
+    pub fn devtools_mut(&mut self) -> &mut DevTools {
+        &mut self.devtools
+    }
+
+    /// Feeds the frame's events to the devtools and returns what the game may see.
+    ///
+    /// Only allocates when the console is open: with it closed there is nothing to
+    /// consume, and the original vector is handed back untouched.
+    fn filter_devtools_events(
+        &mut self,
+        events: Vec<sdl2::event::Event>,
+    ) -> Vec<sdl2::event::Event> {
+        // Walk until something is consumed. A closed console consumes nothing except the
+        // two toggles, so the common frame ends here with no allocation — which is the
+        // whole R2 story for this feature.
+        let first_consumed = events
+            .iter()
+            .position(|event| self.devtools.handle_event(event));
+
+        let Some(start) = first_consumed else {
+            return events;
+        };
+
+        let mut kept = Vec::with_capacity(events.len().saturating_sub(1));
+        kept.extend_from_slice(&events[..start]);
+        for event in &events[start + 1..] {
+            if !self.devtools.handle_event(event) {
+                kept.push(event.clone());
+            }
+        }
+        log::trace!("devtools consumed {} event(s)", events.len() - kept.len());
+        kept
+    }
+
+    /// Applies the console's requests and draws the tools into the frame.
+    fn draw_devtools(&mut self, frame_time: f32) {
+        if self.devtools.take_shader_reload_request() {
+            // The 2D renderer has no shaders. Saying so is better than a silent no-op:
+            // a `reload_shaders` that appears to work and does nothing is a trap.
+            let message = if cfg!(feature = "hot_reload") {
+                "reload_shaders: the 2D renderer has no shaders; \
+                 register a handler for your own assets"
+            } else {
+                "reload_shaders: no shader support in this build"
+            };
+            self.devtools
+                .console_mut()
+                .push_line(crate::devtools::LineKind::Notice, message);
+        }
+
+        self.devtools.set_frame_stats(
+            self.profiler.snapshot(),
+            self.profiler.summary(),
+            frame_time,
+        );
+        #[cfg(feature = "hot_reload")]
+        if let Some(reloader) = self.hot_reload.as_ref() {
+            self.devtools
+                .set_hot_reload_state(reloader.is_enabled(), reloader.stats().applied);
+        }
+
+        self.devtools.draw(&mut self.render);
+
+        // A console `time_scale` must reach the loop: the tools own the value the command
+        // wrote, and the engine owns the one the accumulator uses.
+        self.time_scale = self.devtools.time_scale();
     }
 }
 
@@ -970,11 +1105,19 @@ impl Drop for Engine {
         // Explicit teardown in dependency order; no RAII promise is made to the
         // caller, but the engine itself must not leak handles.
         self.scenes.clear();
+        #[cfg(feature = "devtools")]
+        self.devtools.release(&mut self.render);
         self.audio.clear();
         self.render.clear_resource_cache();
         self.render.textures().clear();
     }
 }
+
+/// Largest simulation multiplier accepted by [`Engine::set_time_scale`].
+///
+/// Duplicated from `devtools::MAX_TIME_SCALE` (which is behind a feature) so the clamp is
+/// the same in every build; the two values are asserted equal in the devtools tests.
+pub const MAX_TIME_SCALE: f32 = 8.0;
 
 /// Upper bound on scene transitions per run before the engine reports a bug.
 const MAX_TRANSITIONS: u32 = 10_000;

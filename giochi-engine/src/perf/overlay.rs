@@ -117,6 +117,21 @@ impl DebugOverlay {
     /// Errors from texture creation or drawing are logged and the frame continues: a
     /// developer tool must never take the game down.
     pub fn draw(&mut self, render: &mut RenderContext, profiler: &Profiler) {
+        self.draw_with(render, profiler, &mut Vec::new);
+    }
+
+    /// Draws the panel with `extra` lines appended (phase 20's expanded overlay).
+    ///
+    /// `extra` is a **builder**, not a slice, and it is called only when the panel actually
+    /// refreshes (1 Hz). Building those lines on every frame cost nine allocations per
+    /// empty frame, which the frame-budget regression test caught — and that test exists
+    /// precisely so a debug tool cannot quietly become a per-frame cost.
+    pub fn draw_with(
+        &mut self,
+        render: &mut RenderContext,
+        profiler: &Profiler,
+        extra: &mut dyn FnMut() -> Vec<String>,
+    ) {
         if !self.visible || !cfg!(feature = "profiling") {
             return;
         }
@@ -135,7 +150,12 @@ impl DebugOverlay {
         // the upload is four times smaller — which is the difference between fitting
         // the 2 % profiling budget and not (measured on the Mali-G31, ADR-042).
         let scale = if render.size().0 < 800 { 1 } else { 2 };
-        let lines = lines(stats, summary);
+        let mut lines = lines(stats, summary);
+        let extra = extra();
+        if !extra.is_empty() {
+            lines.push(String::new());
+            lines.extend(extra);
+        }
         let Some(text) = rasterize(&lines, scale, BACKGROUND, FOREGROUND) else {
             return;
         };

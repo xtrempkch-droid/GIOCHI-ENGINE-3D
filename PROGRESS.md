@@ -7,11 +7,41 @@ Fases 0–18 concluídas. O Growth Pack começou em 2026-11-14.
 | Fase | Estado | Verificado |
 |---|---|---|
 | 19 — Hot Reload | **concluída** (2026-11-14) | 31 testes de unidade em `hot_reload`, `hot_reload_render` (textura no mesmo handle, pixel a pixel), `hot_reload_3d` (shader e malha, pixel a pixel), `hot_reload_lua` (geração avança, deleção não); demo com 14 recargas aplicadas |
-| 20 — Debug Tools | pendente | — |
+| 20 — Debug Tools | **concluída** (2026-11-14) | 69 testes de unidade em `devtools`, 6 de `c_shape`, `devtools_render` (consola desenha por pixels e fechada não desenha nada); `perf_regression` 0 alocações/frame com a feature compilada e a consola fechada |
 | 21 — UI System | pendente | — |
 | 22 — Particles | pendente | — |
 | 23 — Animation | pendente | — |
 | 24 — Physics + C ABI v4 | pendente | — |
+
+### Gates da Fase 20
+
+- [x] `cargo fmt --all -- --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo clippy --workspace --all-targets --features devtools,hot_reload -- -D warnings`
+- [x] `cargo test --workspace` e `--features devtools,hot_reload` (0 falhas)
+- [x] `cargo doc --workspace --no-deps`
+- [x] `cargo build --release` sem features: `libgiochi.so` 911 032 B, 97 símbolos `giochi_*`
+- [x] `cargo run -p giochi-engine --example devtools_demo --features devtools -- --frames 300`
+- [x] `cargo check --workspace --target aarch64-unknown-linux-gnu --features devtools,hot_reload`
+      → ok (`egui` 0.32.3 não traz dependência nativa; MSRV 1.85, abaixo do piso de 1.86)
+
+### Entregue na Fase 20
+
+- `giochi-engine/src/devtools/`: `console.rs` (scrollback 512, histórico 100, `Tab`,
+  `Up`/`Down`), `commands.rs` (10 embutidos, `register` substitui), `debug_draw.rs`
+  (2D + AABB/ray/grid 3D projetados), `overlay_extra.rs`, `mod.rs` (`DevTools`).
+- `giochi-engine/src/ui/egui_integration.rs`: backend egui sobre `SDL_RenderGeometry`
+  (ADR-052), tradução de eventos com flag de consumido e texturas no registry da engine.
+- `Engine`: `devtools()`/`devtools_mut()`, `set_time_scale`/`time_scale`; os eventos
+  consumidos pela consola não chegam ao `Input`.
+- `examples/devtools_demo.rs`, `docs/DEVTOOLS.md`, ADR-052 a ADR-054.
+
+### Defeito encontrado e corrigido
+
+O `perf_regression` (gate da Fase 18) reprovou a primeira versão: o overlay expandido
+construía as linhas extras a cada frame (9 alocações) embora o painel só atualize a 1 Hz.
+Passou a receber um *builder*, chamado apenas na atualização, e `summary()` só é calculado
+com a consola aberta. Voltou a 0 alocações por frame vazio.
 
 ### Gates da Fase 19
 

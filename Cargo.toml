@@ -62,6 +62,10 @@ tobj = "4"
 # `hot_reload` does not raise the engine's measured 1.86 floor (ADR-046). The API used
 # here (`recommended_watcher`, `Watcher::watch`) has not changed since 5.
 notify = "6"
+# Phase 20/21. 0.32 is the newest egui whose MSRV (1.85) is *below* this workspace's
+# 1.86 engine floor, so turning the feature on cannot raise it (ADR-046, ADR-052).
+# 0.33+ declares 1.88 and 0.35+ declares 1.92.
+egui = "0.32.3"
 
 # Phase 18a. Shipping build for the consoles.
 #

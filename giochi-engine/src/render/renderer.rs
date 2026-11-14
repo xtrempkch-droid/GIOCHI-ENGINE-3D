@@ -351,6 +351,13 @@ impl RenderContext {
         self.textures.len()
     }
 
+    /// Estimated video memory held by the live textures, in bytes.
+    ///
+    /// See [`TextureRegistry::estimated_vram_bytes`] for what "estimated" means.
+    pub fn texture_vram_bytes(&self) -> u64 {
+        self.textures.estimated_vram_bytes()
+    }
+
     /// Name of the renderer backend the SDL actually opened.
     ///
     /// Asking is not the same as getting: an unknown `SDL_RENDER_DRIVER` falls
@@ -676,6 +683,17 @@ impl RenderContext {
 
     pub(crate) fn texture_creator(&self) -> TextureCreator<WindowContext> {
         self.canvas.texture_creator()
+    }
+
+    /// The raw canvas, for the UI backend.
+    ///
+    /// Crate-private on purpose: `sdl2::render::WindowCanvas` must never appear in a
+    /// public signature (R1), and the only thing that needs to bypass the batched
+    /// `draw_*` methods is egui's triangle submission, which cannot be expressed as
+    /// sprites.
+    #[cfg(feature = "devtools")]
+    pub(crate) fn canvas_mut(&mut self) -> &mut WindowCanvas {
+        &mut self.canvas
     }
 }
 

@@ -6,6 +6,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Não publicado]
 
+### Adicionado — Fase 20: debug tools
+
+- **Consola in-game (`F2`, feature `devtools`)**: scrollback de 512 linhas, histórico de
+  100 comandos, autocomplete com `Tab`, `Up`/`Down`, e dez comandos embutidos (`help`,
+  `clear`, `fps`, `entities`, `time_scale`, `god`, `noclip`, `spawn`, `reload_shaders`,
+  `dump_frame_stats`). Eventos consumidos pela consola não chegam ao `Input`, então
+  escrever não move o jogador.
+- **`DebugDraw` (`F3`)**: linhas, retângulos, grids 2D e `draw_aabb_3d`/`draw_ray_3d`/
+  `draw_grid_3d` com matriz view-projection — projetados, sem passe `GL_LINES` (ADR-054).
+  Buffer por frame, limpo em `render`.
+- **Overlay expandido (`F1`)**: draw calls por categoria, VRAM estimada, entidades,
+  comandos, `time_scale`, estado e contadores do hot reload.
+- **Integração egui própria** (ADR-052): `egui` 0.32.3 (MSRV 1.85, abaixo do piso de 1.86)
+  e um backend de ~400 linhas sobre `SDL_RenderGeometry` e o registry de texturas; sem
+  `egui-sdl2`, sem segundo `glow`, sem subir o MSRV. `tests/devtools_render.rs` prova por
+  pixels que a consola desenha e que fechada não desenha nada.
+- `Engine::set_time_scale` / `time_scale` (0 pausa, teto 8) e
+  `Engine::devtools()`/`devtools_mut()`.
+- `examples/devtools_demo.rs` e `docs/DEVTOOLS.md`.
+
 ### Adicionado — Fase 19: hot reload
 
 - **`giochi-engine::hot_reload` (feature `hot_reload`)**: `FileWatcher` (notify 6 +

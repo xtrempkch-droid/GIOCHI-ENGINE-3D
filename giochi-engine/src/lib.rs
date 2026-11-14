@@ -43,6 +43,8 @@
 pub mod assets;
 pub mod audio;
 pub mod core;
+#[cfg(feature = "devtools")]
+pub mod devtools;
 pub mod error;
 #[cfg(feature = "hot_reload")]
 pub mod hot_reload;
@@ -52,6 +54,8 @@ pub mod perf;
 pub mod platform;
 pub mod render;
 pub mod scene;
+#[cfg(feature = "devtools")]
+pub mod ui;
 
 pub(crate) mod handle_registry;
 
@@ -85,6 +89,8 @@ pub use crate::audio::{AudioSystem, MusicHandle, MusicState, SoundHandle};
 pub use crate::core::engine::{Engine, EngineConfig, RunStats, DEFAULT_CLEAR_COLOR};
 pub use crate::core::game_loop::{GameLoop, FIXED_TIMESTEP, MAX_FRAME_TIME, MIN_FIXED_TIMESTEP};
 pub use crate::core::time::{FrameClock, Time};
+#[cfg(feature = "devtools")]
+pub use crate::devtools::{CommandRegistry, Console, DebugDraw, DevFlags, DevTools};
 pub use crate::error::{codes, GiochiError, GiochiResult};
 pub use crate::input::{Input, KeyboardState, MouseState};
 pub use crate::math::{Color, Rect, Vec2};

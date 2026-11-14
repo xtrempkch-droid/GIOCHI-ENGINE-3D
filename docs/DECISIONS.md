@@ -1601,3 +1601,77 @@ enables the engine's own hot reload sees one number, not two.
 **Consequences.** `giochi-demo lua <script>` restarts the script when it is saved (with the
 `hot_reload` feature). Deleting a script does **not** restart — there is nothing to run —
 and the generation is deliberately not advanced in that case.
+
+## ADR-052 — egui 0.32 with a hand-written SDL2 backend, not `egui-sdl2`
+
+**Context.** Phase 20's console needs a text editor inside the game, and phase 21 needs
+widgets. The plan named `egui = "0.28"` and `egui-sdl2 = "0.6"`. Neither pairing exists:
+no published `egui-sdl2` supports `egui` 0.28 (0.2.x requires 0.33, 0.4 requires 0.34,
+0.6 requires 0.35), and every version from 0.5 up declares `rust-version = "1.92"`.
+`egui-sdl2`'s default features also pull `egui_glow` and `glow 0.17`, while the 3D crate
+uses `glow 0.18`: one binary would carry two GL function tables.
+
+**Decision.** Depend on `egui` alone, at **0.32.3** — its MSRV is 1.85, *below*
+`giochi-engine`'s measured 1.86 floor, so enabling the feature cannot raise it (ADR-046) —
+and own the backend:
+
+* `giochi-engine/src/ui/egui_integration.rs` turns egui's tessellated meshes into
+  `sdl2::render` geometry, which is the same `SDL_RenderGeometry` call the 2D batch already
+  uses (ADR-043). Textures go through the existing `TextureRegistry`, so an egui texture is
+  an engine texture handle and the debug overlay's VRAM figure includes the font atlas.
+* Event translation is explicit, and the *consumed* flag is what keeps a typed `w` from
+  walking the player forward.
+
+**Measured.** `tests/devtools_render.rs` renders a frame with the console closed (0 pixels
+changed in the panel area), opens it (more than 200 pixels changed), runs a command through
+the same path the keyboard uses, draws debug geometry, and closes it again (0 changed).
+That is the whole integration proved end to end rather than "it compiled".
+
+**Consequences.** ~400 lines the project owns instead of four dependencies, no floor
+increase, one GL table per binary, and the widget facade in phase 21 can stay C-shaped
+because the backend is already ours. The cost is that egui features the backend does not
+implement (clipboard, IME, cursor icons, paint callbacks) are logged rather than honoured;
+`docs/DEVTOOLS.md` §7 lists them.
+
+## ADR-053 — `god`, `noclip` and `spawn` are game concepts; the console only offers the switch
+
+**Context.** Phase 20's built-in command list mixes engine facts (`fps`, `entities`,
+`time_scale`, `dump_frame_stats`) with game concepts (`god`, `noclip`, `spawn`). An engine
+cannot implement the second group: "god mode" means whatever a game's damage model says,
+and "spawn a cube" requires knowing what a cube is.
+
+**Decision.** The console *toggles* and *queues*, and the game reads:
+
+* `god`/`noclip` toggle [`DevFlags`], which the game polls every frame;
+* `spawn <kind> [count]` pushes a [`SpawnRequest`], drained once by the game;
+* `reload_shaders` records a request the engine (2D) or the game (3D) handles.
+
+A game that ignores them sees a switch that does nothing, which is honest. A game can also
+replace any built-in by registering the same name — `CommandRegistry::register` replaces,
+deliberately.
+
+**Consequences.** The demo drains `take_spawn` in its loop and spawns cubes; the built-in is
+exercised without the engine learning what a cube is. `time_scale` is the one built-in that
+touches the engine, because the engine *does* own the fixed-step accumulator: the console
+writes the value, and the frame loop multiplies by it (`0.0` pauses, `MAX_TIME_SCALE = 8`).
+
+## ADR-054 — Debug draw projects 3D primitives instead of opening a GL_LINES pass
+
+**Context.** Phase 20 lists `draw_aabb_3d`, `draw_ray_3d` and `draw_grid_3d`, and the plan
+warns that "3D debug draw needs a separate `LineRenderer` (GL_LINES), do not mix it with
+triangulated meshes". That is true for the 3D renderer. It is also true that the 2D renderer
+has no GL at all — it is `sdl2::render` — and that a debug view of a 2D physics world is a
+3D world seen through an orthographic camera.
+
+**Decision.** [`DebugDraw`] takes a **column-major view-projection matrix** and projects
+points itself, emitting 2D segments. The same call therefore works over the 2D renderer, over
+a 3D scene's overlay, and for a side-scroller's box2d debug view. A point with clip `w <= 0`
+is dropped rather than divided through — a wireframe box with one vertex at infinity is worse
+than no box. The demo proves the mapping: its orthographic matrix maps world pixels to screen
+pixels 1:1, and the unit test checks both corners.
+
+**Consequences.** Debug geometry costs one `SDL_RenderLine` per segment (the 2D path already
+has `draw_line`), which is fine for tens to hundreds of segments and not for a thousand.
+A real `GL_LINES` pass in `giochi-engine-3d` remains the right tool for a dense 3D debug view
+and is listed in `IDEAS.md`; nothing here prevents adding it later, because the projection is
+a pure function.

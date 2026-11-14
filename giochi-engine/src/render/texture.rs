@@ -323,6 +323,21 @@ impl TextureRegistry {
         self.registry.get(handle)
     }
 
+    /// Estimated video memory held by the live textures, in bytes.
+    ///
+    /// `width * height * 4` per texture, which is what an RGBA8 target costs on every
+    /// backend this engine supports. It is an estimate on purpose: a driver may pad the
+    /// pitch, and this number is for the debug overlay, not for a memory budget.
+    pub fn estimated_vram_bytes(&self) -> u64 {
+        let mut total = 0u64;
+        for handle in self.registry.handles() {
+            if let Some((width, height)) = self.dimensions(handle) {
+                total = total.saturating_add(u64::from(width) * u64::from(height) * 4);
+            }
+        }
+        total
+    }
+
     /// Number of live textures. Used by tests to prove there is no leak.
     pub fn len(&self) -> usize {
         self.registry.len()

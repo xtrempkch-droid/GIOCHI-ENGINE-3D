@@ -714,6 +714,49 @@ built-in shaders (the per-draw path `meshes_3d` measures) and **on** for shaders
 from a file, which reload. No benchmark in the suite exercises the latter, and no existing
 benchmark changed.
 
+## After Phase 20 — debug tools
+
+### The gate found a real regression, on the first run
+
+`tests/perf_regression.rs` asserts that an empty frame allocates **zero** times. With
+`devtools` compiled in and the console closed, it reported **9 allocations per frame**. The
+cause was the expanded overlay: the engine built its lines (one `Vec` plus one `String` per
+line) on every frame, while the panel itself only refreshes at 1 Hz. `profiler.summary()`
+was the tenth allocation, computed for the same reason.
+
+Both are now lazy:
+
+* `DebugOverlay::draw_with` takes a **builder closure**, called only when the panel actually
+  refreshes;
+* `DevTools::set_frame_stats` (which needs `summary()`) runs only while the console is open,
+  and the frame delta — all the egui clock needs — has its own allocation-free setter.
+
+Result: **0 allocations per empty frame** with the feature compiled in and the console
+closed, which is the same figure as phase 19.
+
+### Cost while compiled and closed
+
+| Situation | Per frame |
+|---|---|
+| `devtools` not compiled | none — module and field do not exist |
+| compiled, console closed | 2 key comparisons (`F2`/`F3`) + 2 `Vec::clear` on empty buffers + 2 counter reads |
+| compiled, console open | one egui pass: layout, tessellation, one `render_geometry` per mesh |
+
+The console's own texture (the font atlas) lives in the engine's texture registry, so it
+appears in the panel's `TEX`/`VRAM` figures rather than being invisible overhead.
+
+### Release artifact
+
+Unchanged in ABI terms: `nm -D --defined-only target/release/libgiochi.so | grep -c ' T giochi_'`
+still reports **97** symbols, because the feature is off by default and no `giochi_*`
+function was added (that is phase 24's job).
+
+`libgiochi.so` is **911 088 B**, 56 bytes (+0.006 %) above phase 19's 911 032 B. That is
+`Engine::time_scale`/`set_time_scale` and the constant that clamps it, which live in the
+engine unconditionally so a build without `devtools` still has the same simulation-speed
+semantics. A 56-byte delta for a feature is inside anything the size gate could distinguish;
+the symbol set is what actually must not move.
+
 ## Conclusions
 
 - On x86_64 the baseline is dominated by per-sprite draw calls: 200 → 1000 sprites
