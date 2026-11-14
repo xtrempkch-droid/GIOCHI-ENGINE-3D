@@ -17,11 +17,17 @@ use std::path::{Path, PathBuf};
 /// Public items that are deliberately **not** `#[repr(C)]`, with the rule that requires
 /// their exception. Adding a name here is a design decision, not a way to silence a
 /// failure — the reason has to be a rule from the project prompt.
-const NON_C_EXCEPTIONS: &[(&str, &str)] = &[(
-    "GiochiError",
-    "R4: errors are `thiserror` internally and never cross the boundary; a Rust enum \
-     with `String` payloads must not claim a C layout",
-)];
+const NON_C_EXCEPTIONS: &[(&str, &str)] = &[
+    (
+        "GiochiError",
+        "R4: errors are `thiserror` internally and never cross the boundary; a Rust enum \
+         with `String` payloads must not claim a C layout",
+    ),
+    (
+        "ParticleError",
+        "R4: particle errors carry Rust string references and are never exposed in the C ABI",
+    ),
+];
 
 /// Every `.rs` file under `src/`.
 fn sources() -> Vec<PathBuf> {

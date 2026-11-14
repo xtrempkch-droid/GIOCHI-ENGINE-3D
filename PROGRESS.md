@@ -9,9 +9,32 @@ Fases 0–18 concluídas. O Growth Pack começou em 2026-11-14.
 | 19 — Hot Reload | **concluída** (2026-11-14) | 31 testes de unidade em `hot_reload`, `hot_reload_render` (textura no mesmo handle, pixel a pixel), `hot_reload_3d` (shader e malha, pixel a pixel), `hot_reload_lua` (geração avança, deleção não); demo com 14 recargas aplicadas |
 | 20 — Debug Tools | **concluída** (2026-11-14) | 69 testes de unidade em `devtools`, 6 de `c_shape`, `devtools_render` (consola desenha por pixels e fechada não desenha nada); `perf_regression` 0 alocações/frame com a feature compilada e a consola fechada |
 | 21 — UI System | **concluída com pendência** (2026-11-14) | 24 testes de unidade em `ui`, `ui_render` (desenha nos 3 temas, pixels diferentes entre temas, 0 alocações/frame sem UI); `ui_demo` roda. **UI sobre 3D não entregue** — ver pendências |
-| 22 — Particles | pendente | — |
+| 22 — Particles | **concluída** (2026-11-14) | 12 testes 2D, 4 em 3D e aceitação de render: 1.000 partículas 2D → 1 draw call, tint validado por pixel; demos 2D/3D e `mini_fps --particles` executados por 120 frames; gates x86_64, docs e check ARM64 aprovados |
 | 23 — Animation | pendente | — |
 | 24 — Physics + C ABI v4 | pendente | — |
+
+### Gates da Fase 22
+
+- [x] `cargo fmt --all -- --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo test --workspace` — 0 falhas; 12 testes 2D, 4 em 3D e teste de render
+- [x] `cargo doc --workspace --no-deps` — concluído; mantém o warning pré-existente em
+      `giochi-engine-3d/src/render3d/texture.rs:65`
+- [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
+- [x] Demos 2D e 3D em modo headless, `--frames 120 --auto`
+- [x] `mini_fps --particles --frames 120 --auto --bench` em EGL offscreen: 1 chamada
+      de partículas e nenhum erro GL
+
+### Entregue na Fase 22
+
+- `giochi-engine/src/particles/`: curvas tipadas, emissores 2D, presets e pool CPU
+  limitado com seed determinística.
+- Tint por vértice no batch 2D, sem mudar a ordem dos sprites; teste de framebuffer
+  confirma 1.000 partículas da mesma textura em uma chamada e valida os pixels tintados.
+- `giochi-engine-3d/src/particles/`: pool de billboards 3D, ordenação alfa e desenho
+  instanciado com o fallback existente.
+- Demos 2D/3D, guia `docs/PARTICLES.md` e opção `--particles` no `mini_fps` (Space ou
+  emissão automática em `--auto`).
 
 ### Gates da Fase 21
 

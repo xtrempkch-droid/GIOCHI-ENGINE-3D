@@ -784,6 +784,23 @@ about which of them owns a click.
 `libgiochi.so` is unchanged at **911 088 B / 97 symbols**: `devtools` is off by default and
 the widgets add no C surface (that is phase 24's job).
 
+## After Phase 22 — Particle systems
+
+The renderer acceptance test submits 1,000 tinted particles with one texture and
+verifies both the single backend draw call and the resulting framebuffer pixel. This
+meets the batching threshold without reordering sprites.
+
+| Run | Result | Interpretation |
+|---|---|---|
+| `particles_render` | 1,000 particles → **1 draw call** | Pixel readback also verifies tint |
+| 2D demo, 120 frames | 60.9 FPS | SDL dummy/software driver; smoke test, not a performance baseline |
+| 3D demo, 120 frames | 500 particles alive | SDL offscreen; smoke test, not a throughput measurement |
+| `mini_fps --particles`, 120 frames | 1 particle draw call, 160 particles alive | EGL offscreen, GLES 2, no GL errors |
+
+No CPU/GPU frame-time comparison was recorded for particle simulation. The dummy and
+offscreen demo runs verify deterministic execution and rendering only; their frame rates
+are not comparable to the reference-hardware benchmarks above.
+
 ## Conclusions
 
 - On x86_64 the baseline is dominated by per-sprite draw calls: 200 → 1000 sprites

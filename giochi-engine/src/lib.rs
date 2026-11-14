@@ -50,6 +50,7 @@ pub mod error;
 pub mod hot_reload;
 pub mod input;
 pub mod math;
+pub mod particles;
 pub mod perf;
 pub mod platform;
 pub mod render;
@@ -94,6 +95,11 @@ pub use crate::devtools::{CommandRegistry, Console, DebugDraw, DevFlags, DevTool
 pub use crate::error::{codes, GiochiError, GiochiResult};
 pub use crate::input::{Input, KeyboardState, MouseState};
 pub use crate::math::{Color, Rect, Vec2};
+pub use crate::particles::{
+    AreaEmitter, CircleEmitter, Curve, CurveError, CurveValue, Interpolation, Keyframe,
+    LineEmitter, ParticleConfig, ParticleEmitter, ParticleError, ParticleRng, ParticleSystem,
+    PointEmitter,
+};
 pub use crate::perf::{DebugOverlay, FrameCounters, FrameStats, FrameTimeSummary, Profiler};
 pub use crate::platform::sdl::{quit_signal, sdl_version, Platform, QuitSignal, VideoDriverChoice};
 pub use crate::platform::window::{Window, WindowConfig};

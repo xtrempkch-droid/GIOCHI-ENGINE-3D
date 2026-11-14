@@ -50,6 +50,7 @@ pub mod game;
 pub mod hot_reload;
 pub mod math3d;
 pub mod mesh;
+pub mod particles;
 pub mod render3d;
 pub mod shader;
 
@@ -57,6 +58,7 @@ mod error;
 mod registry;
 
 pub use error::{Error3D, Result3D};
+pub use particles::BillboardParticleSystem;
 pub use render3d::{
     sanitise_scale, scaled_size, DirectionalLight, InstancedRenderer, MeshHandle, RenderContext3D,
     ShaderHandle, TextureHandle, Upscaler, MAX_SCALE, MIN_SCALE,

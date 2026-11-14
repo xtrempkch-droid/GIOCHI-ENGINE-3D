@@ -20,6 +20,7 @@
 //!   the frame rate difference is the batching and nothing else.
 //! - **F3** cycles the render scale 100 % → 75 % → 50 %, upscaling a smaller framebuffer
 //!   over the window.
+//! - `--particles` enables a Space-triggered 3D particle burst for phase 22.
 //! - The static scenery is always drawn from one [`StaticBatch`], so the walls, pillars
 //!   and floor are a single draw call instead of ~30.
 //!
@@ -32,10 +33,12 @@
 //! cargo run -p giochi-engine-3d --example mini_fps -- --frames 3 --quadro out.bmp
 //! cargo run --release -p giochi-engine-3d --example mini_fps -- \
 //!     --frames 600 --auto --bench --instanced
+//! cargo run -p giochi-engine-3d --example mini_fps -- --particles
 //! ```
 
 use std::process::ExitCode;
 
+use giochi_engine::input::keyboard::KEY_SPACE;
 use giochi_engine::input::Input;
 use giochi_engine::platform::sdl::{quit_signal, QuitSignal};
 use giochi_engine::platform::window::{Window, WindowConfig};
@@ -44,7 +47,8 @@ use giochi_engine_3d::context::{self, GlesVersion};
 use giochi_engine_3d::math3d::{
     AxisInput, CameraController, Color3D, Mat4, Quat, Transform3D, Vec3,
 };
-use giochi_engine_3d::mesh::{StaticBatch, StaticBatchBuilder};
+use giochi_engine_3d::mesh::{StaticBatch, StaticBatchBuilder, Vertex};
+use giochi_engine_3d::particles::BillboardParticleSystem;
 use giochi_engine_3d::shader::BuiltinShader;
 use giochi_engine_3d::{DirectionalLight, RenderContext3D};
 use sdl2::keyboard::Keycode;
@@ -113,6 +117,8 @@ struct Options {
     /// it until the loop arm actually misses frames — otherwise both arms report 60.0
     /// and the comparison measures the panel.
     cubes: usize,
+    /// Enable 3D particle bursts with Space.
+    particles: bool,
 }
 
 impl Default for Options {
@@ -129,6 +135,7 @@ impl Default for Options {
             width: 1280,
             height: 720,
             cubes: 100,
+            particles: false,
         }
     }
 }
@@ -160,6 +167,8 @@ impl Options {
                 options.quadro = Some(value.to_string());
             } else if arg == "--bench" {
                 options.bench = true;
+            } else if arg == "--particles" {
+                options.particles = true;
             } else if let Some(value) = arg.strip_prefix("--cubes=") {
                 options.cubes = parse_number(value, "--cubes")?;
             } else if arg == "--cubes" {
@@ -184,7 +193,7 @@ impl Options {
                 return Err(format!(
                     "unknown argument '{arg}'; accepted: --frames N, --auto, --quadro PATH, \
                      --instanced, --loop, --scale N, --bench, --width N, --height N, \
-                     --cubes N"
+                     --cubes N, --particles"
                 ));
             }
         }
@@ -341,6 +350,32 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     // driver has the extension, 100 when it does not.
     let field_cube = render.create_cube_mesh(CUBE_FIELD_SIZE)?;
     let instanced_shader = render.create_builtin_shader(BuiltinShader::Instanced)?;
+    let particle_quad = if options.particles {
+        Some(render.create_mesh(
+            &[
+                Vertex::flat([-0.5, -0.5, 0.0], [0.0, 0.0, 1.0]),
+                Vertex::flat([0.5, -0.5, 0.0], [0.0, 0.0, 1.0]),
+                Vertex::flat([0.5, 0.5, 0.0], [0.0, 0.0, 1.0]),
+                Vertex::flat([-0.5, 0.5, 0.0], [0.0, 0.0, 1.0]),
+            ],
+            &[0, 1, 2, 0, 2, 3],
+        )?)
+    } else {
+        None
+    };
+    let mut particles = if options.particles {
+        let mut state = render.state();
+        state.blend = true;
+        state.cull_face = false;
+        render.set_state(state);
+        Some(BillboardParticleSystem::new(
+            2_000,
+            Vec3::new(0.0, -0.5, 0.0),
+            0x22_00_19,
+        )?)
+    } else {
+        None
+    };
     // A square-ish grid, laid out from the count so `--cubes` alone decides the scene.
     let side = (options.cubes as f64).sqrt().ceil() as i32;
     let field: Vec<Mat4> = (0..options.cubes)
@@ -367,6 +402,19 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         },
         render.instancing_support().extension(),
     );
+    if particle_quad.is_some() {
+        println!("3D particles enabled: press Space to emit at the camera target");
+    }
+    let mut mesh_handles = vec![
+        floor,
+        cube,
+        field_cube,
+        obstacle_batch.mesh(),
+        crate_batch.mesh(),
+    ];
+    if let Some(particle_quad) = particle_quad {
+        mesh_handles.push(particle_quad);
+    }
 
     let mut instanced = options.instanced;
     render.set_render_scale(Some(options.scale));
@@ -401,6 +449,7 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     // Draw calls the instanced field cost on the last frame: 1 with the extension, one
     // per cube without it. Printed by `--bench` so the claim is measured, not assumed.
     let mut field_calls: u32 = 0;
+    let mut particle_calls: u32 = 0;
     let mut frames: u64 = 0;
     let mut fps_timer: f32 = 0.0;
     let mut fps_frames: u32 = 0;
@@ -420,13 +469,7 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             if quit_signal(event) != QuitSignal::None {
                 finish(
                     &mut render,
-                    &[
-                        floor,
-                        cube,
-                        field_cube,
-                        obstacle_batch.mesh(),
-                        crate_batch.mesh(),
-                    ],
+                    &mesh_handles,
                     &[shader, instanced_shader],
                     frames,
                     wireframe,
@@ -438,13 +481,15 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
                     // Counted here rather than read from the profiler: the counter only
                     // exists with the `profiling` feature, and the acceptance criterion
                     // has to hold in a plain release build.
-                    let draw_calls = 3 + u64::from(field_calls);
+                    let draw_calls = 3 + u64::from(field_calls) + u64::from(particle_calls);
                     println!(
                         "mini_fps: frames={frames} wall={wall:.3}s fps={:.1} \
                          draw_calls={draw_calls} field_calls={field_calls} \
+                         particle_calls={particle_calls} particles={} \
                          instanced={} cubes={} scale={:.2} render={render_width}x{render_height} \
                          support={}",
                         frames as f32 / wall,
+                        particles.as_ref().map_or(0, BillboardParticleSystem::len),
                         u8::from(instanced),
                         field.len(),
                         render.render_scale().unwrap_or(1.0),
@@ -502,6 +547,12 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         }
 
         input.update(&events);
+        if let Some(system) = particles.as_mut() {
+            if input.key_pressed(KEY_SPACE) || (options.auto && frames % 60 == 0) {
+                system.emit_burst(controller.camera().target, 160, 4.0, 1.2, 0.12)?;
+            }
+            system.update(1.0 / 60.0)?;
+        }
 
         // Auto mode walks a fixed path so the run is deterministic: forward and right,
         // turning slowly. Without it, `--frames` would produce a still frame and the
@@ -582,6 +633,17 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             }
             calls
         };
+        particle_calls = if let (Some(system), Some(mesh)) = (particles.as_mut(), particle_quad) {
+            system.render(
+                &mut render,
+                mesh,
+                instanced_shader,
+                &camera,
+                Color3D::new(1.0, 0.62, 0.2, 0.75),
+            )?
+        } else {
+            0
+        };
 
         if wireframe {
             render.set_wireframe(false);
@@ -630,13 +692,7 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             if frames >= limit {
                 finish(
                     &mut render,
-                    &[
-                        floor,
-                        cube,
-                        field_cube,
-                        obstacle_batch.mesh(),
-                        crate_batch.mesh(),
-                    ],
+                    &mesh_handles,
                     &[shader, instanced_shader],
                     frames,
                     wireframe,
@@ -648,13 +704,15 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
                     // Counted here rather than read from the profiler: the counter only
                     // exists with the `profiling` feature, and the acceptance criterion
                     // has to hold in a plain release build.
-                    let draw_calls = 3 + u64::from(field_calls);
+                    let draw_calls = 3 + u64::from(field_calls) + u64::from(particle_calls);
                     println!(
                         "mini_fps: frames={frames} wall={wall:.3}s fps={:.1} \
                          draw_calls={draw_calls} field_calls={field_calls} \
+                         particle_calls={particle_calls} particles={} \
                          instanced={} cubes={} scale={:.2} render={render_width}x{render_height} \
                          support={}",
                         frames as f32 / wall,
+                        particles.as_ref().map_or(0, BillboardParticleSystem::len),
                         u8::from(instanced),
                         field.len(),
                         render.render_scale().unwrap_or(1.0),

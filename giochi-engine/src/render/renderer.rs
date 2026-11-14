@@ -136,14 +136,24 @@ impl RenderContext {
                 continue;
             };
             let result = match run.kind {
-                // Nothing to merge in a run of one: the plain copy is cheaper than
-                // building and submitting four vertices for a single sprite.
-                RunKind::Single { dst, src } => match to_sdl_rect(dst) {
-                    Some(dst) => canvas.copy(&texture, to_sdl_rect(src), dst),
-                    // The run only exists because the quad had an area, so this is
-                    // unreachable; treated as "nothing to draw" rather than a panic.
-                    None => Ok(()),
-                },
+                // Nothing to merge in a white run of one: the plain copy is cheaper
+                // than submitting geometry. Tinting needs the vertex colour path.
+                RunKind::Single {
+                    dst,
+                    src,
+                    tint,
+                    vertices,
+                    indices,
+                } => {
+                    if tint == Color::WHITE {
+                        match to_sdl_rect(dst) {
+                            Some(dst) => canvas.copy(&texture, to_sdl_rect(src), dst),
+                            None => Ok(()),
+                        }
+                    } else {
+                        canvas.render_geometry(vertices, Some(&texture), indices)
+                    }
+                }
                 RunKind::Geometry { vertices, indices } => {
                     canvas.render_geometry(vertices, Some(&texture), indices)
                 }
@@ -530,6 +540,36 @@ impl RenderContext {
         dst: Rect,
         src: Rect,
     ) -> Result<(), GiochiError> {
+        self.draw_texture_tinted(texture, dst, src, Color::WHITE)
+    }
+
+    /// Queues a tinted texture copy; `dst` and `src` are in screen pixels.
+    ///
+    /// The tint is multiplied by each sampled pixel. Neighbouring copies of the same
+    /// texture remain in one batch, including copies with different tints.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use giochi_engine::{Color, Rect, RenderContext};
+    ///
+    /// # fn draw(renderer: &mut RenderContext, texture: u64) -> Result<(), giochi_engine::GiochiError> {
+    /// renderer.draw_texture_tinted(
+    ///     texture,
+    ///     Rect::new(10.0, 10.0, 32.0, 32.0),
+    ///     Rect::ZERO,
+    ///     Color::rgb(255, 128, 64),
+    /// )?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn draw_texture_tinted(
+        &mut self,
+        texture: TextureHandle,
+        dst: Rect,
+        src: Rect,
+        tint: Color,
+    ) -> Result<(), GiochiError> {
         let Some(size) = self.textures.size(texture) else {
             return Err(GiochiError::InvalidHandle(texture));
         };
@@ -545,7 +585,7 @@ impl RenderContext {
         }
 
         self.batch
-            .push_quad(texture, rect_from_sdl(dst), src, size)?;
+            .push_quad_tinted(texture, rect_from_sdl(dst), src, size, tint)?;
         #[cfg(feature = "profiling")]
         self.counters.record_queued_sprite();
         Ok(())
@@ -632,8 +672,25 @@ impl RenderContext {
 
     /// Draws `sprite`, converting its world-space rectangle through the camera.
     pub fn draw_sprite(&mut self, sprite: &Sprite) -> Result<(), GiochiError> {
+        self.draw_sprite_tinted(sprite, Color::WHITE)
+    }
+
+    /// Draws a tinted `sprite` after converting its world-space rectangle through the camera.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use giochi_engine::{Color, RenderContext, Sprite};
+    ///
+    /// # fn draw(renderer: &mut RenderContext, texture: u64) -> Result<(), giochi_engine::GiochiError> {
+    /// let sprite = Sprite::new(texture, 20.0, 30.0, 16.0, 16.0);
+    /// renderer.draw_sprite_tinted(&sprite, Color::rgb(255, 200, 80))?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn draw_sprite_tinted(&mut self, sprite: &Sprite, tint: Color) -> Result<(), GiochiError> {
         let dst = self.camera.world_rect_to_screen(sprite.world_rect());
-        self.draw_texture(sprite.texture, dst, Rect::ZERO)
+        self.draw_texture_tinted(sprite.texture, dst, Rect::ZERO, tint)
     }
 
     /// Converts a world-space point to screen space with the current camera.
