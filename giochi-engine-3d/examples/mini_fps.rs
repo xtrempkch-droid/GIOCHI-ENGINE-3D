@@ -21,6 +21,11 @@
 //! - **F3** cycles the render scale 100 % → 75 % → 50 %, upscaling a smaller framebuffer
 //!   over the window.
 //! - `--particles` enables a Space-triggered 3D particle burst for phase 22.
+//! - `--physics` (feature `physics-3d`, phase 24) replaces the free walker with a body:
+//!   the player is a kinematic capsule moved by `PhysicsWorld3D::move_character`, so walls
+//!   block it, gravity pulls it down, and the obstacle cubes are static colliders. The
+//!   default path is untouched, which is what keeps the phase-12–17 performance numbers
+//!   comparable.
 //! - The static scenery is always drawn from one [`StaticBatch`], so the walls, pillars
 //!   and floor are a single draw call instead of ~30.
 //!
@@ -49,6 +54,8 @@ use giochi_engine_3d::math3d::{
 };
 use giochi_engine_3d::mesh::{StaticBatch, StaticBatchBuilder, Vertex};
 use giochi_engine_3d::particles::BillboardParticleSystem;
+#[cfg(feature = "physics-3d")]
+use giochi_engine_3d::physics::{BodyDesc, ColliderShape, PhysicsWorld3D};
 use giochi_engine_3d::shader::BuiltinShader;
 use giochi_engine_3d::{DirectionalLight, RenderContext3D};
 use sdl2::keyboard::Keycode;
@@ -119,6 +126,8 @@ struct Options {
     cubes: usize,
     /// Enable 3D particle bursts with Space.
     particles: bool,
+    /// Drive the player with Rapier instead of the free walker (phase 24).
+    physics: bool,
 }
 
 impl Default for Options {
@@ -136,6 +145,7 @@ impl Default for Options {
             height: 720,
             cubes: 100,
             particles: false,
+            physics: false,
         }
     }
 }
@@ -167,6 +177,8 @@ impl Options {
                 options.quadro = Some(value.to_string());
             } else if arg == "--bench" {
                 options.bench = true;
+            } else if arg == "--physics" {
+                options.physics = true;
             } else if arg == "--particles" {
                 options.particles = true;
             } else if let Some(value) = arg.strip_prefix("--cubes=") {
@@ -191,7 +203,7 @@ impl Options {
                 options.scale = parse_number(next_value(&mut args, "--scale")?, "--scale")?;
             } else {
                 return Err(format!(
-                    "unknown argument '{arg}'; accepted: --frames N, --auto, --quadro PATH, \
+                    "unknown argument '{arg}'; accepted: --frames N, --auto, --quadro PATH, --physics, \
                      --instanced, --loop, --scale N, --bench, --width N, --height N, \
                      --cubes N, --particles"
                 ));
@@ -240,6 +252,150 @@ fn main() -> ExitCode {
             eprintln!("erro: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// The player as a Rapier body, for `--physics`.
+///
+/// The controller owns the orientation and proposes a position from the input; this
+/// resolves that position against the walls and gravity, and hands the resolved eye back.
+/// Keeping the two roles apart is what lets the smoothing in `CameraController` survive a
+/// collision instead of being reset by it.
+#[cfg(feature = "physics-3d")]
+struct PhysicsWalker {
+    world: PhysicsWorld3D,
+    body: u64,
+    /// Vertical velocity the character controller cannot integrate by itself.
+    fall: f32,
+    /// Radius plus half height: distance from the capsule centre to the eye.
+    eye_offset: f32,
+    grounded: bool,
+    jumps: u64,
+    dbg: u32,
+}
+
+#[cfg(feature = "physics-3d")]
+impl PhysicsWalker {
+    const RADIUS: f32 = 0.35;
+    const HALF_HEIGHT: f32 = 0.5;
+    const GRAVITY: f32 = -9.81;
+    const JUMP_SPEED: f32 = 5.2;
+
+    fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        let mut world = PhysicsWorld3D::new(Vec3::new(0.0, Self::GRAVITY, 0.0))?;
+
+        // The floor: a slab whose top is y = 0, exactly where the visual plane is.
+        let ground = world.create_body(BodyDesc::static_(Vec3::new(0.0, -0.5, 0.0)))?;
+        world.attach_collider(
+            ground,
+            ColliderShape::cuboid(FLOOR_SIZE * 0.5, 0.5, FLOOR_SIZE * 0.5),
+            0.9,
+            0.0,
+        )?;
+
+        // The same grid the static batch draws, so a cube that is visible is solid and
+        // one that is not cannot be walked into.
+        for row in 0..OBSTACLES {
+            for column in 0..OBSTACLES {
+                let x = (column - OBSTACLES / 2) as f32 * SPACING;
+                let z = (row - OBSTACLES / 2) as f32 * SPACING - 6.0;
+                if x.abs() < 1.0 && (z - 8.0).abs() < 3.0 {
+                    continue;
+                }
+                let tilt =
+                    Quat::from_axis_angle(Vec3::UP, (row * OBSTACLES + column) as f32 * 0.37);
+                let body = world.create_body(
+                    BodyDesc::static_(Vec3::new(x, OBSTACLE_SIZE * 0.5, z)).with_rotation(tilt),
+                )?;
+                let half = OBSTACLE_SIZE * 0.5;
+                world.attach_collider(body, ColliderShape::cuboid(half, half, half), 0.8, 0.0)?;
+            }
+        }
+
+        let eye_offset = Self::RADIUS + Self::HALF_HEIGHT;
+        let body = world.create_character(
+            Vec3::new(0.0, EYE_HEIGHT - eye_offset, 8.0),
+            Self::RADIUS,
+            Self::HALF_HEIGHT,
+        )?;
+        println!(
+            "physics: {} bodies, player capsule r {:.2} h {:.2}",
+            world.body_count(),
+            Self::RADIUS,
+            Self::HALF_HEIGHT
+        );
+        Ok(PhysicsWalker {
+            world,
+            body,
+            fall: 0.0,
+            eye_offset,
+            // Spawned exactly on the floor, so the first frame must not ask to move
+            // down: a kinematic body that is already touching pushes itself into the
+            // solver's allowed penetration, and every later shape cast then hits the
+            // ground at time zero and returns a zero translation.
+            grounded: true,
+            jumps: 0,
+            dbg: 0,
+        })
+    }
+
+    /// Resolves `wanted_eye_delta` — how far the controller moved *this frame* — against
+    /// the world, and returns where the eye ended up.
+    ///
+    /// The argument is a displacement and not a target on purpose: a target recomputed
+    /// from a position that lags one step behind becomes a positive feedback loop (the
+    /// lag is re-requested every frame, the body overshoots and the next request is
+    /// bigger still), which is exactly what the first version of this did — the walker
+    /// reached 270 units in four seconds and fell out of the world.
+    fn step(&mut self, wanted_eye_delta: Vec3, delta: f32, jump: bool) -> Result<Vec3, String> {
+        let centre = self
+            .world
+            .position(self.body)
+            .map_err(|error| error.to_string())?;
+        if jump && self.grounded {
+            self.fall = Self::JUMP_SPEED;
+            self.jumps += 1;
+        }
+        // A grounded character gets no downward push at all. Pushing `gravity * dt` into
+        // a body that is already touching the floor presses it into the solver's allowed
+        // penetration, and the next shape cast hits the ground at time zero and returns a
+        // zero translation — the walker freezes against a flat floor. The controller's
+        // own `snap_to_ground` is what follows a slope or a step down.
+        if self.grounded && self.fall <= 0.0 {
+            self.fall = 0.0;
+        } else {
+            self.fall += Self::GRAVITY * delta;
+        }
+
+        let wanted = Vec3::new(wanted_eye_delta.x, self.fall * delta, wanted_eye_delta.z);
+
+        let movement = self
+            .world
+            .move_character(self.body, wanted, delta)
+            .map_err(|error| error.to_string())?;
+        if self.jumps >= 1 && self.dbg < 5 && wanted.x.abs() > 0.0 {
+            self.dbg += 1;
+            eprintln!(
+                "DBG wanted=({:.4},{:.4}) got=({:.4},{:.4}) centre_before={:.3},{:.3}",
+                wanted.x,
+                wanted.y,
+                movement.translation.x,
+                movement.translation.y,
+                centre.x,
+                centre.y
+            );
+        }
+        self.grounded = movement.grounded;
+        if self.grounded && self.fall < 0.0 {
+            self.fall = 0.0;
+        }
+        self.world.step(delta).map_err(|error| error.to_string())?;
+
+        let centre = self
+            .world
+            .position(self.body)
+            .map_err(|error| error.to_string())?;
+        Ok(Vec3::new(centre.x, centre.y + self.eye_offset, centre.z))
     }
 }
 
@@ -441,6 +597,19 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     let mouse = platform.sdl_mouse();
     controller.set_mouse_captured(mouse.as_ref(), !options.auto);
 
+    #[cfg(feature = "physics-3d")]
+    let mut walker = if options.physics {
+        Some(PhysicsWalker::new()?)
+    } else {
+        None
+    };
+    if options.physics && !cfg!(feature = "physics-3d") {
+        eprintln!(
+            "--physics needs the `physics-3d` feature; running the free walker instead \
+             (cargo run -p giochi-engine-3d --features physics-3d --example mini_fps)"
+        );
+    }
+
     let mut wireframe = false;
     // Reported at the end: a crate whose top face is visible is what makes the phase-13
     // acceptance criterion observable at all, and "zero crates drawn" would mean the
@@ -554,6 +723,9 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             system.update(1.0 / 60.0)?;
         }
 
+        #[cfg(feature = "physics-3d")]
+        let before_input = controller.position();
+
         // Auto mode walks a fixed path so the run is deterministic: forward and right,
         // turning slowly. Without it, `--frames` would produce a still frame and the
         // movement code would go untested on CI.
@@ -571,6 +743,24 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             controller.update_with_axes(axes, (6.0, 0.0), 1.0 / 60.0);
         } else {
             controller.update(&input, mouse_delta(&input), 1.0 / 60.0);
+        }
+
+        // The controller above only proposed a position; this is where the world gets a
+        // say. `before` is where it was *before* this frame's input, so the difference is
+        // this frame's intended displacement and nothing else. Without `--physics`
+        // nothing changes from the phase-12 walker.
+        #[cfg(feature = "physics-3d")]
+        if let Some(walker) = walker.as_mut() {
+            let jump = input.key_pressed(KEY_SPACE) || (options.auto && frames % 120 == 0);
+            let intended = Vec3::new(
+                controller.position().x - before_input.x,
+                0.0,
+                controller.position().z - before_input.z,
+            );
+            match walker.step(intended, 1.0 / 60.0, jump) {
+                Ok(eye) => controller.set_position(eye),
+                Err(error) => return Err(format!("physics: {error}").into()),
+            }
         }
 
         let (width, height) = render.drawable_size();
@@ -677,8 +867,19 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
         fps_frames += 1;
         fps_timer += 1.0 / 60.0;
         if fps_timer >= 1.0 {
+            #[cfg(feature = "physics-3d")]
+            let physics_note = walker.as_ref().map_or(String::new(), |walker| {
+                format!(
+                    ", physics bodies {} grounded {} jumps {}",
+                    walker.world.body_count(),
+                    walker.grounded,
+                    walker.jumps
+                )
+            });
+            #[cfg(not(feature = "physics-3d"))]
+            let physics_note = String::new();
             println!(
-                "fps: {:.1} (frame {frames}, position {:.1},{:.1},{:.1})",
+                "fps: {:.1} (frame {frames}, position {:.1},{:.1},{:.1}{physics_note})",
                 fps_frames as f32 / fps_timer,
                 controller.position().x,
                 controller.position().y,

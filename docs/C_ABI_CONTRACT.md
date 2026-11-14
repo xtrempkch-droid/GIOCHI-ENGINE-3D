@@ -1283,3 +1283,97 @@ corre no máximo 4 e descarta o resto.
 | Handle inválido devolve erro | `c_smoke.c` (`get_position` com handle 999999) |
 | `kind` desconhecido é recusado | `c_smoke.c` (`kind == 7`) |
 | `step` devolve 0, não a contagem | `c_smoke.c` (`CHECK_CODE` no passo) |
+
+# Partes VI–IX — Partículas, animação, consola e hot reload (ABI v6)
+
+Todas aditivas. A regra que vale para as quatro: **os símbolos existem em qualquer
+build**. A consola precisa de `devtools` e o hot reload de `hot_reload`; sem a feature, a
+função devolve `GIOCHI_ERROR_UNSUPPORTED` e explica em `giochi_get_last_error()` como
+recompilar. O header é um contrato e não pode mudar com as features de quem compilou o
+`.so` — um `dlsym` que falha é pior do que um erro com mensagem.
+
+Cada função gated é **uma** definição com o `#[cfg]` *dentro* do corpo. Duas definições
+`#[cfg]`-adas produzem duas declarações no header, porque o cbindgen não avalia `cfg`; foi
+o que aconteceu na primeira tentativa e o `giochi.h` passou a declarar
+`giochi_console_execute` duas vezes.
+
+## 21. Partículas
+
+```c
+uint64_t giochi_particles_create(GiochiTexture texture, uint32_t capacity,
+                                 const GiochiParticleConfig *config);
+int32_t  giochi_particles_emit(uint64_t handle, float x, float y, uint32_t count);
+int32_t  giochi_particles_update(uint64_t handle, float dt);
+int32_t  giochi_particles_draw(uint64_t handle);
+uint32_t giochi_particles_alive(uint64_t handle);
+int32_t  giochi_particles_destroy(uint64_t handle);
+int32_t  giochi_particles_default_config(GiochiParticleConfig *out_config);
+```
+
+`capacity == 0` usa o padrão de 5 000. `config` é copiada; `NULL` usa o emissor padrão.
+`emit` devolve **quantas partículas nasceram** — o pool limita à capacidade, e emitir num
+pool cheio devolve `0` sem ser erro. `draw` só é válido no callback de `render`.
+
+`GiochiParticleConfig` espelha `ParticleConfig` campo a campo; é um tipo próprio para o
+header não depender dos internos do engine.
+
+## 22. Animação
+
+```c
+uint64_t giochi_animator_create(GiochiTexture texture, float frame_width,
+                                float frame_height, uint32_t frame_count,
+                                float frame_duration, uint32_t mode);
+int32_t  giochi_animator_update(uint64_t handle, float dt);
+int32_t  giochi_animator_draw(uint64_t handle, float x, float y,
+                              float width, float height);
+int32_t  giochi_animator_current_frame(uint64_t handle);
+int32_t  giochi_animator_reset(uint64_t handle);
+int32_t  giochi_animator_play(uint64_t handle);
+int32_t  giochi_animator_pause(uint64_t handle);
+int32_t  giochi_animator_finished(uint64_t handle);
+int32_t  giochi_animator_destroy(uint64_t handle);
+```
+
+`mode`: `0` toca uma vez e para, `1` repete, `2` vai e volta sem repetir os extremos.
+Cobre a faixa horizontal de uma textura — o spritesheet simples. `current_frame` devolve
+`-1` para um handle inválido; `finished` só é `1` num modo de uma vez que chegou ao fim.
+
+## 23. Consola
+
+```c
+int32_t giochi_console_execute(const char *line);
+int32_t giochi_console_output_count(void);
+int32_t giochi_console_output_line(int32_t index, char *buffer,
+                                   size_t capacity, size_t *out_len);
+int32_t giochi_console_clear(void);
+```
+
+`execute` corre a linha como se tivesse sido escrita na consola. A saída vai para o
+scrollback, porque C não tem `Vec<String>`: `output_count` diz quantas linhas existem e
+`output_line` copia uma para um buffer do chamador, com `capacity` a incluir o NUL e
+`out_len` a receber os bytes escritos (uma linha maior é truncada, e `out_len` é o que
+permite detectar isso).
+
+## 24. Hot reload
+
+```c
+int32_t giochi_hot_reload_enable(const char *path);
+int32_t giochi_hot_reload_disable(void);
+int32_t giochi_hot_reload_is_enabled(void);
+int32_t giochi_hot_reload_poll(void);
+```
+
+`enable` devolve o número de caminhos observados (`>= 1`) em sucesso. `poll` drena as
+mudanças pendentes e devolve quantas foram aplicadas: chame-o uma vez por frame, antes do
+`update`, para a recarga cair numa fronteira de frame em vez de a meio de um.
+
+## 25. Checklist de conformidade das partes VI–IX
+
+| Requisito | Como é verificado |
+|---|---|
+| `GIOCHI_ABI_VERSION == 6` | `lib.rs::abi_version_matches_contract` |
+| `giochi_particles_*` / `giochi_animator_*` existem e recusam handles inválidos | `c_smoke.c`, `python_smoke.py` |
+| `GiochiParticleConfig` é copiável e o default é válido | `giochi_particles_default_config` nos dois testes |
+| Consola e hot reload existem com e sem feature | `scripts/ffi-smoke.sh` corre os dois builds |
+| Um build sem a feature devolve `UNSUPPORTED` e explica | `c_smoke.c` (verifica a mensagem) e `python_smoke.py` |
+| Sem declarações duplicadas | `scripts/gen-header.sh --check` |

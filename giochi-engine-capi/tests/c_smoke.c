@@ -274,6 +274,88 @@ int main(void)
         GiochiTexture from_memory = giochi_texture_create_memory(buffer, size);
         CHECK(from_memory != 0);
         CHECK(giochi_texture_width(from_memory) == 32);
+
+        /* ---- partes VI e VII: partículas e animação ---------------------- */
+        {
+            GiochiParticleConfig config;
+            memset(&config, 0, sizeof config);
+            CHECK_CODE(giochi_particles_default_config(&config));
+            CHECK(config.lifetime > 0.0f);
+            CHECK(giochi_particles_default_config(NULL) == GIOCHI_ERROR_INVALID_ARGUMENT);
+
+            uint64_t particles = giochi_particles_create(from_memory, 128, &config);
+            CHECK(particles != 0);
+            /* Sem textura não há sistema. */
+            CHECK(giochi_particles_create(0, 128, &config) == 0);
+
+            CHECK(giochi_particles_emit(particles, 10.0f, 20.0f, 10) == 10);
+            CHECK(giochi_particles_alive(particles) == 10);
+            /* Posição inválida é recusada antes de tocar no pool. */
+            CHECK(giochi_particles_emit(particles, NAN, 0.0f, 1) ==
+                  GIOCHI_ERROR_INVALID_ARGUMENT);
+            CHECK(giochi_particles_alive(particles) == 10);
+            CHECK_CODE(giochi_particles_update(particles, 0.5f));
+            CHECK(giochi_particles_update(particles, -1.0f) == GIOCHI_ERROR_INVALID_ARGUMENT);
+            CHECK(giochi_particles_alive(particles) <= 10);
+
+            CHECK_CODE(giochi_particles_destroy(particles));
+            CHECK(giochi_particles_destroy(particles) == GIOCHI_ERROR_INVALID_HANDLE);
+            CHECK(giochi_particles_alive(particles) == 0);
+            CHECK(giochi_particles_emit(particles, 0.0f, 0.0f, 1) ==
+                  GIOCHI_ERROR_INVALID_HANDLE);
+
+            uint64_t animation = giochi_animator_create(from_memory, 16.0f, 16.0f, 4, 0.1f, 1);
+            CHECK(animation != 0);
+            CHECK(giochi_animator_current_frame(animation) == 0);
+            CHECK_CODE(giochi_animator_update(animation, 0.15f));
+            CHECK(giochi_animator_current_frame(animation) == 1);
+            CHECK(giochi_animator_update(animation, -1.0f) == GIOCHI_ERROR_INVALID_ARGUMENT);
+            CHECK_CODE(giochi_animator_pause(animation));
+            CHECK_CODE(giochi_animator_play(animation));
+            CHECK_CODE(giochi_animator_reset(animation));
+            CHECK(giochi_animator_current_frame(animation) == 0);
+            CHECK(giochi_animator_finished(animation) == 0);
+            /* Um modo desconhecido e uma contagem zero são recusados. */
+            CHECK(giochi_animator_create(from_memory, 16.0f, 16.0f, 4, 0.1f, 9) == 0);
+            CHECK(giochi_animator_create(from_memory, 16.0f, 16.0f, 0, 0.1f, 1) == 0);
+            CHECK_CODE(giochi_animator_destroy(animation));
+            CHECK(giochi_animator_destroy(animation) == GIOCHI_ERROR_INVALID_HANDLE);
+            CHECK(giochi_animator_current_frame(animation) == -1);
+        }
+
+        /* ---- partes VIII e IX: consola e hot reload ---------------------- */
+        {
+            /* Existem em qualquer build: ou funcionam, ou dizem que a feature falta. */
+            int32_t console = giochi_console_execute("help");
+            CHECK(console == GIOCHI_ERROR_OK || console == GIOCHI_ERROR_UNSUPPORTED);
+            if (console == GIOCHI_ERROR_UNSUPPORTED) {
+                CHECK(strstr(giochi_get_last_error(), "devtools") != NULL);
+            } else {
+                CHECK(giochi_console_output_count() > 0);
+                char line[256];
+                size_t written = 0;
+                CHECK_CODE(giochi_console_output_line(0, line, sizeof line, &written));
+                CHECK(written > 0 && line[written] == '\0');
+                /* Índice fora do intervalo é erro de argumento, não crash. */
+                CHECK(giochi_console_output_line(1 << 20, line, sizeof line, &written) ==
+                      GIOCHI_ERROR_INVALID_ARGUMENT);
+                CHECK(giochi_console_output_line(0, NULL, sizeof line, &written) ==
+                      GIOCHI_ERROR_INVALID_ARGUMENT);
+            }
+            CHECK(giochi_console_execute(NULL) == GIOCHI_ERROR_INVALID_ARGUMENT ||
+                  giochi_console_execute(NULL) == GIOCHI_ERROR_UNSUPPORTED);
+            CHECK(giochi_console_clear() == GIOCHI_ERROR_OK ||
+                  giochi_console_clear() == GIOCHI_ERROR_UNSUPPORTED);
+
+            int32_t watched = giochi_hot_reload_enable("assets");
+            CHECK(watched == 1 || watched == GIOCHI_ERROR_UNSUPPORTED ||
+                  watched == GIOCHI_ERROR_INVALID_ARGUMENT);
+            CHECK(giochi_hot_reload_poll() >= 0);
+            CHECK(giochi_hot_reload_is_enabled() >= 0);
+            CHECK(giochi_hot_reload_disable() == GIOCHI_ERROR_OK ||
+                  giochi_hot_reload_disable() == GIOCHI_ERROR_UNSUPPORTED);
+            CHECK(giochi_hot_reload_is_enabled() == 0);
+        }
         CHECK_CODE(giochi_texture_destroy(from_memory));
         free(buffer);
     }

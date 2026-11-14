@@ -41,6 +41,7 @@ GIOCHI_ERROR_INVALID_HANDLE = -1
 GIOCHI_ERROR_INVALID_ARGUMENT = -2
 GIOCHI_ERROR_ASSET = -5
 GIOCHI_ERROR_NOT_INITIALIZED = -8
+GIOCHI_ERROR_UNSUPPORTED = -9
 
 
 class GiochiColor(Structure):
@@ -240,6 +241,47 @@ def first_texture(lib: ctypes.CDLL, candidates: list[bytes]) -> tuple[bytes, int
     return b"", 0
 
 
+
+
+class GiochiParticleConfig(Structure):
+    """`docs/C_ABI_CONTRACT.md` §21 — the emitter description.
+
+    Field for field the same shape `giochi_particles_create` copies; the reserved tail is
+    spelled out so the struct is exactly as long as the C one.
+    """
+
+    _fields_ = [
+        ("velocity_x", c_float),
+        ("velocity_y", c_float),
+        ("velocity_spread_x", c_float),
+        ("velocity_spread_y", c_float),
+        ("gravity_x", c_float),
+        ("gravity_y", c_float),
+        ("drag", c_float),
+        ("lifetime", c_float),
+        ("start_size", c_float),
+        ("end_size", c_float),
+        ("start_color", c_uint32),
+        ("end_color", c_uint32),
+        ("_reserved", c_uint32 * 4),
+    ]
+
+def header_abi_version() -> int:
+    """Reads `GIOCHI_ABI_VERSION` from the committed header.
+
+    Reading it instead of hard-coding a number is what keeps this script passing when a
+    later part raises the version: the header and the library are the two things that
+    must agree, and the assertion below is exactly that agreement.
+    """
+    import pathlib
+    import re
+
+    header = pathlib.Path(__file__).resolve().parent.parent / "include" / "giochi.h"
+    match = re.search(r"#define GIOCHI_ABI_VERSION (\d+)", header.read_text())
+    if match is None:
+        raise SystemExit("giochi.h has no GIOCHI_ABI_VERSION")
+    return int(match.group(1))
+
 def main() -> int:
     directory = sys.argv[1] if len(sys.argv) > 1 else "target/debug"
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -257,7 +299,7 @@ def main() -> int:
     # Part I was written against 1; this script ships with the library, so it names the
     # current number. A consumer that predates a part should test `>= 1` instead, which
     # is the compatibility rule in giochi.h.
-    check(lib.giochi_abi_version() == 5, "abi version")
+    check(lib.giochi_abi_version() == header_abi_version(), "abi version")
     check(lib.giochi_abi_version() >= 1, "abi version is at least part I")
     check(lib.giochi_engine_version() > 0, "engine version")
     check(lib.giochi_get_last_error() == b"", "last error starts empty")
@@ -308,6 +350,63 @@ def main() -> int:
           == GIOCHI_ERROR_ASSET, "short buffer is rejected")
 
     check(lib.giochi_texture_destroy(4242) == GIOCHI_ERROR_INVALID_HANDLE, "double destroy")
+
+    # ---- parts VI and VII: particles and animation ---------------------------
+    lib.giochi_particles_create.restype = c_uint64
+    lib.giochi_particles_create.argtypes = [c_uint64, c_uint32, POINTER(GiochiParticleConfig)]
+    lib.giochi_particles_default_config.argtypes = [POINTER(GiochiParticleConfig)]
+    lib.giochi_particles_emit.argtypes = [c_uint64, c_float, c_float, c_uint32]
+    lib.giochi_particles_update.argtypes = [c_uint64, c_float]
+    lib.giochi_particles_alive.argtypes = [c_uint64]
+    lib.giochi_particles_destroy.argtypes = [c_uint64]
+    lib.giochi_animator_create.restype = c_uint64
+    lib.giochi_animator_create.argtypes = [
+        c_uint64, c_float, c_float, c_uint32, c_float, c_uint32
+    ]
+    lib.giochi_animator_update.argtypes = [c_uint64, c_float]
+    lib.giochi_animator_current_frame.argtypes = [c_uint64]
+    lib.giochi_animator_destroy.argtypes = [c_uint64]
+
+    config = GiochiParticleConfig()
+    check(lib.giochi_particles_default_config(byref(config)) == GIOCHI_ERROR_OK,
+          "particles default config")
+    check(config.lifetime > 0.0, "particles default lifetime")
+    check(all(word == 0 for word in config._reserved), "particles config zeroes reserved")
+
+    # A non-zero texture handle is accepted without validating it against the registry:
+    # the check that matters in C is "0 is refused", done below.
+    # A real texture is only available inside the scene callback, so the particle and
+    # animation checks that need one live there; the ones that do not are here.
+    check(lib.giochi_particles_destroy(0) == GIOCHI_ERROR_INVALID_HANDLE,
+          "particles refuse handle 0")
+    check(lib.giochi_animator_create(0, 16.0, 16.0, 4, 0.1, 1) == 0,
+          "animator refuses a dead texture handle")
+
+    # ---- parts VIII and IX: console and hot reload ---------------------------
+    # Both exist in every build: either they work or they report UNSUPPORTED.
+    console = lib.giochi_console_execute(b"help")
+    check(console in (GIOCHI_ERROR_OK, GIOCHI_ERROR_UNSUPPORTED), "console execute")
+    if console == GIOCHI_ERROR_UNSUPPORTED:
+        check(b"devtools" in lib.giochi_get_last_error(), "console unsupported message")
+    else:
+        check(lib.giochi_console_output_count() > 0, "console produced output")
+        line = ctypes.create_string_buffer(256)
+        written = c_size_t()
+        check(lib.giochi_console_output_line(0, line, 256, byref(written)) == GIOCHI_ERROR_OK,
+              "console output line")
+        check(written.value == len(line.value), "console output length")
+        check(lib.giochi_console_output_line(0, None, 256, byref(written))
+              == GIOCHI_ERROR_INVALID_ARGUMENT, "console output rejects NULL")
+    check(lib.giochi_console_clear() in (GIOCHI_ERROR_OK, GIOCHI_ERROR_UNSUPPORTED),
+          "console clear")
+
+    watched = lib.giochi_hot_reload_enable(b"assets")
+    check(watched in (1, GIOCHI_ERROR_UNSUPPORTED, GIOCHI_ERROR_INVALID_ARGUMENT),
+          "hot reload enable")
+    check(lib.giochi_hot_reload_poll() >= 0, "hot reload poll")
+    check(lib.giochi_hot_reload_disable() in (GIOCHI_ERROR_OK, GIOCHI_ERROR_UNSUPPORTED),
+          "hot reload disable")
+    check(lib.giochi_hot_reload_is_enabled() == 0, "hot reload off after disable")
 
     # ---- scene --------------------------------------------------------------
     probe = Probe(quit_after_renders=5)

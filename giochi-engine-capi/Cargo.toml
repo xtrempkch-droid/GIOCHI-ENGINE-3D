@@ -40,6 +40,12 @@ sdl2-bundled = ["giochi-engine/sdl2-bundled", "giochi-engine-3d/sdl2-bundled"]
 #
 #   cargo build -p giochi-engine-capi --no-default-features --features sdl2-system
 sdl2-system = ["giochi-engine/sdl2-system", "giochi-engine-3d/sdl2-system"]
+# Partes VIII e IX da ABI: consola e hot reload. Desligadas por omissão porque a consola
+# traz o `egui`; as funções `giochi_console_*`/`giochi_hot_reload_*` existem de qualquer
+# forma e devolvem GIOCHI_ERROR_UNSUPPORTED sem elas, para que o header não dependa da
+# feature de quem compilou o `.so`.
+devtools = ["giochi-engine/devtools"]
+hot_reload = ["giochi-engine/hot_reload"]
 # Phase 18c: makes `giochi_engine_frame_stats` report real measurements instead of
 # zeros. Off by default for the same reason it is off in `giochi-engine` (ADR-042) --
 # the counters cost a little in the hot path and most hosts do not read them.

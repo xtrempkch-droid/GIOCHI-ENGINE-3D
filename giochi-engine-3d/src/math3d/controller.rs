@@ -96,6 +96,19 @@ impl CameraController {
         self.position
     }
 
+    /// Places the controller at `position` without touching the look direction.
+    ///
+    /// The physics-driven walker (`mini_fps --physics`) owns the position and the
+    /// controller owns the orientation: every frame the controller proposes a position
+    /// from the input, the physics world resolves it against the walls, and the resolved
+    /// one is written back here. Keeping that write-back out of `update_with_axes` means
+    /// the smoothing velocity survives, so a wall does not reset the walk.
+    pub fn set_position(&mut self, position: Vec3) {
+        if position.is_finite() {
+            self.position = position;
+        }
+    }
+
     /// The current yaw, radians.
     pub fn yaw(&self) -> f32 {
         self.yaw
@@ -288,6 +301,18 @@ fn lerp_vec3(from: Vec3, to: Vec3, t: f32) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn set_position_moves_the_eye_and_leaves_the_look_direction_alone() {
+        let mut controller = CameraController::new(Vec3::ZERO, 0.5, 0.25);
+        let forward = controller.forward();
+        controller.set_position(Vec3::new(3.0, 2.0, -1.0));
+        assert_eq!(controller.position(), Vec3::new(3.0, 2.0, -1.0));
+        assert_eq!(controller.forward(), forward);
+        // A non-finite position is ignored instead of poisoning the camera.
+        controller.set_position(Vec3::new(f32::NAN, 0.0, 0.0));
+        assert_eq!(controller.position(), Vec3::new(3.0, 2.0, -1.0));
+    }
 
     #[test]
     fn the_default_camera_looks_along_minus_z() {

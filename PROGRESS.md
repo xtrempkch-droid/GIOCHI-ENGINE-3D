@@ -31,6 +31,10 @@ Fases 0–18 concluídas. O Growth Pack começou em 2026-11-14.
       `giochi-engine-3d/src/render3d/texture.rs:65`
 - [x] `cargo check --workspace --target aarch64-unknown-linux-gnu --features physics-2d,physics-3d`
 - [x] `cargo build --release` — `libgiochi.so` com os símbolos de física
+- [x] `scripts/ffi-smoke.sh` com e sem `--features devtools,hot_reload` — `abi 6`
+- [x] `mini_fps --physics --frames 400 --auto` — `grounded=true`, 4 saltos, dentro do mundo
+- [x] `platformer_2d --frames 1800 --auto` — alvo alcançado
+- [x] `physics_3d_demo --frames 420 --auto` — inalterado depois da correcção do filtro
 
 ### Entregue na Fase 24
 
@@ -51,22 +55,41 @@ Fases 0–18 concluídas. O Growth Pack começou em 2026-11-14.
   um contrato e não pode depender de features (ADR-057).
 - `docs/PHYSICS.md` e ADR-057.
 
-### Pendências da Fase 24
+### Pendências da Fase 24 — resolvidas nesta sessão
 
-O plano pedia duas refactorizações que **não** foram feitas:
+- **`mini_fps` com física** ✅. `mini_fps --physics` (feature `physics-3d`) troca o walker
+  livre por uma cápsula cinemática: paredes bloqueiam, a gravidade puxa, as 24 caixas de
+  obstáculo são colliders fixos e o Space salta. O caminho por omissão não mudou, o que
+  mantém comparáveis os números das fases 12–17. Corrida: 400 frames, `grounded=true`,
+  4 saltos, jogador em (10.2, 2.2, −19.5) — dentro do mundo.
+- **`mini_game` com física** ✅ em parte, com uma nota. `mini_game` é um *shooter* de cima
+  para baixo: não tem gravidade nem chão, e reescrevê-lo como plataforma destruiria o
+  exemplo e os testes dele. O critério ("plataforma com gravidade e pulo") é cumprido por
+  `examples/platformer_2d.rs` (feature `physics-2d`): escada de plataformas sólidas,
+  gravidade, pulo condicionado a um raio de chão, reinício com `R`. Corrida `--auto` de
+  1 800 frames: 63 saltos, topo 424.6, **alvo alcançado**, termina em (788.9, 391.0).
+- **ABI C das fases 19–23** ✅. `GIOCHI_ABI_VERSION 6` acrescenta as partes VI–IX:
+  `giochi_particles_*` (7 símbolos + `GiochiParticleConfig`), `giochi_animator_*` (9),
+  `giochi_console_*` (4) e `giochi_hot_reload_*` (4). A consola e o hot reload existem em
+  qualquer build e devolvem `GIOCHI_ERROR_UNSUPPORTED` quando a feature falta — o header é
+  um contrato, não pode mudar com a feature de quem compilou o `.so`. `c_smoke` e
+  `python_smoke` cobrem as quatro partes, com e sem as features; os testes Python leem
+  `GIOCHI_ABI_VERSION` do header em vez de repetir o número.
 
-- **`mini_fps` com física** (jogador com `KinematicCharacterController` e obstáculos com
-  corpo). O `physics_3d_demo` exercita exactamente esses caminhos — andar, ser bloqueado
-  por uma parede, cair, subir um degrau, empilhar 20 caixas — mas o `mini_fps` continua com
-  a câmara livre. Mexer num exemplo de 801 linhas que é a referência de desempenho das
-  fases 12–17 sem uma sessão dedicada arriscava os gates dele.
-- **`mini_game` com física** (plataforma com gravidade e salto). O `physics_2d_demo` cobre
-  gravidade, empilhamento, arrasto e raycast.
+### Bug encontrado ao integrar a física no `mini_fps`
 
-Também ficaram de fora da ABI C, por âmbito: `giochi_particles_*`, `giochi_sprite_animator_*`,
-`giochi_console_execute` e `giochi_hot_reload_enable/disable`. A parte V cobre a física, que
-é o que o critério de aceite nomeia ("`libgiochi.so` exporta símbolos de physics; teste
-Python passa"); o resto está registado em `IDEAS.md` como trabalho aditivo.
+`PhysicsWorld3D::move_character` incluía a **própria cápsula do personagem** na consulta
+do `move_shape`: cada shape cast começava por bater no personagem, e o controlador devolvia
+uma translação projectada sobre a sua própria superfície. O sintoma era um walker que
+derivava de lado, não atravessava uma porta e acabava por cair fora do mundo — com todos os
+testes verdes, porque um deslocamento numa direcção constante esconde a deriva. A correcção
+é um `QueryFilter` com `exclude_collider`, e `a_character_walks_the_distance_it_asked_for_on_open_floor`
+é o teste de regressão: dez frames de 0.05 unidades têm de somar 0.5, sem deriva em z.
+
+O `physics_3d_demo` anterior passava por sorte: empurrava sempre em +x contra uma parede,
+e a projecção errada mantinha a direcção.
+
+### Nota de âmbito
 
 ### Gates da Fase 23
 

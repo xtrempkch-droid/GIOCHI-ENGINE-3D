@@ -76,6 +76,14 @@ name = "physics_2d_demo"
 path = "examples/physics_2d_demo.rs"
 required-features = ["physics-2d"]
 
+# Phase 24, pendency: the platformer the plan asked `mini_game` to become. `mini_game`
+# is a top-down shooter with no gravity, so this is a sibling example rather than a
+# rewrite of it.
+[[example]]
+name = "platformer_2d"
+path = "examples/platformer_2d.rs"
+required-features = ["physics-2d"]
+
 [[test]]
 name = "physics_2d"
 required-features = ["physics-2d"]

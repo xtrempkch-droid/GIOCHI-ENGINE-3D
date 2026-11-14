@@ -461,8 +461,17 @@ impl PhysicsWorld3D {
         };
         let shape = Capsule::new_y(half_height, radius);
 
+        // The character's own capsule has to be out of the query. Rapier's own examples
+        // use a collider-less body and cast the shape by hand; here the capsule *is* the
+        // collider, so without this filter every cast hits the character itself and
+        // `move_shape` returns a translation projected onto its own surface — a walker
+        // that drifts sideways, cannot pass a doorway and slowly falls out of the world.
+        let filter = match slot.collider {
+            Some(collider) => QueryFilter::default().exclude_collider(collider),
+            None => QueryFilter::default(),
+        };
         let movement = {
-            let queries = self.world.query_pipeline();
+            let queries = self.world.query_pipeline_with_filter(filter);
             controller.move_shape(
                 delta.min(self.timestep),
                 &queries,
@@ -815,6 +824,64 @@ mod tests {
         assert_eq!(
             world.move_character(body, Vec3::ZERO, FIXED_TIMESTEP),
             Err(PhysicsError::NotACharacter)
+        );
+    }
+
+    #[test]
+    fn a_character_walks_the_distance_it_asked_for_on_open_floor() {
+        // Regression: the character's own capsule was part of the query filter, so every
+        // shape cast hit the character itself and `move_shape` returned a translation
+        // projected onto its own surface. The symptom was a walker that drifted, could
+        // not approach a wall and eventually fell out of the world — with every other
+        // test still green, because a constant direction hides the drift.
+        let mut world = world();
+        floor(&mut world, 0.0);
+        let character = world
+            .create_character(Vec3::new(0.0, 0.85, 0.0), 0.3, 0.55)
+            .expect("character");
+
+        // One warm-up cast: the first one runs before the broad phase has seen the
+        // character's collider, so it cannot report `grounded` yet. A real game does not
+        // care — it reads `grounded` from the second frame on — but the assertion below
+        // would be about the warm-up otherwise.
+        world
+            .move_character(character, Vec3::ZERO, FIXED_TIMESTEP)
+            .expect("warm-up move");
+        world.step(FIXED_TIMESTEP).expect("step");
+
+        // Ten frames of 0.05 units forward, on open floor, with the walker grounded.
+        let mut total = 0.0f32;
+        for _ in 0..10 {
+            let movement = world
+                .move_character(character, Vec3::new(0.05, 0.0, 0.0), FIXED_TIMESTEP)
+                .expect("move");
+            assert!(
+                movement.grounded,
+                "a character standing on the floor lost contact: {movement:?}"
+            );
+            total += movement.translation.x;
+            // The z drift that the self-collision produced was the visible symptom.
+            assert!(
+                movement.translation.z.abs() < 1.0e-3,
+                "moving along x drifted {:.4} along z",
+                movement.translation.z
+            );
+            world.step(FIXED_TIMESTEP).expect("step");
+        }
+        assert!(
+            (total - 0.5).abs() < 0.05,
+            "asked to move 0.5 units forward, the controller allowed {total}"
+        );
+        let position = world.position(character).expect("position");
+        assert!(
+            (position.x - 0.5).abs() < 0.05,
+            "the character ended at x = {}, expected 0.5",
+            position.x
+        );
+        assert!(
+            (position.y - 0.85).abs() < 0.02,
+            "the walker sank while walking: y = {}",
+            position.y
         );
     }
 

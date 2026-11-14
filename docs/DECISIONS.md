@@ -1783,3 +1783,25 @@ Two behaviours are worth remembering because they cost time to discover:
   the supported path (see `PERF_LOG.md`).
 * The character controller needs the game to apply gravity. A kinematic body that is only
   pushed sideways never reaches the floor, never snaps to it and never reports `grounded`.
+
+## ADR-058 — The character's own collider is excluded from its movement query
+
+**Context.** `PhysicsWorld3D::move_character` wraps Rapier's `KinematicCharacterController`.
+Rapier's own examples use a rigid body with **no** collider and cast a `Capsule` shape by
+hand, so the query pipeline naturally excludes the thing being moved. This engine instead
+attaches a real collider to the body, because the rest of the API (`attach_collider`,
+`sync_to_transforms`, raycasts against the player) expects every body to have one.
+
+**Decision.** `move_character` builds its query pipeline with
+`QueryFilter::default().exclude_collider(collider)`, excluding the character's own collider.
+
+**Consequences.** Without it, every shape cast hits the character itself and the controller
+returns a translation projected onto its own surface: the walker drifts sideways, cannot
+pass a doorway, and eventually leaves the world. The bug is invisible to a test that pushes
+in a single constant direction — `physics_3d_demo` passed with it for exactly that reason —
+so the regression test is a **distance walked** rather than a direction: ten frames of 0.05
+units must sum to 0.5, with no drift on the other two axes.
+
+A character whose collider was created some other way (a game calling `attach_collider`
+after `create_character` replaces nothing) still works: the filter is optional and falls back
+to the unfiltered pipeline when the body has no collider.

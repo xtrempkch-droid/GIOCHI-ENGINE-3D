@@ -540,6 +540,44 @@ A referência completa está em `docs/C_ABI_CONTRACT.md` §20. Cuide de três co
 * **Meias medidas.** `half_width`/`half_height`, não largura e altura.
 * **Não é singleton.** Dois mundos coexistem; guarde o ponteiro.
 
+## 11c. Partes VI–IX: partículas, animação, consola e hot reload (ABI version 6)
+
+```c
+/* Partículas: handle opaco, a descrição é copiada. */
+GiochiParticleConfig config;
+giochi_particles_default_config(&config);
+uint64_t smoke = giochi_particles_create(textura, 512, &config);
+giochi_particles_emit(smoke, 100.0f, 80.0f, 32);   /* devolve quantas nasceram */
+giochi_particles_update(smoke, 1.0f / 60.0f);
+giochi_particles_draw(smoke);                        /* só no callback de render */
+giochi_particles_destroy(smoke);
+
+/* Animação: faixa horizontal, 4 frames de 16x16 a 0.1 s, em loop. */
+uint64_t walk = giochi_animator_create(textura, 16.0f, 16.0f, 4, 0.1f, 1);
+giochi_animator_update(walk, 1.0f / 60.0f);
+giochi_animator_draw(walk, 40.0f, 60.0f, 32.0f, 32.0f);
+giochi_animator_destroy(walk);
+
+/* Consola e hot reload: existem sempre; sem a feature devolvem UNSUPPORTED. */
+if (giochi_console_execute("fps") != 0) {           /* 0 = sucesso */
+    printf("sem consola: %s\n", giochi_get_last_error());
+}
+giochi_hot_reload_enable("assets");
+/* ... por frame, antes do update ... */
+giochi_hot_reload_poll();
+giochi_hot_reload_disable();
+```
+
+Três coisas a reter:
+
+* **A saída da consola vai para o scrollback.** `giochi_console_output_count()` e
+  `giochi_console_output_line(index, buffer, capacity, &written)` copiam-na para o
+  chamador; `capacity` inclui o NUL.
+* **`UNSUPPORTED` não é falha de utilização.** É a resposta de um `libgiochi.so`
+  compilado sem `devtools`/`hot_reload`. A mensagem diz como recompilar.
+* **`poll` antes do `update`.** Uma recarga aplicada a meio de um frame é uma textura
+  trocada debaixo do desenho.
+
 ## 12. Verification
 
 ```bash

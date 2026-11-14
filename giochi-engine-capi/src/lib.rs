@@ -64,12 +64,16 @@
 #![warn(missing_docs)]
 
 mod abi_types;
+mod animation;
 mod assets;
 mod audio;
+mod console;
 mod engine;
+mod hot_reload;
 mod input;
 mod lib3d;
 mod net;
+mod particles;
 mod physics;
 mod render;
 mod scene;
@@ -84,6 +88,11 @@ pub use abi_types::{
     GIOCHI_ERROR_UNSUPPORTED, GIOCHI_MAX_ASSET_SIZE, GIOCHI_NET_AGUARDE, GIOCHI_SHADER_FLAT,
     GIOCHI_SHADER_PHONG, GIOCHI_SHADER_TEXTURED,
 };
+pub use animation::{
+    giochi_animator_create, giochi_animator_current_frame, giochi_animator_destroy,
+    giochi_animator_draw, giochi_animator_finished, giochi_animator_pause, giochi_animator_play,
+    giochi_animator_reset, giochi_animator_update,
+};
 pub use assets::{giochi_asset_read, giochi_asset_size};
 pub use audio::{
     giochi_audio_available, giochi_audio_set_volume, giochi_audio_volume, giochi_music_destroy,
@@ -91,11 +100,19 @@ pub use audio::{
     giochi_music_resume, giochi_music_stop, giochi_sound_destroy, giochi_sound_load,
     giochi_sound_play,
 };
+pub use console::{
+    giochi_console_clear, giochi_console_execute, giochi_console_output_count,
+    giochi_console_output_line,
+};
 pub use engine::{
     giochi_engine_elapsed, giochi_engine_frame_stats, giochi_engine_frames, giochi_engine_init,
     giochi_engine_is_running, giochi_engine_request_quit, giochi_engine_reset_quit,
     giochi_engine_run, giochi_engine_run_scene, giochi_engine_shutdown, giochi_engine_step,
     giochi_engine_steps, giochi_engine_timestep, giochi_engine_video_driver,
+};
+pub use hot_reload::{
+    giochi_hot_reload_disable, giochi_hot_reload_enable, giochi_hot_reload_is_enabled,
+    giochi_hot_reload_poll,
 };
 pub use input::{
     giochi_gamepad_axis, giochi_gamepad_button_down, giochi_gamepad_connected,
@@ -120,6 +137,11 @@ pub use net::{
     giochi_net_pump, giochi_net_send_input, giochi_net_set_area, giochi_net_set_camera_pos,
     GiochiNetGlobal, GiochiNetInimigo, GiochiNetInput, GiochiNetSnapshot, GIOCHI_NET_MAX_GLOBAL,
     GIOCHI_NET_MAX_INIMIGOS,
+};
+pub use particles::{
+    giochi_particles_alive, giochi_particles_create, giochi_particles_default_config,
+    giochi_particles_destroy, giochi_particles_draw, giochi_particles_emit,
+    giochi_particles_update, GiochiParticleConfig,
 };
 pub use physics::{
     giochi_physics_apply_impulse, giochi_physics_attach_box, giochi_physics_body_count,
@@ -160,7 +182,7 @@ mod tests {
     fn abi_version_matches_contract() {
         // The number `docs/C_ABI_CONTRACT.md` names as the current part. Bump it with
         // the contract, never to make a test pass.
-        assert_eq!(GIOCHI_ABI_VERSION, 5);
+        assert_eq!(GIOCHI_ABI_VERSION, 6);
         assert_eq!(giochi_abi_version(), GIOCHI_ABI_VERSION);
     }
 

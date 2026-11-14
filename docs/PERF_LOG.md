@@ -854,6 +854,29 @@ step per raycast-after-mutation, and none in the steady state.
 * The controller does not move the body: `move_character` returns the allowed translation
   and the caller's `step` applies it through `set_next_kinematic_translation`.
 
+## After the phase-24 pendencies — physics in the examples
+
+| Run | Result | Interpretation |
+|---|---|---|
+| `mini_fps --physics`, 400 frames | 60.0 fps, 26 bodies, 4 jumps, ends at (10.2, 2.2, −19.5) | EGL offscreen; the default path is unchanged |
+| `platformer_2d --auto`, 1800 frames | 60.2 fps, 63 jumps, goal reached at (788.9, 391.0) | SDL dummy/software; smoke test, not a baseline |
+| `physics_3d_demo`, 420 frames | unchanged after the filter fix (5.18, 0.91, −0.19) | The demo was passing by luck, not by correctness |
+| `libgiochi.so` release, ABI 6 | 9 + 20 new symbols for parts VI–IX | Particles and animation are handles, not new dependencies |
+
+### The self-collision in `move_character`
+
+`move_shape` was being given the world's query pipeline, which includes the character's own
+capsule. Every cast therefore started by hitting the character, and the controller returned
+a translation projected onto its own surface. The visible symptom was a walker that drifted
+sideways, could not pass a doorway and slowly fell out of the world; the invisible one was
+that `physics_3d_demo` passed because it only ever pushed in +x against a wall, and the
+wrong projection preserved that direction.
+
+The fix is one line of intent (`QueryFilter::default().exclude_collider(collider)`) and the
+regression test is a distance: ten frames of 0.05 units must sum to 0.5 with no drift on the
+other axes. A constant-direction test cannot catch this class of bug — the direction is what
+hides it.
+
 ## Conclusions
 
 - On x86_64 the baseline is dominated by per-sprite draw calls: 200 → 1000 sprites

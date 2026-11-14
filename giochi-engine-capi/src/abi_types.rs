@@ -35,7 +35,11 @@ const _: () = assert!(ENGINE_TITLE_CAPACITY == 64);
 /// * `4` — part IV (networking), release 0.4.0.
 /// * `5` — part V (2D physics), Growth Pack phase 24. Additive: new `giochi_physics_*`
 ///   symbols and one opaque `GiochiPhysicsWorld`; no earlier signature or layout moved.
-pub const GIOCHI_ABI_VERSION: u32 = 5;
+/// * `6` — parts VI–IX: particles, sprite animation, console and hot reload. Additive
+///   again. The console and hot-reload entry points exist in every build and report
+///   `GIOCHI_ERROR_UNSUPPORTED` when the corresponding feature is off, because a header
+///   that changes with the feature set is not a contract.
+pub const GIOCHI_ABI_VERSION: u32 = 6;
 
 /// Largest asset the loader accepts, in bytes (64 MiB).
 pub const GIOCHI_MAX_ASSET_SIZE: usize = 64 * 1024 * 1024;

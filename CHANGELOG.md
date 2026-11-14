@@ -6,6 +6,41 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Não publicado]
 
+### Adicionado — ABI C v6: partículas, animação, consola e hot reload
+
+- **Partes VI–IX da ABI C** (`GIOCHI_ABI_VERSION 6`, aditivas): `giochi_particles_*` com
+  `GiochiParticleConfig` e um handle opaco por sistema; `giochi_animator_*` para faixas
+  horizontais de spritesheet (`0` toca uma vez, `1` repete, `2` vai e volta);
+  `giochi_console_*` com a saída copiada para um buffer do chamador; e
+  `giochi_hot_reload_*`.
+- A consola e o hot reload **existem em qualquer build**: sem `devtools`/`hot_reload`
+  devolvem `GIOCHI_ERROR_UNSUPPORTED` e explicam como recompilar, porque o header é um
+  contrato e não pode mudar com as features de quem compilou a biblioteca. Cada função
+  gated é uma única definição com o `#[cfg]` no corpo — duas definições produzem duas
+  declarações no header, e foi o que aconteceu na primeira tentativa.
+- `giochi.h` regenerado e verificado; `c_smoke` e `python_smoke` cobrem as quatro partes
+  com e sem as features, e derivam `GIOCHI_ABI_VERSION` do header em vez de repetirem o
+  número.
+
+### Corrigido — o controlador de personagem colidia consigo próprio
+
+- `PhysicsWorld3D::move_character` não excluía a cápsula do próprio personagem da consulta
+  do `move_shape`. Cada shape cast batia primeiro no personagem e o controlador devolvia
+  uma translação projectada sobre a sua própria superfície, pelo que um walker derivava de
+  lado, não atravessava uma porta e acabava por cair fora do mundo. A consulta passa a usar
+  `QueryFilter::exclude_collider`; o teste de regressão pede dez frames de 0.05 unidades e
+  exige 0.5 no total, sem deriva em z.
+
+### Adicionado — física nos exemplos (pendências da Fase 24)
+
+- `mini_fps --physics` (feature `physics-3d`): o walker passa a ser uma cápsula cinemática
+  conduzida pelo controlador de personagem, com as caixas de obstáculo como colliders fixos
+  e Space para saltar. O caminho por omissão não mudou, para os números das fases 12–17
+  continuarem comparáveis.
+- `examples/platformer_2d.rs` (feature `physics-2d`): gravidade, pulo condicionado a um
+  raio de chão e plataformas sólidas em escada, com um modo `--auto` que sobe e alcança o
+  alvo. `mini_game` é um shooter sem gravidade e ficou como estava.
+
 ### Adicionado — Fase 24: física e C ABI v5
 
 - **Física 2D** (`giochi-engine::physics`, feature `physics-2d`): `PhysicsWorld2D` com

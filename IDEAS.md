@@ -37,13 +37,17 @@ para não serem perdidas nem implementadas por acidente (R6).
 - [ ] Preservar globais Lua entre recargas de script (hoje a VM reinicia; ADR-050).
 - [ ] `giochi_ui_*` na ABI v4: a fachada já é C-shaped, falta a exposição (Fase 24c).
 
-## C ABI v5 — the parts not exposed
+## C ABI — what is still not exposed
 
-- **`giochi_particles_*`** (create/emit/update/draw). The 2D particle system already has a
-  `#[repr(C)]`-shaped API, so this is mostly a handle registry; `draw` needs the global
-  engine's render context.
-- **`giochi_sprite_animator_*`** (create/play/update). Straightforward, same reason.
-- **`giochi_console_execute`** — needs `devtools` on, which would make the header feature
-  dependent; the fix is a separate `libgiochi-devtools.so` or a stubbed symbol that
-  returns `GIOCHI_ERROR_UNSUPPORTED`.
-- **`giochi_hot_reload_enable/disable`** — needs `hot_reload` on, same problem.
+Everything the Growth Pack asked for is now in the header (ABI v6). What is left is
+deliberately out of scope:
+
+- **Physics 3D through C.** Would need a second set of `giochi_physics3d_*` symbols and
+  `GiochiVec3`-shaped types at every call. A C game that wants 3D physics is better served
+  by linking `rapier3d` (or the Rust crate) than by growing the flat ABI.
+- **Particle emitters other than a point.** `AreaEmitter`, `CircleEmitter` and `LineEmitter`
+  exist in Rust; each needs its own `#[repr(C)]` description and its own create function.
+  Additive whenever someone needs it.
+- **Console commands registered from C.** `CommandRegistry::register` takes a Rust closure;
+  a C callback would need a function-pointer type, a user-data void*, and a rule for what
+  happens when the library outlives the callback. Worth doing with a real consumer.

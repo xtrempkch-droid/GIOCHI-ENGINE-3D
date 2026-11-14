@@ -24,7 +24,7 @@ documentation_length = "full"
 usize_is_size_t = true
 
 header = """/*
- * GIOCHI-ENGINE C ABI, version 5.
+ * GIOCHI-ENGINE C ABI, version 6.
  *
  * Link against libgiochi.so (or libgiochi.a) and call giochi_engine_init() before
  * anything else. Every fallible function returns 0 on success and a negative code
@@ -50,8 +50,15 @@ header = """/*
  * Still additive: every earlier signature and layout is unchanged.
  *
  * Version 5 adds part V: 2D physics (giochi_physics_* and GiochiPhysicsWorld), section 20.
- * Additive like the rest: a version 1-4 consumer compiles and runs unchanged, so accept
- * giochi_abi_version() >= the part you use, not == 5.
+ *
+ * Version 6 adds parts VI-IX: particles (giochi_particles_*), sprite animation
+ * (giochi_animator_*), the in-game console (giochi_console_*) and hot reload
+ * (giochi_hot_reload_*), sections 21-24. Still additive, so accept
+ * giochi_abi_version() >= the part you use, not == 6.
+ *
+ * giochi_console_* and giochi_hot_reload_* exist in every build. A library compiled
+ * without the `devtools`/`hot_reload` feature returns GIOCHI_ERROR_UNSUPPORTED from them
+ * and explains why in giochi_get_last_error(); they are never missing symbols.
  *
  * The 3D engine is an opaque pointer the caller owns (ADR-039), unlike the 2D singleton.
  * giochi_mesh_* and giochi_shader_* take no engine: they act on the most recently created

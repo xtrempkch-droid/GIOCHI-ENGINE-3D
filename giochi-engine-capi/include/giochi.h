@@ -1,5 +1,5 @@
 /*
- * GIOCHI-ENGINE C ABI, version 5.
+ * GIOCHI-ENGINE C ABI, version 6.
  *
  * Link against libgiochi.so (or libgiochi.a) and call giochi_engine_init() before
  * anything else. Every fallible function returns 0 on success and a negative code
@@ -25,8 +25,15 @@
  * Still additive: every earlier signature and layout is unchanged.
  *
  * Version 5 adds part V: 2D physics (giochi_physics_* and GiochiPhysicsWorld), section 20.
- * Additive like the rest: a version 1-4 consumer compiles and runs unchanged, so accept
- * giochi_abi_version() >= the part you use, not == 5.
+ *
+ * Version 6 adds parts VI-IX: particles (giochi_particles_*), sprite animation
+ * (giochi_animator_*), the in-game console (giochi_console_*) and hot reload
+ * (giochi_hot_reload_*), sections 21-24. Still additive, so accept
+ * giochi_abi_version() >= the part you use, not == 6.
+ *
+ * giochi_console_* and giochi_hot_reload_* exist in every build. A library compiled
+ * without the `devtools`/`hot_reload` feature returns GIOCHI_ERROR_UNSUPPORTED from them
+ * and explains why in giochi_get_last_error(); they are never missing symbols.
  *
  * The 3D engine is an opaque pointer the caller owns (ADR-039), unlike the 2D singleton.
  * giochi_mesh_* and giochi_shader_* take no engine: they act on the most recently created
@@ -69,7 +76,11 @@ typedef uint64_t GiochiGlTextureHandle; /* 0 invalid */
 // * `4` — part IV (networking), release 0.4.0.
 // * `5` — part V (2D physics), Growth Pack phase 24. Additive: new `giochi_physics_*`
 //   symbols and one opaque `GiochiPhysicsWorld`; no earlier signature or layout moved.
-#define GIOCHI_ABI_VERSION 5
+// * `6` — parts VI–IX: particles, sprite animation, console and hot reload. Additive
+//   again. The console and hot-reload entry points exist in every build and report
+//   `GIOCHI_ERROR_UNSUPPORTED` when the corresponding feature is off, because a header
+//   that changes with the feature set is not a contract.
+#define GIOCHI_ABI_VERSION 6
 
 // Largest asset the loader accepts, in bytes (64 MiB).
 #define GIOCHI_MAX_ASSET_SIZE ((64 * 1024) * 1024)
@@ -156,6 +167,15 @@ typedef uint64_t GiochiGlTextureHandle; /* 0 invalid */
 // `giochi_physics_world_destroy`; cada mundo é independente, ao contrário do motor 2D,
 // que é singleton (ADR-012).
 typedef struct GiochiPhysicsWorld GiochiPhysicsWorld;
+
+// Opaque texture handle. `0` is invalid/null.
+//
+// # C ABI
+//
+// ```c
+// typedef uint64_t GiochiTexture;
+// ```
+typedef uint64_t GiochiTexture;
 
 // Opaque sound handle (short, fully decoded effect). `0` is invalid/null.
 //
@@ -565,15 +585,6 @@ typedef struct GiochiNetGlobal {
     uint8_t dados[GIOCHI_NET_MAX_GLOBAL];
 } GiochiNetGlobal;
 
-// Opaque texture handle. `0` is invalid/null.
-//
-// # C ABI
-//
-// ```c
-// typedef uint64_t GiochiTexture;
-// ```
-typedef uint64_t GiochiTexture;
-
 // An 8-bit-per-channel RGBA color.
 //
 // # C ABI
@@ -598,6 +609,39 @@ typedef struct GiochiColor {
     // Reserved for future ABI-compatible fields. Must be zero.
     uint32_t _reserved[4];
 } GiochiColor;
+
+// The description of an emitter's behaviour, as the C side fills it in.
+//
+// Mirrors `ParticleConfig` field for field. Kept as its own type rather than exporting
+// the Rust struct so the header stays independent of the engine's internals.
+typedef struct GiochiParticleConfig {
+    // Initial velocity, in world units per second.
+    float velocity_x;
+    // Initial velocity, in world units per second.
+    float velocity_y;
+    // Symmetric random spread applied to each velocity component.
+    float velocity_spread_x;
+    // Symmetric random spread applied to each velocity component.
+    float velocity_spread_y;
+    // Constant acceleration during the particle's life.
+    float gravity_x;
+    // Constant acceleration during the particle's life.
+    float gravity_y;
+    // Exponential drag per second; must not be negative.
+    float drag;
+    // Lifetime in seconds; must be positive.
+    float lifetime;
+    // Initial size, in world units.
+    float start_size;
+    // Final size, in world units.
+    float end_size;
+    // Colour at the start of the life.
+    struct GiochiColor start_color;
+    // Colour at the end of the life.
+    struct GiochiColor end_color;
+    // Reserved for ABI-compatible extension; must be zero.
+    uint32_t _reserved[4];
+} GiochiParticleConfig;
 
 // An axis-aligned rectangle.
 //
@@ -756,6 +800,43 @@ typedef struct GiochiSceneCallbacks {
 
 
 
+// Creates a horizontal spritesheet animation and returns its handle.
+//
+// `frame_width`/`frame_height` are in texture pixels; `frame_duration` is seconds per
+// frame. `mode` is `0` once, `1` loop, `2` ping-pong. Returns `0` on failure.
+uint64_t giochi_animator_create(GiochiTexture texture,
+                                float frame_width,
+                                float frame_height,
+                                uint32_t frame_count,
+                                float frame_duration,
+                                uint32_t mode);
+
+// Destroys an animation.
+int32_t giochi_animator_destroy(uint64_t handle);
+
+// Advances the animation by `dt` seconds.
+int32_t giochi_animator_update(uint64_t handle, float dt);
+
+// Which frame is showing right now (`-1` for an invalid handle).
+int32_t giochi_animator_current_frame(uint64_t handle);
+
+// Restarts the animation from the first frame and leaves it playing.
+int32_t giochi_animator_reset(uint64_t handle);
+
+// Pauses the animation on the current frame.
+int32_t giochi_animator_pause(uint64_t handle);
+
+// Resumes a paused animation.
+int32_t giochi_animator_play(uint64_t handle);
+
+// Whether a one-shot animation reached its last frame (`1`) or not (`0`).
+int32_t giochi_animator_finished(uint64_t handle);
+
+// Draws the current frame into `(x, y, width, height)` through the engine's camera.
+//
+// Only valid inside a `render` callback (or outside a run).
+int32_t giochi_animator_draw(uint64_t handle, float x, float y, float width, float height);
+
 // Writes the size of `path` in bytes into `out_size`.
 //
 // # C ABI
@@ -911,6 +992,27 @@ void giochi_music_stop(void);
 // int32_t giochi_music_is_playing(void);
 // ```
 int32_t giochi_music_is_playing(void);
+
+// Executes one console command line, as if it had been typed into the console.
+//
+// Returns `0` on success. The output goes to the console scrollback, readable with
+// `giochi_console_output_count`/`giochi_console_output_line` — C has no
+// `Vec<String>`, and copying into a caller buffer is the convention the rest of the
+// ABI uses. Returns `GIOCHI_ERROR_UNSUPPORTED` when this build has no console.
+int32_t giochi_console_execute(const char *line);
+
+// How many lines the console scrollback holds (`0` without a console).
+int32_t giochi_console_output_count(void);
+
+// Copies scrollback line `index` (`0` is the oldest) into `buffer` as NUL-terminated
+// UTF-8.
+//
+// `capacity` includes the NUL; `out_len` receives the bytes written, not counting the
+// NUL. A line longer than the buffer is truncated, which is why `out_len` exists.
+int32_t giochi_console_output_line(int32_t index, char *buffer, size_t capacity, size_t *out_len);
+
+// Clears the scrollback and the command history.
+int32_t giochi_console_clear(void);
 
 // Initialises the engine, creating the window, renderer, mixer and input state.
 //
@@ -1074,6 +1176,24 @@ int32_t giochi_engine_frame_stats(struct GiochiFrameStats *out_stats);
 // const char* giochi_engine_video_driver(void);
 // ```
 const char *giochi_engine_video_driver(void);
+
+// Starts watching `path` for changes.
+//
+// Returns the number of paths being watched (`>= 1`) on success, or a negative error
+// code. `GIOCHI_ERROR_UNSUPPORTED` means this build has no `hot_reload` feature.
+int32_t giochi_hot_reload_enable(const char *path);
+
+// Stops watching and discards the watcher.
+int32_t giochi_hot_reload_disable(void);
+
+// `1` when a watcher is running, `0` otherwise.
+int32_t giochi_hot_reload_is_enabled(void);
+
+// Drains pending changes and returns how many were applied.
+//
+// Call it once per frame, before `update`, so a reload lands at a frame boundary
+// instead of in the middle of one.
+int32_t giochi_hot_reload_poll(void);
 
 // `1` while `keycode` is held.
 //
@@ -1719,6 +1839,39 @@ int32_t giochi_net_poll_snapshot_filtered(uint64_t handle,
 // int32_t giochi_net_poll_global(uint64_t handle, GiochiNetGlobal* out);
 // ```
 int32_t giochi_net_poll_global(uint64_t handle, struct GiochiNetGlobal *out);
+
+// Creates a particle system over `texture` and returns its handle.
+//
+// `capacity` is the pool size (`0` uses the default of 5 000). `config` is copied;
+// a `NULL` config uses the default emitter. Returns `0` on failure.
+uint64_t giochi_particles_create(GiochiTexture texture,
+                                 uint32_t capacity,
+                                 const struct GiochiParticleConfig *config);
+
+// Destroys a particle system.
+//
+// Returns `GIOCHI_ERROR_INVALID_HANDLE` for `0` or an already-destroyed handle.
+int32_t giochi_particles_destroy(uint64_t handle);
+
+// Emits `count` particles at `(x, y)`.
+//
+// Returns how many were actually emitted — the pool caps at its capacity — or a
+// negative error code. Emitting into a full pool returns `0` and is not an error.
+int32_t giochi_particles_emit(uint64_t handle, float x, float y, uint32_t count);
+
+// Advances the live particles by `dt` seconds.
+int32_t giochi_particles_update(uint64_t handle, float dt);
+
+// Draws the live particles through the engine's camera.
+//
+// Only valid inside a `render` callback (or outside a run).
+int32_t giochi_particles_draw(uint64_t handle);
+
+// How many particles are alive right now (`0` for an invalid handle).
+uint32_t giochi_particles_alive(uint64_t handle);
+
+// Copies the default emitter configuration into `out_config`.
+int32_t giochi_particles_default_config(struct GiochiParticleConfig *out_config);
 
 // Creates a physics world with the given gravity and a 60 Hz fixed step.
 //

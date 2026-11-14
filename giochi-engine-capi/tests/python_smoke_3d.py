@@ -33,7 +33,6 @@ GIOCHI_SHADER_FLAT = 0
 GIOCHI_SHADER_TEXTURED = 1
 GIOCHI_SHADER_PHONG = 2
 
-GIOCHI_ABI_VERSION = 5
 SKIP_CODE = 77
 
 
@@ -187,6 +186,23 @@ def declare(lib: ctypes.CDLL) -> None:
     lib.giochi_renderer3d_draw_mesh.restype = c_int32
 
 
+
+def header_abi_version() -> int:
+    """Reads `GIOCHI_ABI_VERSION` from the committed header.
+
+    Reading it instead of hard-coding a number is what keeps this script passing when a
+    later part raises the version: the header and the library are the two things that
+    must agree, and the assertion below is exactly that agreement.
+    """
+    import pathlib
+    import re
+
+    header = pathlib.Path(__file__).resolve().parent.parent / "include" / "giochi.h"
+    match = re.search(r"#define GIOCHI_ABI_VERSION (\d+)", header.read_text())
+    if match is None:
+        raise SystemExit("giochi.h has no GIOCHI_ABI_VERSION")
+    return int(match.group(1))
+
 def main() -> int:
     directory = sys.argv[1] if len(sys.argv) > 1 else "target/debug"
 
@@ -207,8 +223,8 @@ def main() -> int:
     # rule, so it keeps passing once a later part raises the number. The equality checks
     # that these struct declarations describe the same version the library exports.
     check(lib.giochi_abi_version() >= 2, "abi version is at least part II")
-    check(lib.giochi_abi_version() == GIOCHI_ABI_VERSION, "abi version matches the header")
-    check(GIOCHI_ABI_VERSION >= 2, "the struct declarations match ABI >= 2")
+    check(lib.giochi_abi_version() == header_abi_version(), "abi version matches the header")
+    check(header_abi_version() >= 2, "the struct declarations match ABI >= 2")
 
     # ---- the structs must be the size the header documents ------------------
     for name, size in [
