@@ -61,7 +61,7 @@ use sdl2::keyboard::Keycode;
 
 use crate::perf::{FrameStats, FrameTimeSummary};
 use crate::render::RenderContext;
-use crate::ui::egui_integration::{translate_event, EguiBackend};
+use crate::ui::egui_integration::translate_event;
 
 pub use commands::{Builtin, CommandFn, CommandRegistry};
 pub use console::{Console, ConsoleAction, ConsoleLine, LineKind, MAX_HISTORY, MAX_OUTPUT};
@@ -114,7 +114,7 @@ pub struct DevFlags {
     pub _reserved: [u32; 4],
 }
 
-/// The devtools state: console, commands, debug geometry and the egui backend.
+/// The devtools state: console, commands and debug geometry.
 ///
 /// The engine owns one behind the `devtools` feature. A host that drives a
 /// [`RenderContext`] itself can own one too and call [`DevTools::handle_event`],
@@ -128,10 +128,10 @@ pub struct DevTools {
     console: Console,
     commands: CommandRegistry,
     debug_draw: DebugDraw,
-    /// Created the first time the console opens and kept afterwards, because building an
-    /// egui context allocates the font atlas.
-    backend: Option<EguiBackend>,
     /// Events collected for the next egui frame.
+    ///
+    /// The engine owns the egui backend (the UI layer needs it too); the devtools own the
+    /// events, because they are what the console's key handling produces.
     pending_events: Vec<egui::Event>,
     /// The expanded overlay's numbers.
     extra: OverlayExtra,
@@ -180,7 +180,6 @@ impl DevTools {
             console: Console::new(),
             commands,
             debug_draw: DebugDraw::new(),
-            backend: None,
             pending_events: Vec::new(),
             extra,
             time_scale: 1.0,
@@ -281,7 +280,7 @@ impl DevTools {
         self.extra.meshes_drawn = stats.meshes_drawn;
     }
 
-    /// Records just the frame delta, for the egui backend's clock.
+    /// Records just the frame delta, for the egui clock.
     pub fn set_frame_time(&mut self, dt: f32) {
         self.frame_time = dt.max(0.0);
     }
@@ -516,16 +515,14 @@ impl DevTools {
     }
 }
 
-/// Drawing: debug geometry always, egui only while the console is open.
+/// Drawing: debug geometry always, egui only while something needs it.
 impl DevTools {
-    /// Draws the frame's debug geometry and, if the console is open, the console.
+    /// Refreshes the figures the overlay shows and draws the buffered debug geometry.
     ///
     /// Call it **after** the scene has drawn and **before** `present`, and after the
-    /// profiler has taken its snapshot so the tools do not inflate the numbers they
-    /// report. The engine does exactly that in `run_frame`.
+    /// profiler has taken its snapshot so the tools do not inflate the numbers they report.
     pub fn draw(&mut self, render: &mut RenderContext) {
-        // Refresh the numbers the panel reads from the renderer. Two cheap calls, and
-        // doing them unconditionally is what keeps the overlay correct when the console
+        // Two cheap calls, unconditional so the overlay is correct even when the console
         // has never been opened.
         self.extra.textures = render.texture_count() as u32;
         self.extra.texture_vram_bytes = render.texture_vram_bytes();
@@ -538,38 +535,40 @@ impl DevTools {
         // The debug geometry is the 2D renderer's own primitives, so it costs nothing
         // when nothing is buffered and needs no egui.
         self.debug_draw.render(render);
-
-        if !self.console.is_open() {
-            // Drop anything the previous frame queued: an egui event that arrives after
-            // the console closed must not be replayed when it reopens.
-            self.pending_events.clear();
-            return;
-        }
-
-        let mut backend = self.backend.take().unwrap_or_else(EguiBackend::new);
-        // Take the events out: the closure below needs `&mut self`, and an immutable
-        // borrow of `self.pending_events` would overlap it.
-        let events = std::mem::take(&mut self.pending_events);
-        let screen = render.drawable_size();
-        let frame_time = self.frame_time;
-
-        let output = backend.run(screen, frame_time, &events, &mut |ctx| {
-            self.draw_console(ctx, render.drawable_size());
-        });
-
-        backend.paint(render, output);
-        // The font atlas lives in the registry now; refresh the figures the panel shows.
-        self.extra.textures = render.texture_count() as u32;
-        self.extra.texture_vram_bytes = render.texture_vram_bytes();
-
-        self.backend = Some(backend);
     }
 
-    /// Releases the egui textures. Call it before dropping the render context.
-    pub fn release(&mut self, render: &mut RenderContext) {
-        if let Some(mut backend) = self.backend.take() {
-            backend.release(render);
+    /// Takes the events collected since the last frame, for the engine's egui pass.
+    ///
+    /// Draining here rather than in the UI layer keeps the ownership clear: the console's
+    /// key handling produces these, and whoever runs egui consumes them.
+    pub fn take_pending_events(&mut self) -> Vec<egui::Event> {
+        std::mem::take(&mut self.pending_events)
+    }
+
+    /// Throws away queued events. Called when nothing will run egui this frame.
+    pub fn clear_pending_events(&mut self) {
+        self.pending_events.clear();
+    }
+
+    /// The frame delta the console's egui clock advances by.
+    pub fn frame_time(&self) -> f32 {
+        self.frame_time
+    }
+
+    /// Whether the console needs the egui pass this frame.
+    pub fn wants_ui(&self) -> bool {
+        self.console.is_open()
+    }
+
+    /// Draws the console into an existing egui frame.
+    ///
+    /// `screen` is the drawable size in pixels; the panel is sized as a fraction of it so
+    /// the game stays visible behind the console.
+    pub fn draw_console_panel(&mut self, ctx: &egui::Context, screen: (u32, u32)) {
+        if !self.console.is_open() {
+            return;
         }
+        self.draw_console(ctx, screen);
     }
 
     /// Builds and draws the console panel.

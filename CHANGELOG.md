@@ -6,6 +6,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Não publicado]
 
+### Adicionado — Fase 21: sistema de UI
+
+- **Widgets da engine** (`giochi_engine::ui`): `Button`, `Slider`, `Checkbox`, `TextInput`,
+  `ComboBox`, `ProgressBar`, `Image`, mais `label`/`heading`/`muted` e os layouts
+  `vertical`/`horizontal`/`group`. Nenhum tipo do `egui` aparece numa assinatura do engine
+  (ADR-055), e cada widget sanear os próprios valores (`NaN`, intervalo invertido, tamanho
+  não-positivo) em vez de deixar o jogo derrubar o frame.
+- **Temas** `dark`, `light` e `retro` (verde fosforescente sobre preto, cantos retos,
+  monoespaçada), aplicados por frame via `Engine::set_ui_theme`.
+- **`Scene::wants_ui`/`Scene::render_ui`**: a cena desenha seu próprio menu; responder
+  `false` faz o engine não rodar egui nenhum naquele frame.
+- **Um passe egui para tudo**: consola (painel inferior) e cena (painel central) dividem o
+  mesmo contexto e o mesmo atlas de fonte, então uma tecla consumida pela consola não chega
+  à cena e a VRAM do painel conta a verdade.
+- `examples/ui_demo.rs` (menu, opções com slider/checkbox/input/combo/barra, três temas) e
+  `docs/UI.md`. `tests/ui_render.rs` prova por pixels que a UI desenha e que os três temas
+  produzem imagens diferentes.
+
+### Pendente nesta fase
+
+- **UI sobre 3D.** Os exemplos 3D conduzem `RenderContext3D` diretamente, sem
+  `Engine`/`Scene`; um HUD 3D precisa de um backend egui em GLES. Registrado em
+  `PROGRESS.md` e em `IDEAS.md`, não entregue.
+
+
 ### Adicionado — Fase 20: debug tools
 
 - **Consola in-game (`F2`, feature `devtools`)**: scrollback de 512 linhas, histórico de

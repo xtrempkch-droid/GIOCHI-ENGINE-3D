@@ -757,6 +757,33 @@ engine unconditionally so a build without `devtools` still has the same simulati
 semantics. A 56-byte delta for a feature is inside anything the size gate could distinguish;
 the symbol set is what actually must not move.
 
+## After Phase 21 — UI system
+
+### The empty-frame budget is unchanged
+
+`perf_regression` still measures **0 allocations per empty frame** with `devtools`
+compiled in. A scene answers `Scene::wants_ui` with `false` by default, and the engine runs
+no egui pass at all for it; the virtual call and one `bool` are the entire cost.
+
+### What a UI frame costs
+
+Measured indirectly: `tests/ui_render.rs` draws a heading, a button, a slider and a
+checkbox at 480×480 and asserts the pixels. The egui pass is per-frame work only while a
+scene asks for it — that is the intended trade (a menu is not a frame-budget scenario), and
+the number that matters for R2 is the previous section.
+
+### One context, one atlas
+
+The console and the scene UI share the egui context and the font atlas (ADR-052), so the
+VRAM line in the expanded overlay reports the whole UI rather than half of it. Two
+independent backends would have doubled the atlas and let the console and the menu disagree
+about which of them owns a click.
+
+### Release artifact
+
+`libgiochi.so` is unchanged at **911 088 B / 97 symbols**: `devtools` is off by default and
+the widgets add no C surface (that is phase 24's job).
+
 ## Conclusions
 
 - On x86_64 the baseline is dominated by per-sprite draw calls: 200 → 1000 sprites

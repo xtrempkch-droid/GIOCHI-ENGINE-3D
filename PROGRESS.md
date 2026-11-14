@@ -8,10 +8,41 @@ Fases 0–18 concluídas. O Growth Pack começou em 2026-11-14.
 |---|---|---|
 | 19 — Hot Reload | **concluída** (2026-11-14) | 31 testes de unidade em `hot_reload`, `hot_reload_render` (textura no mesmo handle, pixel a pixel), `hot_reload_3d` (shader e malha, pixel a pixel), `hot_reload_lua` (geração avança, deleção não); demo com 14 recargas aplicadas |
 | 20 — Debug Tools | **concluída** (2026-11-14) | 69 testes de unidade em `devtools`, 6 de `c_shape`, `devtools_render` (consola desenha por pixels e fechada não desenha nada); `perf_regression` 0 alocações/frame com a feature compilada e a consola fechada |
-| 21 — UI System | pendente | — |
+| 21 — UI System | **concluída com pendência** (2026-11-14) | 24 testes de unidade em `ui`, `ui_render` (desenha nos 3 temas, pixels diferentes entre temas, 0 alocações/frame sem UI); `ui_demo` roda. **UI sobre 3D não entregue** — ver pendências |
 | 22 — Particles | pendente | — |
 | 23 — Animation | pendente | — |
 | 24 — Physics + C ABI v4 | pendente | — |
+
+### Gates da Fase 21
+
+- [x] `cargo fmt --all -- --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` e `--features devtools,hot_reload`
+- [x] `cargo test --workspace` e `--features devtools,hot_reload` (0 falhas)
+- [x] `cargo doc --workspace --no-deps`
+- [x] `cargo run -p giochi-engine --example ui_demo --features devtools -- --frames 120 --theme retro`
+- [x] `perf_regression`: 0 alocações por frame com `devtools` compilada
+- [x] `cargo check --target aarch64-unknown-linux-gnu --features devtools,hot_reload`
+- [ ] **UI sobre 3D (HUD em `mini_fps`)** — não entregue; precisa do backend egui em GLES
+      (`IDEAS.md`). `mini_fps` não foi tocado.
+
+### Entregue na Fase 21
+
+- `giochi-engine/src/ui/widgets.rs`: `Button`, `Slider`, `Checkbox`, `TextInput`,
+  `ComboBox`, `ProgressBar`, `Image`, `Separator` e `Ui` com `vertical`/`horizontal`/`group`.
+  Todos saneiam os próprios valores e terminam em `_reserved: [u32; 4]`.
+- `giochi-engine/src/ui/theme.rs`: `Theme`/`ThemeKind` `dark`/`light`/`retro`, cores em
+  `0xRRGGBBAA`, aplicados ao contexto por frame.
+- `Scene::wants_ui`/`render_ui`; `Engine::ui_theme`/`set_ui_theme`; um único passe egui para
+  consola (painel inferior) e cena (painel central).
+- `examples/ui_demo.rs`, `docs/UI.md`, ADR-055, `tests/ui_render.rs`.
+
+### Pendência da Fase 21 (não é "concluída" no critério do plano)
+
+O plano pede **"UI sobre 3D funciona (HUD em FPS)"**. Não foi entregue: `mini_fps` e os
+outros exemplos 3D conduzem `RenderContext3D` diretamente, sem `Engine`/`Scene`, e o
+backend desta fase desenha com `sdl2::render` — que o caminho 3D não usa (ADR-037). Falta
+um backend egui em GLES (~250 linhas) no crate 3D. Registrado em `IDEAS.md`; a UI da Fase 21
+é a do renderer 2D, e `docs/UI.md` §7 diz isso explicitamente.
 
 ### Gates da Fase 20
 

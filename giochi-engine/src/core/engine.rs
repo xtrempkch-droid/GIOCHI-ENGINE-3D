@@ -35,6 +35,8 @@ use crate::platform::window::WindowConfig;
 use crate::platform::{quit_signal, Platform};
 use crate::render::RenderContext;
 use crate::scene::{Scene, SceneManager, SceneTransition};
+#[cfg(feature = "devtools")]
+use crate::ui::{egui_integration::EguiBackend, Theme, Ui};
 
 #[cfg(feature = "hot_reload")]
 use std::path::{Path, PathBuf};
@@ -256,6 +258,16 @@ pub struct Engine {
     /// Console, debug draw and the expanded overlay.
     #[cfg(feature = "devtools")]
     devtools: DevTools,
+    /// The single egui backend, shared by the console and the scene's UI.
+    ///
+    /// Created the first time something needs it and kept afterwards: building an egui
+    /// context allocates the font atlas, and doing that per frame would show up in the
+    /// numbers the panel reports.
+    #[cfg(feature = "devtools")]
+    ui_backend: Option<EguiBackend>,
+    /// The theme the scene's UI draws with.
+    #[cfg(feature = "devtools")]
+    ui_theme: Theme,
     /// Multiplier applied to the frame time before the fixed-step accumulator.
     ///
     /// 1.0 unless `time_scale` changed it. Kept here rather than in `DevTools` so a build
@@ -358,6 +370,10 @@ impl Engine {
             hot_reload_handlers: Vec::new(),
             #[cfg(feature = "devtools")]
             devtools: DevTools::new(),
+            #[cfg(feature = "devtools")]
+            ui_backend: None,
+            #[cfg(feature = "devtools")]
+            ui_theme: Theme::dark(),
             time_scale: 1.0,
             _reserved: [0; 4],
         })
@@ -877,10 +893,66 @@ impl Engine {
         }
 
         self.devtools.draw(&mut self.render);
+        self.draw_ui();
 
         // A console `time_scale` must reach the loop: the tools own the value the command
         // wrote, and the engine owns the one the accumulator uses.
         self.time_scale = self.devtools.time_scale();
+    }
+
+    /// Runs one egui pass for the console, the scene's UI, or both.
+    ///
+    /// One pass, one context, one font atlas: the console is drawn as a bottom panel and
+    /// the scene gets the central panel, so a click on a button cannot also reach the game
+    /// through a second, independent UI.
+    fn draw_ui(&mut self) {
+        let scene_wants_ui = self
+            .scenes
+            .current()
+            .is_some_and(crate::scene::Scene::wants_ui);
+
+        if !self.devtools.wants_ui() && !scene_wants_ui {
+            // Nothing to draw: drop queued egui events so a later open cannot replay them.
+            self.devtools.clear_pending_events();
+            return;
+        }
+
+        let events = self.devtools.take_pending_events();
+        let screen = self.render.drawable_size();
+        let frame_time = self.devtools.frame_time();
+        let theme = self.ui_theme;
+        let mut backend = self.ui_backend.take().unwrap_or_else(EguiBackend::new);
+
+        let output = backend.run(screen, frame_time, &events, &mut |ctx| {
+            theme.apply(ctx);
+            self.devtools.draw_console_panel(ctx, screen);
+            if scene_wants_ui {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |inner| {
+                        if let Some(scene) = self.scenes.current_mut() {
+                            scene.render_ui(&mut Ui::new(inner, theme));
+                        }
+                    });
+            }
+        });
+
+        backend.paint(&mut self.render, output);
+        self.ui_backend = Some(backend);
+    }
+}
+
+/// Scene UI: the theme a game's menus draw with.
+#[cfg(feature = "devtools")]
+impl Engine {
+    /// The theme the scene's UI uses.
+    pub fn ui_theme(&self) -> Theme {
+        self.ui_theme
+    }
+
+    /// Replaces the theme. Takes effect on the next frame.
+    pub fn set_ui_theme(&mut self, theme: Theme) {
+        self.ui_theme = theme;
     }
 }
 
@@ -1106,7 +1178,9 @@ impl Drop for Engine {
         // caller, but the engine itself must not leak handles.
         self.scenes.clear();
         #[cfg(feature = "devtools")]
-        self.devtools.release(&mut self.render);
+        if let Some(mut backend) = self.ui_backend.take() {
+            backend.release(&mut self.render);
+        }
         self.audio.clear();
         self.render.clear_resource_cache();
         self.render.textures().clear();

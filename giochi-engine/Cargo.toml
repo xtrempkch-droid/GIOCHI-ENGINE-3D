@@ -45,6 +45,16 @@ required-features = ["hot_reload"]
 name = "devtools_render"
 required-features = ["devtools"]
 
+# Phase 21. The scene UI needs the widgets, the theme and the backend.
+[[test]]
+name = "ui_render"
+required-features = ["devtools"]
+
+[[example]]
+name = "ui_demo"
+path = "examples/ui_demo.rs"
+required-features = ["devtools"]
+
 [[example]]
 name = "devtools_demo"
 path = "examples/devtools_demo.rs"

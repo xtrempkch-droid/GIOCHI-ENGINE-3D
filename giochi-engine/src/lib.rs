@@ -102,6 +102,10 @@ pub use crate::render::{
     TextureHandle, TextureRegistry, TextureSize,
 };
 pub use crate::scene::{EmptyScene, Scene, SceneHandle, SceneManager, SceneTransition};
+#[cfg(feature = "devtools")]
+pub use crate::ui::{
+    Button, Checkbox, ComboBox, Image, ProgressBar, Slider, TextInput, Theme, ThemeKind, Ui,
+};
 
 #[cfg(test)]
 mod tests {

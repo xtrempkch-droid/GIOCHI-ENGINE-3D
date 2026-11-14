@@ -4,6 +4,8 @@ use crate::audio::AudioSystem;
 use crate::core::time::Time;
 use crate::input::Input;
 use crate::render::RenderContext;
+#[cfg(feature = "devtools")]
+use crate::ui::Ui;
 
 /// Opaque scene identifier used at the C ABI boundary. `0` is invalid/null.
 ///
@@ -92,6 +94,24 @@ pub trait Scene {
     fn transition(&mut self) -> SceneTransition {
         SceneTransition::Continue
     }
+
+    /// Whether [`Scene::render_ui`] does anything.
+    ///
+    /// Defaults to `false`, and the engine does not run egui at all for a scene that
+    /// answers `false`: a game without UI pays nothing for the UI layer. Override it (and
+    /// `render_ui`) together.
+    #[cfg(feature = "devtools")]
+    fn wants_ui(&self) -> bool {
+        false
+    }
+
+    /// Draws the scene's UI, once per frame, over the frame the scene rendered.
+    ///
+    /// The widgets are the engine's own ([`crate::ui::Button`], [`crate::ui::Slider`], …),
+    /// not egui's: see `docs/UI.md` and ADR-055. A scene that implements this must also
+    /// return `true` from [`Scene::wants_ui`].
+    #[cfg(feature = "devtools")]
+    fn render_ui(&mut self, _ui: &mut Ui<'_>) {}
 }
 
 /// Convenience: a scene that does nothing, used as a placeholder and in tests.

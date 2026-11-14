@@ -1675,3 +1675,26 @@ has `draw_line`), which is fine for tens to hundreds of segments and not for a t
 A real `GL_LINES` pass in `giochi-engine-3d` remains the right tool for a dense 3D debug view
 and is listed in `IDEAS.md`; nothing here prevents adding it later, because the projection is
 a pure function.
+
+## ADR-055 — The widget API is the engine's own, not `egui`'s
+
+**Context.** egui is immediate-mode and meant to be called directly: `ui.add(egui::Slider::new(&mut value, 0.0..=1.0))`. Exposing it that way would be less code and less
+indirection. It would also put an `egui` type in a game's source, in `Scene::render_ui`, and
+in phase 24's C header — where there is no Rust and no generics.
+
+**Decision.** The engine owns a thin facade ([`ui::Button`], [`ui::Slider`], …) and a
+[`Ui`] that draws them. Rules that fell out of it:
+
+* a widget owns the value it edits, so `Ui::slider(&mut slider)` returns whether it changed
+  — one line more than egui, and the same shape a C struct has (`float value;
+  uint32_t changed;`);
+* layouts take `&mut dyn FnMut(&mut Ui<'_>)` rather than a generic closure, because a public
+  generic function is forbidden by this crate's C-shaped rules (`tests/c_shape.rs`);
+* every widget sanitises its inputs (a `NaN` slider value becomes the minimum, a
+  non-positive image size becomes `1x1`), because these values come from game config and a
+  debug UI must not be able to panic the game.
+
+**Consequences.** ~350 lines of facade to maintain and one extra indirection per widget.
+In exchange: no `egui` type in any engine signature, phase 24 can expose the same widgets
+through `giochi_ui_*`, and swapping the backend (a GL one for the 3D crate) does not change
+a game's source.

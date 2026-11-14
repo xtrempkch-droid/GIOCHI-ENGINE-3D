@@ -1,11 +1,25 @@
-//! In-game UI: egui on top of the engine's renderers.
+//! In-game UI: widgets, themes and the egui backend.
 //!
-//! Phase 20 introduces the backend (this module) for the debug console; phase 21 adds the
-//! widget facade, themes and layouts on top of it. The backend is deliberately private:
-//! what a game sees is [`crate::devtools`] and, from phase 21, the C-shaped widget
-//! facade — never an `egui` type in an engine signature.
+//! Three layers, smallest dependence first:
 //!
-//! See `docs/DEVTOOLS.md` and ADR-052 for why the integration is hand-written instead of
-//! using `egui-sdl2`.
+//! | Module | Knows about | Used by |
+//! |---|---|---|
+//! | [`widgets`] | nothing but the engine's math types | a game's menus |
+//! | [`theme`] | egui, for [`Theme::apply`] | the widget layer |
+//! | [`egui_integration`] | egui + `sdl2::render` | the engine, once per frame |
+//!
+//! A game calls [`widgets::Button`], [`widgets::Slider`] and friends, never an `egui` type.
+//! That is what phase 24 can expose through the C ABI, and what keeps a game's source
+//! independent of the egui version.
+//!
+//! See `docs/UI.md` and ADR-052 (why the backend is hand-written) and ADR-055 (why the
+//! facade exists at all).
 
 pub(crate) mod egui_integration;
+pub mod theme;
+pub mod widgets;
+
+pub use theme::{Theme, ThemeKind};
+pub use widgets::{
+    Button, Checkbox, ComboBox, Image, ProgressBar, Separator, Slider, TextInput, Ui,
+};
