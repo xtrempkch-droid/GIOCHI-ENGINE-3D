@@ -19,7 +19,7 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 # `[features]` below. Left implicit, `giochi-engine`'s default `sdl2-bundled` won the
 # feature union and `--features sdl2-system` built SDL2 from source through CMake —
 # which is the one thing the console cross-compile cannot do.
-giochi-engine = { path = "../giochi-engine", version = "0.4.0", default-features = false }
+giochi-engine = { path = "../giochi-engine", version = "0.4.0", default-features = false, features = ["physics-2d"] }
 # Part II of the ABI (3D); frame statistics (part III) come from `giochi-engine`.
 # The 3D crate is the only thing here that
 # links GLES, so a 2D-only consumer of `libgiochi.so` still pulls it in — that is the

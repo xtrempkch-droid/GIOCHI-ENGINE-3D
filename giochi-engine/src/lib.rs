@@ -53,6 +53,8 @@ pub mod input;
 pub mod math;
 pub mod particles;
 pub mod perf;
+#[cfg(feature = "physics-2d")]
+pub mod physics;
 pub mod platform;
 pub mod render;
 pub mod scene;

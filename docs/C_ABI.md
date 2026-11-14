@@ -514,6 +514,32 @@ while (running) {
 the game runs at 60 Hz and the host publishes at 15 Hz. `total > escritos` means
 truncation — log it instead of drawing fewer enemies than the host sent.
 
+## 11b. Part V: física 2D (ABI version 5)
+
+Um mundo por ponteiro, corpos como `uint64_t`, e a mesma convenção "0 é sucesso":
+
+```c
+GiochiPhysicsWorld *world = giochi_physics_world_create(0.0f, -10.0f);
+uint64_t chao = 0, caixa = 0;
+giochi_physics_create_body(world, 1, 0.0f, -0.5f, 0.0f, &chao);   /* 1 = fixo */
+giochi_physics_attach_box(world, chao, 20.0f, 0.5f, 0.9f, 0.0f);
+giochi_physics_create_body(world, 0, 0.0f, 5.0f, 0.0f, &caixa);   /* 0 = dinâmico */
+giochi_physics_attach_box(world, caixa, 0.5f, 0.5f, 0.5f, 0.0f);
+
+for (int i = 0; i < 120; i++) {
+    giochi_physics_step(world, 1.0f / 60.0f);   /* devolve 0, não a contagem */
+}
+float x = 0.0f, y = 0.0f;
+giochi_physics_get_position(world, caixa, &x, &y);  /* y ~ 0.5 */
+giochi_physics_world_destroy(world);
+```
+
+A referência completa está em `docs/C_ABI_CONTRACT.md` §20. Cuide de três coisas:
+
+* **`step` devolve 0.** O número de passos internos não sai da biblioteca.
+* **Meias medidas.** `half_width`/`half_height`, não largura e altura.
+* **Não é singleton.** Dois mundos coexistem; guarde o ponteiro.
+
 ## 12. Verification
 
 ```bash

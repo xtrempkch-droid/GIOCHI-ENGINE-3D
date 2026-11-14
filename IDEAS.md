@@ -36,3 +36,14 @@ para não serem perdidas nem implementadas por acidente (R6).
       embutido só registra o pedido; no 2D responde que não há shaders).
 - [ ] Preservar globais Lua entre recargas de script (hoje a VM reinicia; ADR-050).
 - [ ] `giochi_ui_*` na ABI v4: a fachada já é C-shaped, falta a exposição (Fase 24c).
+
+## C ABI v5 — the parts not exposed
+
+- **`giochi_particles_*`** (create/emit/update/draw). The 2D particle system already has a
+  `#[repr(C)]`-shaped API, so this is mostly a handle registry; `draw` needs the global
+  engine's render context.
+- **`giochi_sprite_animator_*`** (create/play/update). Straightforward, same reason.
+- **`giochi_console_execute`** — needs `devtools` on, which would make the header feature
+  dependent; the fix is a separate `libgiochi-devtools.so` or a stubbed symbol that
+  returns `GIOCHI_ERROR_UNSUPPORTED`.
+- **`giochi_hot_reload_enable/disable`** — needs `hot_reload` on, same problem.

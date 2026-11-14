@@ -23,6 +23,8 @@ pub const KEY_E: KeyCode = 101;
 pub const KEY_M: KeyCode = 109;
 /// `Q`. Used by the 3D walker to descend.
 pub const KEY_Q: KeyCode = 113;
+/// `R`. Used by the 2D physics demo to rebuild the level.
+pub const KEY_R: KeyCode = 114;
 /// `S`.
 pub const KEY_S: KeyCode = 115;
 /// `W`.

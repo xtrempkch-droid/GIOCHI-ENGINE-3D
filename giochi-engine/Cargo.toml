@@ -16,6 +16,11 @@ notify = { workspace = true, optional = true }
 # Phase 20/21. `default-features` stays on: the only default feature is `default_fonts`,
 # and a console or a menu without a font is not a console or a menu.
 egui = { workspace = true, optional = true }
+# Phase 24a. Rapier 2D is behind a feature because it is the first dependency that
+# adds a couple of megabytes to the binary; a game that does not need physics must not
+# pay for it. The 3D world lives in `giochi-engine-3d` with its own feature, because
+# that crate owns the 3D types (ADR-057).
+rapier2d = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
@@ -65,6 +70,16 @@ name = "hot_reload_demo"
 path = "examples/hot_reload_demo.rs"
 required-features = ["hot_reload"]
 
+# Phase 24b. The demo needs the world it demonstrates.
+[[example]]
+name = "physics_2d_demo"
+path = "examples/physics_2d_demo.rs"
+required-features = ["physics-2d"]
+
+[[test]]
+name = "physics_2d"
+required-features = ["physics-2d"]
+
 [features]
 # Compila o SDL2 do código-fonte — o padrão, e o que o CI usa em x86_64.
 default = ["sdl2-bundled"]
@@ -85,3 +100,6 @@ hot_reload = ["dep:notify"]
 # Traz o `egui`; sem a feature a consola, o draw de debug e o módulo `ui` inteiro não
 # existem.
 devtools = ["dep:egui"]
+# Fase 24a: mundo físico 2D (corpos, colliders, contactos, raycast). Independente de
+# `physics-3d`, que vive no crate 3D, para que um jogo 2D não ligue o Rapier 3D.
+physics-2d = ["dep:rapier2d"]

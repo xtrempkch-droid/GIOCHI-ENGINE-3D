@@ -1,5 +1,5 @@
 /*
- * GIOCHI-ENGINE C ABI, version 4.
+ * GIOCHI-ENGINE C ABI, version 5.
  *
  * Link against libgiochi.so (or libgiochi.a) and call giochi_engine_init() before
  * anything else. Every fallible function returns 0 on success and a negative code
@@ -23,6 +23,10 @@
  *
  * Version 4 adds part IV: networking (giochi_net_* and GiochiNet*), sections 16-19.
  * Still additive: every earlier signature and layout is unchanged.
+ *
+ * Version 5 adds part V: 2D physics (giochi_physics_* and GiochiPhysicsWorld), section 20.
+ * Additive like the rest: a version 1-4 consumer compiles and runs unchanged, so accept
+ * giochi_abi_version() >= the part you use, not == 5.
  *
  * The 3D engine is an opaque pointer the caller owns (ADR-039), unlike the 2D singleton.
  * giochi_mesh_* and giochi_shader_* take no engine: they act on the most recently created
@@ -62,7 +66,10 @@ typedef uint64_t GiochiGlTextureHandle; /* 0 invalid */
 // * `3` — part III (`GiochiFrameStats`), phase 18. Additive as well, so a consumer
 //   written against `1` or `2` keeps working; the contract asks callers to accept
 //   `giochi_abi_version() >= 1` for exactly this reason.
-#define GIOCHI_ABI_VERSION 4
+// * `4` — part IV (networking), release 0.4.0.
+// * `5` — part V (2D physics), Growth Pack phase 24. Additive: new `giochi_physics_*`
+//   symbols and one opaque `GiochiPhysicsWorld`; no earlier signature or layout moved.
+#define GIOCHI_ABI_VERSION 5
 
 // Largest asset the loader accepts, in bytes (64 MiB).
 #define GIOCHI_MAX_ASSET_SIZE ((64 * 1024) * 1024)
@@ -142,6 +149,13 @@ typedef uint64_t GiochiGlTextureHandle; /* 0 invalid */
 // contador; usar o datagrama inteiro como teto é mais simples e nunca trunca o
 // que o protocolo aceita.
 #define GIOCHI_NET_MAX_GLOBAL 1200
+
+// Um mundo físico 2D, opaco para o C.
+//
+// Criado por `giochi_physics_world_create` e destruído por
+// `giochi_physics_world_destroy`; cada mundo é independente, ao contrário do motor 2D,
+// que é singleton (ADR-012).
+typedef struct GiochiPhysicsWorld GiochiPhysicsWorld;
 
 // Opaque sound handle (short, fully decoded effect). `0` is invalid/null.
 //
@@ -1705,6 +1719,61 @@ int32_t giochi_net_poll_snapshot_filtered(uint64_t handle,
 // int32_t giochi_net_poll_global(uint64_t handle, GiochiNetGlobal* out);
 // ```
 int32_t giochi_net_poll_global(uint64_t handle, struct GiochiNetGlobal *out);
+
+// Creates a physics world with the given gravity and a 60 Hz fixed step.
+//
+// Returns `NULL` on a non-finite gravity; `giochi_get_last_error()` explains.
+struct GiochiPhysicsWorld *giochi_physics_world_create(float gravity_x, float gravity_y);
+
+// Destroys a physics world and every body in it.
+//
+// Returns `GIOCHI_ERROR_INVALID_ARGUMENT` for a `NULL` world. A pointer used after this
+// call is undefined behaviour, as with every other `giochi_*_destroy`.
+int32_t giochi_physics_world_destroy(struct GiochiPhysicsWorld *pointer);
+
+// Creates a body and writes its handle to `out_handle`.
+//
+// `kind` is `0` dynamic, `1` fixed and `2` kinematic; anything else is refused. Returns
+// `0` on success.
+int32_t giochi_physics_create_body(struct GiochiPhysicsWorld *pointer,
+                                   uint32_t kind,
+                                   float x,
+                                   float y,
+                                   float rotation,
+                                   uint64_t *out_handle);
+
+// Gives `body` a box collider with the given half extents.
+int32_t giochi_physics_attach_box(struct GiochiPhysicsWorld *pointer,
+                                  uint64_t body,
+                                  float half_width,
+                                  float half_height,
+                                  float friction,
+                                  float restitution);
+
+// Advances the world by `dt` seconds.
+//
+// Returns `0` on success, like every other fallible entry point. The number of 60 Hz
+// steps the accumulator ran is deliberately **not** the return value: a positive number
+// would break "0 means success", which is the convention the whole header rests on.
+int32_t giochi_physics_step(struct GiochiPhysicsWorld *pointer, float dt);
+
+// Reads the body's position into `out_x` and `out_y`.
+int32_t giochi_physics_get_position(struct GiochiPhysicsWorld *pointer,
+                                    uint64_t body,
+                                    float *out_x,
+                                    float *out_y);
+
+// Applies an impulse to the body at its centre of mass.
+int32_t giochi_physics_apply_impulse(struct GiochiPhysicsWorld *pointer,
+                                     uint64_t body,
+                                     float impulse_x,
+                                     float impulse_y);
+
+// Destroys a body and its collider.
+int32_t giochi_physics_destroy_body(struct GiochiPhysicsWorld *pointer, uint64_t body);
+
+// Number of live bodies in the world, or `0` for a `NULL` world.
+uint32_t giochi_physics_body_count(struct GiochiPhysicsWorld *pointer);
 
 // Creates a texture by loading an image file (PNG, JPEG, BMP, …).
 //

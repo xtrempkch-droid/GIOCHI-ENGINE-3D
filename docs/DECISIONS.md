@@ -1741,3 +1741,45 @@ recorded here so a future refactor can move the trait to `math` with a re-export
 There is **no blending** between animations and no AI layer. A `AnimationStateMachine`
 answers "which state am I in"; the game maps that to a clip. Blend trees, root motion and
 frame events are not implemented and are not implied by the API.
+
+## ADR-057 — Physics lives in two crates and behind two features
+
+**Context.** The plan described `physics/world.rs` with `PhysicsWorld2D` and
+`PhysicsWorld3D` in one module, behind `physics-2d` and `physics-3d`. The repository does
+not have a crate where that works: `giochi-engine` is the 2D engine and does not depend on
+the 3D renderer; `giochi-engine-3d` depends on the 2D engine, not the other way round
+(ADR-037). Putting `rapier3d` in the 2D crate would mean every 2D game links a 3D physics
+engine it can never use.
+
+Rapier 0.36 is also the first release in this range whose declared MSRV is 1.86 — exactly
+the engine's floor — so turning either feature on cannot raise it (ADR-046).
+
+**Decision.** Two modules, one per crate, with the same shape:
+
+* `giochi_engine::physics` (`physics-2d`) owns `PhysicsWorld2D` and Rapier 2D.
+* `giochi_engine_3d::physics` (`physics-3d`) owns `PhysicsWorld3D`, Rapier 3D and the
+  kinematic character controller.
+
+Both have the same `BodyHandle = u64` contract, the same fixed 60 Hz accumulator, the same
+`BodyDesc`/`ColliderShape`/`BodyTransform` shape and the same `sync_to_transforms` /
+`sync_from_transforms` pair. What differs is what the dimension demands: 2D rotations are
+an angle, 3D rotations are a quaternion, and only 3D has `move_character`.
+
+`rapier`'s own `PhysicsWorld` is wrapped rather than exposed, so its type — which changes
+between releases — never appears in a signature, and both worlds are `#[repr(C)]` with
+private fields, like every other engine type.
+
+**Consequences.** A game that wants both 2D and 3D physics links two copies of Rapier
+(~2 MB each, ~4 MB together). That is the price of the crate split, and it is opt-in: with
+neither feature on, neither dependency is compiled. The C ABI enables `physics-2d`
+unconditionally (§20 of `docs/C_ABI_CONTRACT.md`) because the header is a contract and
+must not depend on the feature set of whoever built the `.so`.
+
+Two behaviours are worth remembering because they cost time to discover:
+
+* Rapier's `detect_collisions` (the obvious "refresh the broad phase" call) leaves the
+  world in a state where the *next* `step` no longer moves a dynamic body. `raycast`
+  therefore refreshes with a zero-delta `step`, which updates the same structures through
+  the supported path (see `PERF_LOG.md`).
+* The character controller needs the game to apply gravity. A kinematic body that is only
+  pushed sideways never reaches the floor, never snaps to it and never reports `grounded`.

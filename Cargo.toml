@@ -67,6 +67,14 @@ notify = "6"
 # 0.33+ declares 1.88 and 0.35+ declares 1.92.
 egui = "0.32.3"
 
+# Phase 24. Rapier 0.36 is the newest release whose declared MSRV (1.86) is exactly the
+# engine's floor, so turning `physics-2d`/`physics-3d` on cannot raise it (ADR-046).
+# `default-features` stays on: `std` and the block solver are not optional for a game, and
+# `parallel` (rayon) is the one feature deliberately left off — a game loop already owns
+# its threading and the determinism cost is not worth the speed on two cores.
+rapier2d = { version = "0.36", default-features = false, features = ["dim2", "f32", "std", "block-solver"] }
+rapier3d = { version = "0.36", default-features = false, features = ["dim3", "f32", "std", "block-solver"] }
+
 # Phase 18a. Shipping build for the consoles.
 #
 # `lto = "fat"` rather than `"thin"`: the console payload is a handful of binaries

@@ -18,6 +18,7 @@ repository.workspace = true
 # forwarded below instead, and `default = ["sdl2-bundled"]` keeps the old behaviour for
 # callers who ask for nothing.
 giochi-engine = { path = "../giochi-engine", version = "0.4.0", default-features = false }
+rapier3d = { workspace = true, optional = true }
 glow = { workspace = true }
 bytemuck = { workspace = true }
 tobj = { workspace = true }
@@ -75,3 +76,12 @@ profiling = ["giochi-engine/profiling"]
 # para o watcher do core (`notify`); sem esta feature o módulo `hot_reload` deste
 # crate não é compilado e o `RenderContext3D` não ganha campo nenhum.
 hot_reload = ["giochi-engine/hot_reload"]
+# Fase 24a: mundo físico 3D. Traz o Rapier 3D, que é o custo real (~2 MB) desta fase;
+# fica desligado por omissão para que o caminho 2D não o ligue (ADR-057).
+physics-3d = ["dep:rapier3d"]
+
+# Phase 24b. The demo needs the world it demonstrates.
+[[example]]
+name = "physics_3d_demo"
+path = "examples/physics_3d_demo.rs"
+required-features = ["physics-3d"]

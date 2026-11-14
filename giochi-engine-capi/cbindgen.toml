@@ -24,7 +24,7 @@ documentation_length = "full"
 usize_is_size_t = true
 
 header = """/*
- * GIOCHI-ENGINE C ABI, version 4.
+ * GIOCHI-ENGINE C ABI, version 5.
  *
  * Link against libgiochi.so (or libgiochi.a) and call giochi_engine_init() before
  * anything else. Every fallible function returns 0 on success and a negative code
@@ -48,6 +48,10 @@ header = """/*
  *
  * Version 4 adds part IV: networking (giochi_net_* and GiochiNet*), sections 16-19.
  * Still additive: every earlier signature and layout is unchanged.
+ *
+ * Version 5 adds part V: 2D physics (giochi_physics_* and GiochiPhysicsWorld), section 20.
+ * Additive like the rest: a version 1-4 consumer compiles and runs unchanged, so accept
+ * giochi_abi_version() >= the part you use, not == 5.
  *
  * The 3D engine is an opaque pointer the caller owns (ADR-039), unlike the 2D singleton.
  * giochi_mesh_* and giochi_shader_* take no engine: they act on the most recently created

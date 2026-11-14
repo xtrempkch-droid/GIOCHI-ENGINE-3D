@@ -70,6 +70,7 @@ mod engine;
 mod input;
 mod lib3d;
 mod net;
+mod physics;
 mod render;
 mod scene;
 mod state;
@@ -120,6 +121,12 @@ pub use net::{
     GiochiNetGlobal, GiochiNetInimigo, GiochiNetInput, GiochiNetSnapshot, GIOCHI_NET_MAX_GLOBAL,
     GIOCHI_NET_MAX_INIMIGOS,
 };
+pub use physics::{
+    giochi_physics_apply_impulse, giochi_physics_attach_box, giochi_physics_body_count,
+    giochi_physics_create_body, giochi_physics_destroy_body, giochi_physics_get_position,
+    giochi_physics_step, giochi_physics_world_create, giochi_physics_world_destroy,
+    GiochiPhysicsWorld,
+};
 pub use render::{
     giochi_camera_get, giochi_camera_set, giochi_render_clear, giochi_render_draw_rect,
     giochi_render_draw_texture, giochi_render_present, giochi_render_size, giochi_sprite_draw,
@@ -153,7 +160,7 @@ mod tests {
     fn abi_version_matches_contract() {
         // The number `docs/C_ABI_CONTRACT.md` names as the current part. Bump it with
         // the contract, never to make a test pass.
-        assert_eq!(GIOCHI_ABI_VERSION, 4);
+        assert_eq!(GIOCHI_ABI_VERSION, 5);
         assert_eq!(giochi_abi_version(), GIOCHI_ABI_VERSION);
     }
 

@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 
 #include "giochi.h"
@@ -429,6 +430,55 @@ int main(void)
             /* Destruído, o handle não vale mais. */
             CHECK(giochi_net_local_port(net_host) == GIOCHI_ERROR_NETWORK);
         }
+    }
+
+    /* ---- parte V: física 2D ------------------------------------------------ */
+    {
+        GiochiPhysicsWorld *physics = giochi_physics_world_create(0.0f, -10.0f);
+        CHECK(physics != NULL);
+        CHECK(giochi_physics_world_create(NAN, 0.0f) == NULL);
+        CHECK(strstr(giochi_get_last_error(), "out of range") != NULL || strstr(giochi_get_last_error(), "range") != NULL);
+
+        uint64_t chao = 0;
+        uint64_t ignorado = 0;
+        CHECK_CODE(giochi_physics_create_body(physics, 1 /* fixed */, 0.0f, -0.5f, 0.0f, &chao));
+        CHECK(chao != 0);
+        CHECK_CODE(giochi_physics_attach_box(physics, chao, 20.0f, 0.5f, 0.9f, 0.0f));
+
+        uint64_t bola = 0;
+        CHECK_CODE(giochi_physics_create_body(physics, 0 /* dynamic */, 0.0f, 5.0f, 0.0f, &bola));
+        CHECK(bola != 0 && bola != chao);
+        CHECK_CODE(giochi_physics_attach_box(physics, bola, 0.5f, 0.5f, 0.5f, 0.0f));
+        CHECK(giochi_physics_body_count(physics) == 2);
+
+        float x = 0.0f;
+        float y = 0.0f;
+        CHECK_CODE(giochi_physics_get_position(physics, bola, &x, &y));
+        CHECK(y > 4.9f && y < 5.1f);
+
+        /* Um passo a 60 Hz roda exactamente um passo de integração. */
+        CHECK_CODE(giochi_physics_step(physics, 1.0f / 60.0f));
+        for (int i = 0; i < 120; i++) {
+            CHECK_CODE(giochi_physics_step(physics, 1.0f / 60.0f));
+        }
+        CHECK_CODE(giochi_physics_get_position(physics, bola, &x, &y));
+        /* A caixa caiu e assentou sobre o chão: o centro fica a meia altura. */
+        CHECK(y < 4.0f);
+        CHECK(y > 0.3f && y < 0.8f);
+
+        /* Erros, não crashes: corpo inválido, parâmetros inválidos, NULL. */
+        CHECK(giochi_physics_get_position(physics, 999999u, &x, &y) ==
+              GIOCHI_ERROR_INVALID_ARGUMENT);
+        CHECK(giochi_physics_step(physics, -1.0f) == GIOCHI_ERROR_INVALID_ARGUMENT);
+        CHECK(giochi_physics_create_body(physics, 7 /* kind desconhecido */, 0.0f, 0.0f,
+                                         0.0f, &ignorado) == GIOCHI_ERROR_INVALID_ARGUMENT);
+        CHECK(giochi_physics_step(NULL, 0.01f) == GIOCHI_ERROR_INVALID_ARGUMENT);
+        CHECK(giochi_physics_world_destroy(NULL) == GIOCHI_ERROR_INVALID_ARGUMENT);
+
+        CHECK_CODE(giochi_physics_destroy_body(physics, bola));
+        CHECK(giochi_physics_destroy_body(physics, bola) == GIOCHI_ERROR_INVALID_ARGUMENT);
+        CHECK(giochi_physics_body_count(physics) == 1);
+        CHECK_CODE(giochi_physics_world_destroy(physics));
     }
 
     /* ---- teardown --------------------------------------------------------- */

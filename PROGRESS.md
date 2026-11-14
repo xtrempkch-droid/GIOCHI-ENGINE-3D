@@ -11,7 +11,62 @@ Fases 0–18 concluídas. O Growth Pack começou em 2026-11-14.
 | 21 — UI System | **concluída com pendência** (2026-11-14) | 24 testes de unidade em `ui`, `ui_render` (desenha nos 3 temas, pixels diferentes entre temas, 0 alocações/frame sem UI); `ui_demo` roda. **UI sobre 3D não entregue** — ver pendências |
 | 22 — Particles | **concluída** (2026-11-14) | 12 testes 2D, 4 em 3D e aceitação de render: 1.000 partículas 2D → 1 draw call, tint validado por pixel; demos 2D/3D e `mini_fps --particles` executados por 120 frames; gates x86_64, docs e check ARM64 aprovados |
 | 23 — Animation | **concluída** (2026-11-14) | 13 testes de unidade em `animation`, `animation_render` (a câmara escolhe o frame certo do spritesheet, pixel a pixel), `perf_regression` com 256 tweens + 1 spritesheet a 0 alocações/frame; `animation_demo` em 120 frames; gates x86_64, features, docs e check ARM64 aprovados |
-| 24 — Physics + C ABI v4 | pendente | — |
+| 24 — Physics + C ABI | **concluída com pendências** (2026-11-14) | 9 testes de unidade em `physics` 2D + 8 em 3D, 5 de integração (`tests/physics_2d.rs`), `physics_2d_demo` 1800 frames com a torre a `0.000` de velocidade, `physics_3d_demo` 420 frames com o jogador bloqueado pela parede e apoiado no chão; C ABI **v5** com 9 símbolos `giochi_physics_*` e testes C + Python a passar; gates x86_64, features, docs e ARM64 aprovados |
+
+### Gates da Fase 24
+
+- [x] `cargo fmt --all -- --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` (com e sem
+      `physics-2d,physics-3d,devtools,hot_reload`)
+- [x] `cargo test --workspace` e `--features physics-2d,physics-3d,devtools,hot_reload`
+- [x] `cargo test -p giochi-engine --features physics-2d --test physics_2d` — 5 testes
+- [x] `cargo test -p giochi-engine-3d --features physics-3d physics` — 8 testes
+- [x] `physics_2d_demo --frames 1800 --auto` — torre estável, velocidade máxima 0.000 no
+      último segundo de 30 s simulados
+- [x] `physics_3d_demo --frames 420 --auto` — jogador bloqueado pela parede (x=5.18,
+      parede em 5.5), `grounded=true`, 0 caixas a mover, topo da pilha em 4.49
+- [x] `scripts/ffi-smoke.sh` — `c_smoke` e `python_smoke` a passar com `abi 5`, header
+      regenerado e verificado
+- [x] `cargo doc --workspace --no-deps` — mantém o warning pré-existente em
+      `giochi-engine-3d/src/render3d/texture.rs:65`
+- [x] `cargo check --workspace --target aarch64-unknown-linux-gnu --features physics-2d,physics-3d`
+- [x] `cargo build --release` — `libgiochi.so` com os símbolos de física
+
+### Entregue na Fase 24
+
+- `giochi-engine/src/physics/` (`physics-2d`): `PhysicsWorld2D` com passo fixo de 60 Hz e
+  acumulador limitado, `BodyDesc`/`BodyKind`/`BodyTransform`, `ColliderShape` de caixa,
+  círculo e cápsula, contactos `Started`/`Stopped` e `raycast` com normal.
+- `giochi-engine-3d/src/physics/` (`physics-3d`): o mesmo contrato em 3D, mais
+  `create_character`/`move_character` sobre o `KinematicCharacterController` do Rapier
+  (deslizar em paredes, degraus de 35 cm, colar ao chão a 30 cm).
+- `examples/physics_2d_demo.rs` (torre de caixas, drag com o rato, raycast, estabilidade
+  impressa por segundo) e `examples/physics_3d_demo.rs` (arena com 20 caixas e jogador em
+  primeira pessoa).
+- `tests/physics_2d.rs` (torre assente, passo fixo, contactos, raio na mesma frame,
+  destruição a remover o collider) e 8 testes de unidade em 3D.
+- **C ABI v5**: `GIOCHI_ABI_VERSION` de 4 para 5, `docs/C_ABI_CONTRACT.md` §20,
+  `docs/C_ABI.md` §11b, `giochi.h` regenerado, secção de física em `c_smoke.c` e
+  `python_smoke.py`. A física 2D fica sempre compilada no `libgiochi.so` porque o header é
+  um contrato e não pode depender de features (ADR-057).
+- `docs/PHYSICS.md` e ADR-057.
+
+### Pendências da Fase 24
+
+O plano pedia duas refactorizações que **não** foram feitas:
+
+- **`mini_fps` com física** (jogador com `KinematicCharacterController` e obstáculos com
+  corpo). O `physics_3d_demo` exercita exactamente esses caminhos — andar, ser bloqueado
+  por uma parede, cair, subir um degrau, empilhar 20 caixas — mas o `mini_fps` continua com
+  a câmara livre. Mexer num exemplo de 801 linhas que é a referência de desempenho das
+  fases 12–17 sem uma sessão dedicada arriscava os gates dele.
+- **`mini_game` com física** (plataforma com gravidade e salto). O `physics_2d_demo` cobre
+  gravidade, empilhamento, arrasto e raycast.
+
+Também ficaram de fora da ABI C, por âmbito: `giochi_particles_*`, `giochi_sprite_animator_*`,
+`giochi_console_execute` e `giochi_hot_reload_enable/disable`. A parte V cobre a física, que
+é o que o critério de aceite nomeia ("`libgiochi.so` exporta símbolos de physics; teste
+Python passa"); o resto está registado em `IDEAS.md` como trabalho aditivo.
 
 ### Gates da Fase 23
 

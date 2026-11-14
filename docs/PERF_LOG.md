@@ -817,6 +817,43 @@ is the one that reaches the framebuffer.
 No draw-call claim is made: `SpriteAnimation::draw` submits one sprite through the normal
 batch, so an animated spritesheet costs exactly what the same sprite costs today.
 
+## After Phase 24 — physics and C ABI v5
+
+Physics is the first dependency in this project that costs megabytes, so the numbers are
+about size and about the tick, not about frame rate.
+
+| Run | Result | Interpretation |
+|---|---|---|
+| `physics_2d_demo`, 1800 frames (30 s) | peak box speed **0.000** in the last second | The stack sleeps; a jittering solver would report a constant non-zero speed |
+| `physics_2d_demo`, 1800 frames | 59.9 fps (SDL dummy/software) | Smoke test, not a baseline |
+| `physics_3d_demo`, 420 frames | 60.0 fps, 24 bodies, player blocked at x=5.18, `grounded=true` | EGL offscreen, GLES 2 on a desktop GPU |
+| `physics_3d_demo` | 0 crates moving at the end, stack top at 4.49 | 20 dynamic boxes settled |
+| `libgiochi.so` release | **2 569 008 B / 106 symbols**, 9 of them `giochi_physics_*` (was 912 888 B / 97 symbols) | +1.66 MB from Rapier 2D, which is unconditional in the capi: the header is a contract (ADR-057) |
+| ARM64 `cargo check` with `physics-2d,physics-3d` | ok | Rapier is pure Rust; no new native dependency |
+
+### The `detect_collisions` trap
+
+Rapier 0.36 has no `EventQueue` (events go through an `EventHandler`) and no public
+"refresh the broad phase" call other than `PhysicsWorld::detect_collisions`. Using it to
+make `raycast` see a body created in the same frame breaks the simulation: after
+`detect_collisions`, the **next** `step` no longer moves a dynamic body at all. Measured
+with a two-body world; the same code with the call removed falls normally.
+
+The fix is a step with `dt = 0`: it updates the broad phase, integrates nothing, and leaves
+the island state in a shape the next real step accepts. `refresh_queries` is that, and
+`raycast` calls it when the world changed since the last step. Cost: one extra (cheap)
+step per raycast-after-mutation, and none in the steady state.
+
+### Character controller
+
+`KinematicCharacterController` was the phase's unknown. Two behaviours cost time:
+
+* `grounded` is only computed when the controller has something to sample — a character
+  that is only pushed sideways never touches the floor and never reports `grounded`. The
+  game has to apply gravity to the desired movement.
+* The controller does not move the body: `move_character` returns the allowed translation
+  and the caller's `step` applies it through `set_next_kinematic_translation`.
+
 ## Conclusions
 
 - On x86_64 the baseline is dominated by per-sprite draw calls: 200 → 1000 sprites

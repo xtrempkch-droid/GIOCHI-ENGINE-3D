@@ -257,7 +257,7 @@ def main() -> int:
     # Part I was written against 1; this script ships with the library, so it names the
     # current number. A consumer that predates a part should test `>= 1` instead, which
     # is the compatibility rule in giochi.h.
-    check(lib.giochi_abi_version() == 4, "abi version")
+    check(lib.giochi_abi_version() == 5, "abi version")
     check(lib.giochi_abi_version() >= 1, "abi version is at least part I")
     check(lib.giochi_engine_version() > 0, "engine version")
     check(lib.giochi_get_last_error() == b"", "last error starts empty")
@@ -401,6 +401,58 @@ def main() -> int:
         # Only a build with `profiling` measures anything.
         check(stats.frame_time_ns > 0, "frame stats period")
         check(stats.fps >= 0.0, "frame stats fps")
+
+    # ---- part V: 2D physics --------------------------------------------------
+    lib.giochi_physics_world_create.restype = c_void_p
+    lib.giochi_physics_world_create.argtypes = [c_float, c_float]
+    lib.giochi_physics_world_destroy.argtypes = [c_void_p]
+    lib.giochi_physics_create_body.argtypes = [
+        c_void_p, c_uint32, c_float, c_float, c_float, POINTER(c_uint64)
+    ]
+    lib.giochi_physics_attach_box.argtypes = [
+        c_void_p, c_uint64, c_float, c_float, c_float, c_float
+    ]
+    lib.giochi_physics_step.argtypes = [c_void_p, c_float]
+    # Without argtypes ctypes passes a Python int as a 32-bit C int, which truncates the
+    # pointer on a 64-bit build: the first call segfaults instead of failing a check.
+    lib.giochi_physics_body_count.argtypes = [c_void_p]
+    lib.giochi_physics_body_count.restype = c_uint32
+    lib.giochi_physics_get_position.argtypes = [
+        c_void_p, c_uint64, POINTER(c_float), POINTER(c_float)
+    ]
+
+    physics = lib.giochi_physics_world_create(0.0, -10.0)
+    check(bool(physics), "physics world create")
+    floor_body = c_uint64()
+    check(lib.giochi_physics_create_body(physics, 1, 0.0, -0.5, 0.0, byref(floor_body))
+          == GIOCHI_ERROR_OK, "physics create floor")
+    check(lib.giochi_physics_attach_box(physics, floor_body, 20.0, 0.5, 0.9, 0.0)
+          == GIOCHI_ERROR_OK, "physics attach floor")
+
+    box = c_uint64()
+    check(lib.giochi_physics_create_body(physics, 0, 0.0, 5.0, 0.0, byref(box))
+          == GIOCHI_ERROR_OK, "physics create box")
+    check(lib.giochi_physics_attach_box(physics, box, 0.5, 0.5, 0.5, 0.0)
+          == GIOCHI_ERROR_OK, "physics attach box")
+    check(lib.giochi_physics_body_count(physics) == 2, "physics body count")
+
+    pos_x = c_float()
+    pos_y = c_float()
+    check(lib.giochi_physics_get_position(physics, box, byref(pos_x), byref(pos_y))
+          == GIOCHI_ERROR_OK, "physics get position")
+    check(abs(pos_y.value - 5.0) < 0.01, "physics start position")
+
+    check(lib.giochi_physics_step(physics, 1.0 / 60.0) == GIOCHI_ERROR_OK, "physics one substep")
+    for _ in range(120):
+        check(lib.giochi_physics_step(physics, 1.0 / 60.0) == GIOCHI_ERROR_OK, "physics step")
+    check(lib.giochi_physics_get_position(physics, box, byref(pos_x), byref(pos_y))
+          == GIOCHI_ERROR_OK, "physics get position after falling")
+    check(0.3 < pos_y.value < 0.8, "physics box landed on the floor")
+    check(lib.giochi_physics_step(None, 0.01) == GIOCHI_ERROR_INVALID_ARGUMENT,
+          "physics NULL world")
+    check(lib.giochi_physics_world_destroy(None) == GIOCHI_ERROR_INVALID_ARGUMENT,
+          "physics NULL destroy")
+    check(lib.giochi_physics_world_destroy(physics) == GIOCHI_ERROR_OK, "physics destroy")
 
     # ---- teardown -----------------------------------------------------------
     check(lib.giochi_scene_destroy(scene) == GIOCHI_ERROR_OK, "scene destroy")

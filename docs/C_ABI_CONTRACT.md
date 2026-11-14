@@ -1199,3 +1199,87 @@ while (rodando) {
 | O broadcast do host chega ao cliente por `giochi_net_poll_global` | `net.rs::broadcast_do_host_chega_ao_cliente_pela_abi` |
 | `GIOCHI_NET_AGUARDE` é positivo | `net.rs::codigo_de_espera_nao_e_erro` |
 | O header corresponde ao código | `scripts/gen-header.sh --check` no CI |
+# Part V — Física 2D (ABI v5)
+
+Aditiva como as anteriores: só símbolos e um tipo opaco novos. Um consumidor escrito
+para as partes I–IV compila e corre sem alterações.
+
+## 20. Física
+
+### 20.1 O mundo
+
+```c
+typedef struct GiochiPhysicsWorld GiochiPhysicsWorld;
+
+GiochiPhysicsWorld *giochi_physics_world_create(float gravity_x, float gravity_y);
+int32_t             giochi_physics_world_destroy(GiochiPhysicsWorld *world);
+```
+
+O mundo é um ponteiro opaco, como o motor 3D (ADR-039): a struct por dentro tem um Rapier,
+cujo tamanho muda entre versões da dependência e não é assunto do header. **Não é
+singleton** — cada `create` devolve um mundo independente — e `destroy(NULL)` devolve
+`GIOCHI_ERROR_INVALID_ARGUMENT` em vez de não fazer nada, para que um ponteiro perdido
+apareça como erro.
+
+Gravidade não-finita devolve `NULL` e explica em `giochi_get_last_error()`.
+
+### 20.2 Corpos
+
+```c
+int32_t  giochi_physics_create_body(GiochiPhysicsWorld *world, uint32_t kind,
+                                    float x, float y, float rotation,
+                                    uint64_t *out_body);
+int32_t  giochi_physics_attach_box(GiochiPhysicsWorld *world, uint64_t body,
+                                   float half_width, float half_height,
+                                   float friction, float restitution);
+int32_t  giochi_physics_apply_impulse(GiochiPhysicsWorld *world, uint64_t body,
+                                      float impulse_x, float impulse_y);
+int32_t  giochi_physics_destroy_body(GiochiPhysicsWorld *world, uint64_t body);
+uint32_t giochi_physics_body_count(GiochiPhysicsWorld *world);
+```
+
+`kind`: `0` dinâmico, `1` fixo, `2` cinemático. Qualquer outro valor é
+`GIOCHI_ERROR_INVALID_ARGUMENT` — o header documenta os três e um teste C cobre o quarto.
+
+`half_width`/`half_height` são **meias medidas**, como no Rust. Handle `0` nunca é válido,
+e destruir duas vezes o mesmo corpo devolve erro (não é idempotente de propósito: um
+despawn duplo significa que o jogo perdeu a conta).
+
+### 20.3 Passo e leitura
+
+```c
+int32_t giochi_physics_step(GiochiPhysicsWorld *world, float dt);
+int32_t giochi_physics_get_position(GiochiPhysicsWorld *world, uint64_t body,
+                                    float *out_x, float *out_y);
+```
+
+`step` devolve **`0` em sucesso**, como todas as funções falíveis da ABI. O número de
+passos de integração que o acumulador correu (0–4) não é exposto: um valor positivo
+quebraria "0 significa sucesso", que é a convenção em que o header inteiro assenta.
+
+O mundo integra a 60 Hz fixos: `dt` de 1/30 corre dois passos, e um travamento de 2 s
+corre no máximo 4 e descarta o resto.
+
+### 20.4 O que a parte V deliberadamente não tem
+
+- **Não é singleton.** Ao contrário do motor 2D, dois mundos coexistem. Não há
+  `giochi_physics_current()`: um programa C que queira um mundo guarda o ponteiro.
+- **Sem collider que não seja caixa.** Círculo e cápsula existem em Rust; a ABI expõe a
+  caixa, que é o que um teste de fumo e um jogo de plataforma precisam. Alargar é aditivo.
+- **Sem contactos nem raycast.** Os dois estão em Rust (`docs/PHYSICS.md`); expô-los exige
+  decidir como um `Vec` de eventos atravessa a fronteira, o que é a mesma conversa do
+  `GiochiNetSnapshot` (parte IV) e não foi feita nesta passagem.
+- **Sem física 3D.** Exigiria um segundo conjunto de símbolos e de tipos; as fases 19–24
+  não o pediram à ABI.
+
+### 20.5 Checklist de conformidade da parte V
+
+| Requisito | Como é verificado |
+|---|---|
+| `GIOCHI_ABI_VERSION == 5` | `lib.rs::abi_version_matches_contract` |
+| O header declara a parte V | `scripts/gen-header.sh --check` |
+| `NULL` é recusado sem crash | `c_smoke.c` (física, secção final) e `python_smoke.py` |
+| Um corpo dinâmico cai e assenta | `c_smoke.c` e `python_smoke.py` (posição final) |
+| Handle inválido devolve erro | `c_smoke.c` (`get_position` com handle 999999) |
+| `kind` desconhecido é recusado | `c_smoke.c` (`kind == 7`) |
+| `step` devolve 0, não a contagem | `c_smoke.c` (`CHECK_CODE` no passo) |

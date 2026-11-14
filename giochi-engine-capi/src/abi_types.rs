@@ -32,7 +32,10 @@ const _: () = assert!(ENGINE_TITLE_CAPACITY == 64);
 /// * `3` — part III (`GiochiFrameStats`), phase 18. Additive as well, so a consumer
 ///   written against `1` or `2` keeps working; the contract asks callers to accept
 ///   `giochi_abi_version() >= 1` for exactly this reason.
-pub const GIOCHI_ABI_VERSION: u32 = 4;
+/// * `4` — part IV (networking), release 0.4.0.
+/// * `5` — part V (2D physics), Growth Pack phase 24. Additive: new `giochi_physics_*`
+///   symbols and one opaque `GiochiPhysicsWorld`; no earlier signature or layout moved.
+pub const GIOCHI_ABI_VERSION: u32 = 5;
 
 /// Largest asset the loader accepts, in bytes (64 MiB).
 pub const GIOCHI_MAX_ASSET_SIZE: usize = 64 * 1024 * 1024;

@@ -6,6 +6,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Não publicado]
 
+### Adicionado — Fase 24: física e C ABI v5
+
+- **Física 2D** (`giochi-engine::physics`, feature `physics-2d`): `PhysicsWorld2D` com
+  passo fixo de 60 Hz e acumulador limitado a quatro subpassos, corpos `dynamic`/`fixed`/
+  `kinematic`, colliders de caixa, círculo e cápsula, contactos `Started`/`Stopped` e
+  `raycast` com normal. Handles `u64` nunca reutilizados: um handle morto devolve
+  `InvalidBody` em vez de endereçar outro corpo.
+- **Física 3D** (`giochi-engine-3d::physics`, feature `physics-3d`): o mesmo contrato com
+  rotação por quaternião, mais um controlador de personagem sobre o
+  `KinematicCharacterController` do Rapier — deslizar em paredes, subir degraus e reportar
+  `grounded`.
+- **C ABI v5**: `GIOCHI_ABI_VERSION` 5, nove funções `giochi_physics_*` e o tipo opaco
+  `GiochiPhysicsWorld` (`docs/C_ABI_CONTRACT.md` §20). Aditiva: um consumidor da v1–v4
+  compila e corre sem alterações. `giochi.h` regenerado e verificado em CI; testes C e
+  Python criam um mundo, deixam uma caixa cair e leem a posição.
+- `examples/physics_2d_demo.rs` e `examples/physics_3d_demo.rs`, `tests/physics_2d.rs`,
+  `docs/PHYSICS.md` e ADR-057.
+
 ### Adicionado — Fase 23: animação
 
 - **Animação de spritesheet** (`giochi_engine::animation::SpriteAnimation`): frames como

@@ -39,8 +39,8 @@ SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" \
 # Phase 20/21. `devtools` is off by default, so without this the console, the debug draw,
 # the egui backend and the widget facade are only type-checked.
 SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" \
-    run cargo test --workspace --features giochi-engine/devtools,giochi-engine/hot_reload,giochi-engine-3d/hot_reload,giochi-engine-lua/hot_reload,giochi-demo/hot_reload --target x86_64-unknown-linux-gnu
-run cargo clippy --workspace --all-targets --features giochi-engine/devtools,giochi-engine/hot_reload,giochi-engine-3d/hot_reload,giochi-engine-lua/hot_reload,giochi-demo/hot_reload -- -D warnings
+    run cargo test --workspace --features giochi-engine/devtools,giochi-engine/hot_reload,giochi-engine-3d/hot_reload,giochi-engine-lua/hot_reload,giochi-demo/hot_reload,giochi-engine/physics-2d,giochi-engine-3d/physics-3d --target x86_64-unknown-linux-gnu
+run cargo clippy --workspace --all-targets --features giochi-engine/devtools,giochi-engine/hot_reload,giochi-engine-3d/hot_reload,giochi-engine-lua/hot_reload,giochi-demo/hot_reload,giochi-engine/physics-2d,giochi-engine-3d/physics-3d -- -D warnings
 # `laminar` and `mdns` are optional, so a default-feature build never compiles or tests
 # their code outside the aarch64 cross-check. Test them here, where the loopback tests
 # can actually run.
