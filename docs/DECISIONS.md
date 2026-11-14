@@ -1698,3 +1698,46 @@ in phase 24's C header — where there is no Rust and no generics.
 In exchange: no `egui` type in any engine signature, phase 24 can expose the same widgets
 through `giochi_ui_*`, and swapping the backend (a GL one for the 3D crate) does not change
 a game's source.
+
+## ADR-056 — Animation is the engine's own maths over `CurveValue`, and it has no feature flag
+
+**Context.** Phase 23 had to deliver sprite animation, easing, tweens and an event-driven
+state machine. Three ways to do it were on the table: a third-party animation crate (there
+is no mature, no_std-friendly, MSRV-1.86 option that fits an engine that already owns its
+sprite batch); a `giochi-animation` crate mirroring `giochi-engine-3d`; or a module inside
+`giochi-engine` next to `particles` and `ui`. The `CurveValue` trait published with phase 22
+already describes exactly what a tween needs — interpolate between two values — and is
+implemented for `f32`, `Vec2` and `Color` (and `Vec3` in the 3D crate).
+
+**Decision.** A module, `giochi_engine::animation`, with four small pieces:
+
+* `SpriteAnimation` stores frames as source rects with individual durations, because
+  spritesheets are not always uniform grids; `from_strip` is the shortcut for the common case.
+  Frame advance reduces the delta modulo the cycle duration, so a 2-second stall does not
+  loop a 0.1-second animation twenty times inside one `update`.
+* `Tween<T>` is generic over `CurveValue` rather than over a new `Animatable` trait. A second
+  interpolation trait would mean two impls per type and a conversion at every call site.
+* `Easing::sample` returns `Result`: a `NaN` progress is a bug in the caller and the engine
+  reports it instead of silently rendering a `NaN` transform.
+* States and events are `u32` IDs owned by the game. The engine cannot know what "run" or
+  "hurt" means, and a string-keyed map would allocate on construction and invite typos that
+  only surface at runtime.
+* `RenderContext::draw_sprite_region` is the entire renderer support: no new pass, no new
+  shader, no new state. The animation draws through the camera and the existing batch, so an
+  animated sprite costs what a still sprite costs.
+
+**No feature flag**, unlike phases 19–21. `hot_reload` and `devtools` pull in `notify` and
+`egui`; `particles` and `animation` pull in nothing. A feature that only removes ~600 lines
+of dead-stripped arithmetic from a binary adds a matrix cell (eight more gate combinations)
+and buys no dependency. Compiled code size is unchanged for callers who do not use it, which
+is the property the flag would have been protecting.
+
+**Consequences.** `animation` depends on `particles::CurveValue`. That is a data-oriented
+trait, not a particle concept, and `math` would be its natural home — but moving it now would
+break the phase-22 public path (`giochi_engine::particles::CurveValue`) that `docs/PARTICLES.md`
+documents. The dependency direction is `animation → particles`, never the reverse, and is
+recorded here so a future refactor can move the trait to `math` with a re-export.
+
+There is **no blending** between animations and no AI layer. A `AnimationStateMachine`
+answers "which state am I in"; the game maps that to a clip. Blend trees, root motion and
+frame events are not implemented and are not implied by the API.

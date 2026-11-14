@@ -6,6 +6,38 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Não publicado]
 
+### Adicionado — Fase 23: animação
+
+- **Animação de spritesheet** (`giochi_engine::animation::SpriteAnimation`): frames como
+  recortes da textura, com duração individual, `from_strip` para faixas horizontais e
+  `PlaybackMode::{Once, Loop, PingPong}` (o ping-pong não repete os endpoints). `update`
+  aceita deltas grandes e reduz o trabalho ao ciclo, `pause`/`play`/`reset` controlam a
+  reprodução e `draw` desenha pela câmara e pelo batch normal de sprites.
+- **`Tween<T>` e `Easing`**: interpolação tipada (`f32`, `Vec2`, `Color`) com curvas
+  linear/ease-in/ease-out/ease-in-out, reaproveitando o trait `CurveValue` das partículas em
+  vez de duplicar a aritmética.
+- **`AnimationStateMachine`**: transições declaradas por par `(estado, evento)`, com estados
+  e eventos como IDs da aplicação; um evento sem transição é ignorado em vez de ser erro.
+- `examples/animation_demo.rs`, `docs/ANIMATION.md`, ADR-056 e `tests/animation_render.rs`
+  (prova por pixel que a região de origem escolhida chega ao framebuffer).
+- `perf_regression` passa a exigir **0 alocações** por frame na actualização de 256 tweens
+  mais uma animação de spritesheet.
+
+### Adicionado — Fase 22: partículas
+
+- **Partículas 2D** (`giochi_engine::particles`): curvas tipadas para tamanho, cor, velocidade
+  e rotação; emissores (`ParticleEmitter` implementado por um emissor configurável e pelos
+  presets) e um pool de CPU limitado com seed determinística, para que uma demo ou um teste
+  produza sempre a mesma imagem.
+- **Tint por vértice no batch 2D**: uma partícula colorida deixa de forçar uma chamada por
+  sprite. A ordem de submissão é preservada e só o quad com `tint == WHITE` continua a usar o
+  caminho rápido de uma cópia. `tests/particles_render.rs` confirma 1.000 partículas da mesma
+  textura em **1 draw call** e valida os pixels tintados.
+- **Partículas 3D** (`giochi-engine-3d::particles`): pool de billboards, ordenação
+  trás-para-a-frente e desenho instanciado com o fallback já existente.
+- Demos `particles_2d_demo`/`particles_3d_demo`, guia `docs/PARTICLES.md` e opção
+  `--particles` no `mini_fps` (Space para emitir; emissão automática em `--auto`).
+
 ### Adicionado — Fase 21: sistema de UI
 
 - **Widgets da engine** (`giochi_engine::ui`): `Button`, `Slider`, `Checkbox`, `TextInput`,

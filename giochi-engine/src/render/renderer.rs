@@ -693,6 +693,27 @@ impl RenderContext {
         self.draw_texture_tinted(sprite.texture, dst, Rect::ZERO, tint)
     }
 
+    /// Draws a world-space sprite using a source rectangle in texture pixels.
+    ///
+    /// The destination is transformed by the camera and queued in the same order-
+    /// preserving batch as [`RenderContext::draw_sprite`].
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use giochi_engine::{Rect, RenderContext, Sprite};
+    ///
+    /// # fn draw(renderer: &mut RenderContext, texture: u64) -> Result<(), giochi_engine::GiochiError> {
+    /// let sprite = Sprite::new(texture, 20.0, 30.0, 16.0, 16.0);
+    /// renderer.draw_sprite_region(&sprite, Rect::new(16.0, 0.0, 16.0, 16.0))?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn draw_sprite_region(&mut self, sprite: &Sprite, source: Rect) -> Result<(), GiochiError> {
+        let dst = self.camera.world_rect_to_screen(sprite.world_rect());
+        self.draw_texture(sprite.texture, dst, source)
+    }
+
     /// Converts a world-space point to screen space with the current camera.
     pub fn world_to_screen(&self, world: Vec2) -> Vec2 {
         self.camera.world_to_screen(world)

@@ -40,6 +40,7 @@
 #![warn(missing_docs)]
 #![warn(missing_debug_implementations)]
 
+pub mod animation;
 pub mod assets;
 pub mod audio;
 pub mod core;
@@ -85,6 +86,10 @@ pub const fn version_packed() -> u32 {
     (VERSION_MAJOR << 16) | (VERSION_MINOR << 8) | VERSION_PATCH
 }
 
+pub use crate::animation::{
+    AnimationError, AnimationFrame, AnimationStateMachine, Easing, PlaybackMode, SpriteAnimation,
+    Tween,
+};
 pub use crate::assets::{asset_size, read_asset, ResourceManager, MAX_ASSET_SIZE};
 pub use crate::audio::{AudioSystem, MusicHandle, MusicState, SoundHandle};
 pub use crate::core::engine::{Engine, EngineConfig, RunStats, DEFAULT_CLEAR_COLOR};

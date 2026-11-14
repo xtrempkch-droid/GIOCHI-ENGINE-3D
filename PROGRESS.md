@@ -10,8 +10,45 @@ Fases 0–18 concluídas. O Growth Pack começou em 2026-11-14.
 | 20 — Debug Tools | **concluída** (2026-11-14) | 69 testes de unidade em `devtools`, 6 de `c_shape`, `devtools_render` (consola desenha por pixels e fechada não desenha nada); `perf_regression` 0 alocações/frame com a feature compilada e a consola fechada |
 | 21 — UI System | **concluída com pendência** (2026-11-14) | 24 testes de unidade em `ui`, `ui_render` (desenha nos 3 temas, pixels diferentes entre temas, 0 alocações/frame sem UI); `ui_demo` roda. **UI sobre 3D não entregue** — ver pendências |
 | 22 — Particles | **concluída** (2026-11-14) | 12 testes 2D, 4 em 3D e aceitação de render: 1.000 partículas 2D → 1 draw call, tint validado por pixel; demos 2D/3D e `mini_fps --particles` executados por 120 frames; gates x86_64, docs e check ARM64 aprovados |
-| 23 — Animation | pendente | — |
+| 23 — Animation | **concluída** (2026-11-14) | 13 testes de unidade em `animation`, `animation_render` (a câmara escolhe o frame certo do spritesheet, pixel a pixel), `perf_regression` com 256 tweens + 1 spritesheet a 0 alocações/frame; `animation_demo` em 120 frames; gates x86_64, features, docs e check ARM64 aprovados |
 | 24 — Physics + C ABI v4 | pendente | — |
+
+### Gates da Fase 23
+
+- [x] `cargo fmt --all -- --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo clippy --workspace --all-targets --features devtools,hot_reload -- -D warnings`
+- [x] `cargo test --workspace` e `--features devtools,hot_reload` — 0 falhas; 13 testes de
+      unidade em `animation` e `animation_render`
+- [x] `perf_regression`: 256 tweens + 1 spritesheet actualizados por 120 frames a
+      **0 alocações**; frame vazio continua a 254.95 µs
+- [x] `cargo doc --workspace --no-deps` — mantém o warning pré-existente em
+      `giochi-engine-3d/src/render3d/texture.rs:65`
+- [x] `cargo check --workspace --target aarch64-unknown-linux-gnu`
+- [x] `cargo run -p giochi-engine --example animation_demo -- --frames 120 --auto` em modo
+      headless
+- [x] `cargo build --release` sem features: `libgiochi.so` 912 888 B, 97 símbolos `giochi_*`
+
+### Entregue na Fase 23
+
+- `giochi-engine/src/animation/`: `Easing` (linear, ease-in, ease-out, ease-in-out),
+  `Tween<T>` sobre o trait `CurveValue` que as partículas já usavam, `SpriteAnimation` com
+  `PlaybackMode::{Once, Loop, PingPong}` e `AnimationStateMachine` por pares
+  `(estado, evento)`.
+- `SpriteAnimation::draw` desenha pela câmara e pelo batch normal de sprites; um único
+  `draw_sprite_region` novo no `RenderContext` é todo o suporte de renderer que a fase
+  precisou — sem passe, sem shader, sem estado novo.
+- `examples/animation_demo.rs`, `docs/ANIMATION.md`, `tests/animation_render.rs` e ADR-056.
+- Nenhuma flag de feature: o módulo é aritmética de CPU e não arrasta dependência, pelo que
+  custa 0 bytes no binário de quem não o chama (ADR-056).
+
+### Nota de âmbito da Fase 23
+
+O plano pedia "animações dirigidas por IA ou por máquina de estados". O que existe é a
+máquina de estados **e** os tweens; não há camada de IA nem de blending entre clips (uma
+`AnimationStateMachine` devolve o estado, o jogo escolhe a animação). Blend trees, root
+motion e eventos de frame ficaram de fora e não foram pedidos explicitamente — registados
+aqui para o estado do plano não prometer mais do que o código faz.
 
 ### Gates da Fase 22
 

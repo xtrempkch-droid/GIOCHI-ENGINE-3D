@@ -801,6 +801,22 @@ No CPU/GPU frame-time comparison was recorded for particle simulation. The dummy
 offscreen demo runs verify deterministic execution and rendering only; their frame rates
 are not comparable to the reference-hardware benchmarks above.
 
+## After Phase 23 — Animation
+
+Animation is CPU arithmetic plus the existing sprite batch, so the interesting number is
+allocations, not FPS. The renderer acceptance test proves the camera-driven source region
+is the one that reaches the framebuffer.
+
+| Run | Result | Interpretation |
+|---|---|---|
+| `perf_regression`, 256 tweens + 1 spritesheet | **0 allocations over 120 frames** | `update` mutates in place; no per-frame heap state |
+| `perf_regression`, empty frame | 254.95 µs | Unchanged from phase 22 — animation adds nothing to `Engine::step` |
+| `animation_render` | Source region (8,8) reads the expected frame colour | Framebuffer pixel, software driver |
+| `animation_demo`, 120 frames | 58.7 FPS | SDL dummy/software driver; smoke test, not a baseline |
+
+No draw-call claim is made: `SpriteAnimation::draw` submits one sprite through the normal
+batch, so an animated spritesheet costs exactly what the same sprite costs today.
+
 ## Conclusions
 
 - On x86_64 the baseline is dominated by per-sprite draw calls: 200 → 1000 sprites

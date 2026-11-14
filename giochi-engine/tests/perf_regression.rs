@@ -37,7 +37,8 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use giochi_engine::{Engine, EngineConfig, Rect, TextureHandle};
+use giochi_engine::animation::{Easing, PlaybackMode, SpriteAnimation, Tween};
+use giochi_engine::{Engine, EngineConfig, Rect, TextureHandle, Vec2};
 
 /// Wraps the system allocator to count what Rust code asks for.
 ///
@@ -192,6 +193,45 @@ fn the_per_frame_engine_budget_has_not_regressed() {
         sprite_allocations, 0,
         "drawing 512 batched sprites allocated {sprite_allocations} times over 120 frames: \
          the batch is rebuilding its scratch buffers per frame"
+    );
+
+    // Animation updates run on the game side every frame: they must not allocate
+    // either, or a scene's steady state pays a malloc per tween per frame.
+    let mut animation = SpriteAnimation::from_strip(
+        texture,
+        Vec2::new(8.0, 8.0),
+        4,
+        FRAME_TIME,
+        PlaybackMode::Loop,
+    )
+    .expect("sprite animation");
+    let mut tweens: Vec<Tween<Vec2>> = (0..256u32)
+        .map(|index| {
+            Tween::new(
+                Vec2::ZERO,
+                Vec2::new(index as f32, 8.0),
+                1.0,
+                Easing::EaseInOut,
+            )
+            .expect("tween")
+        })
+        .collect();
+    let before = ALLOCATIONS.load(Ordering::Relaxed);
+    for _ in 0..120 {
+        animation.update(FRAME_TIME).expect("animation update");
+        for tween in &mut tweens {
+            tween.update(FRAME_TIME).expect("tween update");
+        }
+    }
+    let animation_allocations = ALLOCATIONS.load(Ordering::Relaxed) - before;
+    println!(
+        "perf_regression: 256 tweens + 1 spritesheet over 120 frames allocated \
+         {animation_allocations} times"
+    );
+    assert_eq!(
+        animation_allocations, 0,
+        "updating 256 tweens and one spritesheet allocated {animation_allocations} times \
+         over 120 frames: the animation path builds per-frame state on the heap"
     );
 
     // --- 2. Draw-call gate -------------------------------------------------------
