@@ -36,11 +36,12 @@ SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" \
 # integration tests are skipped by `required-features`.
 SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" \
     run cargo test --workspace --features giochi-engine/hot_reload,giochi-engine-3d/hot_reload,giochi-engine-lua/hot_reload,giochi-demo/hot_reload --target x86_64-unknown-linux-gnu
-# Phase 20/21. `devtools` is off by default, so without this the console, the debug draw,
-# the egui backend and the widget facade are only type-checked.
+# Phase 20/21/24. `devtools`, `physics-*` and `hud` are off by default, so without this
+# the console, the debug draw, the egui backends (2D and GLES), the widget facade, the
+# physics worlds and the HUD painter are only type-checked.
 SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" \
-    run cargo test --workspace --features giochi-engine/devtools,giochi-engine/hot_reload,giochi-engine-3d/hot_reload,giochi-engine-lua/hot_reload,giochi-demo/hot_reload,giochi-engine/physics-2d,giochi-engine-3d/physics-3d --target x86_64-unknown-linux-gnu
-run cargo clippy --workspace --all-targets --features giochi-engine/devtools,giochi-engine/hot_reload,giochi-engine-3d/hot_reload,giochi-engine-lua/hot_reload,giochi-demo/hot_reload,giochi-engine/physics-2d,giochi-engine-3d/physics-3d -- -D warnings
+    run cargo test --workspace --features giochi-engine/devtools,giochi-engine/hot_reload,giochi-engine-3d/hot_reload,giochi-engine-lua/hot_reload,giochi-demo/hot_reload,giochi-engine/physics-2d,giochi-engine-3d/physics-3d,giochi-engine-3d/hud --target x86_64-unknown-linux-gnu
+run cargo clippy --workspace --all-targets --features giochi-engine/devtools,giochi-engine/hot_reload,giochi-engine-3d/hot_reload,giochi-engine-lua/hot_reload,giochi-demo/hot_reload,giochi-engine/physics-2d,giochi-engine-3d/physics-3d,giochi-engine-3d/hud -- -D warnings
 # `laminar` and `mdns` are optional, so a default-feature build never compiles or tests
 # their code outside the aarch64 cross-check. Test them here, where the loopback tests
 # can actually run.

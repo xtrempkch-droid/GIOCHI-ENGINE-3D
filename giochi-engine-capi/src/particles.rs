@@ -282,3 +282,48 @@ pub extern "C" fn giochi_particles_default_config(out_config: *mut GiochiParticl
         0
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_config_is_96_bytes_and_matches_the_header() {
+        // The header declares this struct and a consumer compiled against it reads it by
+        // offset. The Python smoke test used to declare `start_color` as a `uint32_t`, which
+        // made its buffer 64 bytes where the library writes 96: the write overran it and
+        // every field after `end_size` came from the wrong place. Pinning the size here is
+        // the cheapest guard against that class of mismatch.
+        assert_eq!(core::mem::size_of::<GiochiParticleConfig>(), 96);
+        assert_eq!(core::mem::align_of::<GiochiParticleConfig>(), 4);
+        assert_eq!(core::mem::size_of::<Color>(), 20);
+        // `_reserved` must be the last field or the offsets above are meaningless.
+        let config = GiochiParticleConfig::default();
+        assert_eq!(config._reserved, [0; 4]);
+    }
+
+    #[test]
+    fn creating_requires_a_texture_and_a_live_handle_to_use() {
+        assert_eq!(giochi_particles_create(0, 16, core::ptr::null()), 0);
+        assert!(state::last_error_text().contains("texture"));
+
+        let handle = 9_999u64;
+        assert_eq!(
+            giochi_particles_destroy(handle),
+            GIOCHI_ERROR_INVALID_HANDLE
+        );
+        assert_eq!(giochi_particles_alive(handle), 0);
+        assert_eq!(
+            giochi_particles_emit(handle, 0.0, 0.0, 1),
+            GIOCHI_ERROR_INVALID_HANDLE
+        );
+        assert_eq!(
+            giochi_particles_update(handle, 0.016),
+            GIOCHI_ERROR_INVALID_HANDLE
+        );
+        assert_eq!(
+            giochi_particles_default_config(core::ptr::null_mut()),
+            GIOCHI_ERROR_INVALID_ARGUMENT
+        );
+    }
+}

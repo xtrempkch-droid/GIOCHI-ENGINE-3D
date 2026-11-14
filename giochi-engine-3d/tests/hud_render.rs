@@ -92,6 +92,82 @@ fn the_hud_paints_pixels_on_top_of_the_scene() {
     hud.destroy(render.glow());
 }
 
+#[test]
+fn the_hud_puts_the_gl_state_back_the_way_it_found_it() {
+    // The painter used to force `disable(BLEND)` on the way out, which broke the plausible
+    // order "HUD first, particles after": the particle pass asks `GlState::blend` for
+    // source-alpha blending once per frame and the HUD had just turned it off, so the
+    // particles drew opaque. This asserts the state the caller set is the state it gets
+    // back.
+    use glow::HasContext;
+
+    let _guard = common::platform_guard();
+    std::env::set_var("SDL_VIDEODRIVER", "offscreen");
+
+    let Ok(platform) = Platform::new() else {
+        eprintln!("hud_render: no SDL video driver, skipping");
+        return;
+    };
+    if context::configure_attributes(&platform, GlesVersion::Gles2).is_err() {
+        eprintln!("hud_render: no GLES configuration, skipping");
+        return;
+    }
+    let Ok(window) = Window::new_opengl(&platform, WindowConfig::new(WIDTH, HEIGHT), "hud state")
+    else {
+        eprintln!("hud_render: no GL window, skipping");
+        return;
+    };
+    let mut render = RenderContext3D::new(context::create(&window).expect("GL context"));
+    let mut hud = GlesHud::new(render.glow()).expect("HUD program");
+
+    render.begin_frame(&window);
+    render.clear(&window, Color3D::new(0.1, 0.2, 0.3, 1.0));
+    // Re-borrowed after the `&mut` calls, which is why it is not held for the whole test.
+    let gl = render.glow();
+
+    // A caller's state, set before the HUD runs: blending on with the engine's own factors.
+    // SAFETY: current context, core GLES 2.0.
+    unsafe {
+        gl.enable(glow::BLEND);
+        gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+        gl.enable(glow::DEPTH_TEST);
+        gl.enable(glow::CULL_FACE);
+    }
+
+    for _ in 0..2 {
+        hud.draw(gl, (WIDTH, HEIGHT), 1.0 / 60.0, &mut |ctx| {
+            egui::Window::new("state").show(ctx, |ui| ui.label("state"));
+        })
+        .expect("HUD frame");
+    }
+
+    // SAFETY: same context; these are queries.
+    let (blend, depth, cull, src, dst) = unsafe {
+        (
+            gl.is_enabled(glow::BLEND),
+            gl.is_enabled(glow::DEPTH_TEST),
+            gl.is_enabled(glow::CULL_FACE),
+            gl.get_parameter_i32(glow::BLEND_SRC_ALPHA) as u32,
+            gl.get_parameter_i32(glow::BLEND_DST_ALPHA) as u32,
+        )
+    };
+    assert!(blend, "the HUD turned blending off");
+    assert!(depth, "the HUD turned the depth test off");
+    assert!(cull, "the HUD turned face culling off");
+    assert_eq!(
+        src,
+        glow::SRC_ALPHA,
+        "the HUD changed the blend source factor"
+    );
+    assert_eq!(
+        dst,
+        glow::ONE_MINUS_SRC_ALPHA,
+        "the HUD changed the blend destination factor"
+    );
+
+    hud.destroy(gl);
+}
+
 /// Fails unless the top-left corner has more than one colour and is not just the clear
 /// colour.
 ///

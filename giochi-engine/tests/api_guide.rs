@@ -12,8 +12,8 @@ use giochi_engine::input::gamepad::{AXIS_LEFT_X, BUTTON_SOUTH};
 use giochi_engine::input::keyboard::{KEY_A, KEY_D, KEY_SPACE};
 use giochi_engine::input::mouse::MOUSE_RIGHT;
 use giochi_engine::{
-    codes, Camera, Color, Engine, EngineConfig, GiochiError, Input, Rect, RenderContext, Scene,
-    SceneTransition, Sprite, Time, Vec2,
+    codes, Camera, Color, Engine, EngineConfig, GiochiError, Input, PresentationMode, Rect,
+    RenderContext, Scene, SceneTransition, Sprite, Time, Vec2,
 };
 
 fn asset(name: &str) -> String {
@@ -27,6 +27,21 @@ fn api_guide_examples_compile_and_behave() {
     assert_eq!(config.width, 320);
     assert_eq!(config.title_str(), "guide");
     assert!(config.is_vsync_enabled());
+    assert_eq!(config.presentation_mode(), PresentationMode::Vsync);
+    assert_eq!(
+        config.with_async_presentation().presentation_mode(),
+        PresentationMode::Async
+    );
+    // Both spellings have to agree, including on the `vsync` field the C ABI reads.
+    let async_config = config.with_presentation_mode(PresentationMode::Async);
+    assert_eq!(async_config.vsync, 0);
+    assert!(!async_config.is_vsync_enabled());
+    assert_eq!(
+        async_config
+            .with_presentation_mode(PresentationMode::Vsync)
+            .vsync,
+        1
+    );
     assert_eq!(config.window_config().width, 320);
 
     let error = Engine::new(EngineConfig::new(0, 200, "bad")).expect_err("must fail");

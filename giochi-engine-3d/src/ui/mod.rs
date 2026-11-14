@@ -114,6 +114,62 @@ impl std::fmt::Debug for GlesHud {
     }
 }
 
+/// The GLES enable bits and blend function a HUD frame has to put back.
+#[derive(Debug, Clone, Copy)]
+struct SavedState {
+    blend: bool,
+    blend_src: i32,
+    blend_dst: i32,
+    depth_test: bool,
+    cull_face: bool,
+    scissor_test: bool,
+    active_texture: i32,
+}
+
+/// Applies an enable bit without touching it when it already has that value.
+fn set_enabled(gl: &glow::Context, cap: u32, enabled: bool) {
+    // SAFETY: core GLES 2.0 on the current context.
+    unsafe {
+        if enabled {
+            gl.enable(cap);
+        } else {
+            gl.disable(cap);
+        }
+    }
+}
+
+/// Maps a raw `GL_BLEND_*` enum value back to glow's factor type.
+///
+/// The saved value is whatever the caller had; an unknown one falls back to the value the
+/// engine itself uses (`SRC_ALPHA`/`ONE_MINUS_SRC_ALPHA`), which is the only sane guess and
+/// cannot make the state worse than leaving it at the HUD's premultiplied pair.
+fn to_blend_factor(value: i32, fallback: u32) -> u32 {
+    // The blend factors the engine and SDL2 use. `ONE`/`ZERO` are included because a
+    // caller may have set additive blending for a glow effect.
+    match value {
+        v if v == glow::ZERO as i32 => glow::ZERO,
+        v if v == glow::ONE as i32 => glow::ONE,
+        v if v == glow::SRC_ALPHA as i32 => glow::SRC_ALPHA,
+        v if v == glow::ONE_MINUS_SRC_ALPHA as i32 => glow::ONE_MINUS_SRC_ALPHA,
+        v if v == glow::DST_ALPHA as i32 => glow::DST_ALPHA,
+        v if v == glow::ONE_MINUS_DST_ALPHA as i32 => glow::ONE_MINUS_DST_ALPHA,
+        v if v == glow::SRC_COLOR as i32 => glow::SRC_COLOR,
+        v if v == glow::ONE_MINUS_SRC_COLOR as i32 => glow::ONE_MINUS_SRC_COLOR,
+        _ => fallback,
+    }
+}
+
+/// Maps a raw `GL_TEXTURE0 + n` value back to glow's texture-unit constant.
+fn to_texture_unit(value: i32) -> u32 {
+    let base = glow::TEXTURE0 as i32;
+    let offset = value - base;
+    if (0..32).contains(&offset) {
+        (base + offset) as u32
+    } else {
+        glow::TEXTURE0
+    }
+}
+
 impl GlesHud {
     /// Compiles the painter's program and creates its buffers.
     ///
@@ -177,8 +233,14 @@ impl GlesHud {
 
     /// Runs one egui frame and draws it, returning how many draw calls it took.
     ///
-    /// `screen` is in physical pixels. Call it *after* the scene and before the frame is
-    /// presented; it restores the GL state it changes, so the caller can keep drawing.
+    /// `screen` is in physical pixels. Call it after the scene and before the frame is
+    /// presented.
+    ///
+    /// It saves and restores every global bit it touches — blend enable and factors, depth
+    /// test, face culling, scissor test, active texture unit, and the bound program,
+    /// buffers and texture — so the caller's draw order does not matter. Vertex **attribute
+    /// enables** are left off on purpose: the mesh path re-specifies them for every draw, so
+    /// the only alternative would be to restore three slots the caller never asked about.
     pub fn draw(
         &mut self,
         gl: &glow::Context,
@@ -300,6 +362,24 @@ impl GlesHud {
         // SAFETY: every call below is core GLES 2.0 with objects this type owns. The state
         // changes are undone at the end of the function.
         unsafe {
+            // Saved, not assumed. The previous version disabled blending on the way out,
+            // which silently broke a caller that drew the HUD before its particles: the
+            // particle pass had asked `GlState::blend` for `SRC_ALPHA` blending and this
+            // left it off. Restoring what was there is the only version of "restores the
+            // state it changes" that survives a reordering of the caller's draw list.
+            let state = SavedState {
+                blend: gl.is_enabled(glow::BLEND),
+                blend_src: gl.get_parameter_i32(glow::BLEND_SRC_ALPHA),
+                // The alpha pair, not the RGB one: egui's premultiplied output and the
+                // engine's own `GlState` both set both pairs to the same factors, and the
+                // alpha pair is what a caller changing only one of them would notice.
+                blend_dst: gl.get_parameter_i32(glow::BLEND_DST_ALPHA),
+                depth_test: gl.is_enabled(glow::DEPTH_TEST),
+                cull_face: gl.is_enabled(glow::CULL_FACE),
+                scissor_test: gl.is_enabled(glow::SCISSOR_TEST),
+                active_texture: gl.get_parameter_i32(glow::ACTIVE_TEXTURE),
+            };
+
             gl.enable(glow::BLEND);
             gl.blend_equation(glow::FUNC_ADD);
             gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
@@ -377,10 +457,20 @@ impl GlesHud {
             gl.disable_vertex_attrib_array(self.pos_attribute);
             gl.disable_vertex_attrib_array(self.uv_attribute);
             gl.disable_vertex_attrib_array(self.colour_attribute);
-            gl.disable(glow::SCISSOR_TEST);
-            gl.enable(glow::DEPTH_TEST);
-            gl.enable(glow::CULL_FACE);
-            gl.disable(glow::BLEND);
+            gl.bind_buffer(glow::ARRAY_BUFFER, None);
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, None);
+            gl.bind_texture(glow::TEXTURE_2D, None);
+            gl.use_program(None);
+
+            set_enabled(gl, glow::SCISSOR_TEST, state.scissor_test);
+            set_enabled(gl, glow::DEPTH_TEST, state.depth_test);
+            set_enabled(gl, glow::CULL_FACE, state.cull_face);
+            set_enabled(gl, glow::BLEND, state.blend);
+            gl.blend_func(
+                to_blend_factor(state.blend_src, glow::SRC_ALPHA),
+                to_blend_factor(state.blend_dst, glow::ONE_MINUS_SRC_ALPHA),
+            );
+            gl.active_texture(to_texture_unit(state.active_texture));
         }
         Ok(draws)
     }

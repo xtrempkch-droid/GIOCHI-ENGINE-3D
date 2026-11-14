@@ -94,7 +94,9 @@ pub use crate::animation::{
 };
 pub use crate::assets::{asset_size, read_asset, ResourceManager, MAX_ASSET_SIZE};
 pub use crate::audio::{AudioSystem, MusicHandle, MusicState, SoundHandle};
-pub use crate::core::engine::{Engine, EngineConfig, RunStats, DEFAULT_CLEAR_COLOR};
+pub use crate::core::engine::{
+    Engine, EngineConfig, PresentationMode, RunStats, DEFAULT_CLEAR_COLOR,
+};
 pub use crate::core::game_loop::{GameLoop, FIXED_TIMESTEP, MAX_FRAME_TIME, MIN_FIXED_TIMESTEP};
 pub use crate::core::time::{FrameClock, Time};
 #[cfg(feature = "devtools")]

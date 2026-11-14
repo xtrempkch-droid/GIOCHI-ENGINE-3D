@@ -18,11 +18,9 @@ para não serem perdidas nem implementadas por acidente (R6).
 
 ## Saíram das fases 19–24 e ficaram de fora
 
-- [ ] **Backend egui em GLES para o crate 3D** (HUD sobre cena 3D). O plano da Fase 21 pedia
-      "UI sobre 3D (HUD em FPS)"; os exemplos 3D conduzem `RenderContext3D` diretamente, sem
-      `Engine`/`Scene`, então o HUD exige um segundo backend egui — ~250 linhas de shader +
-      VBO + scissor na mesma `glow` 0.18. É o próximo passo natural e o único item de
-      aceitação da Fase 21 não entregue.
+- [x] ~~**Backend egui em GLES para o crate 3D**~~ — entregue em
+      `giochi-engine-3d::ui::GlesHud` (feature `hud`, ADR-059). O que sobra dele é a
+      tradução de input, na secção "3D HUD — what is still missing" abaixo.
 - [ ] `GL_LINES` no `giochi-engine-3d` para debug draw denso. O `DebugDraw` da Fase 20
       projeta para 2D, o que custa um `SDL_RenderLine` por segmento — certo para centenas,
       errado para milhares (ADR-054).

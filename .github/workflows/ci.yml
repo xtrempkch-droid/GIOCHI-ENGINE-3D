@@ -103,6 +103,22 @@ jobs:
         # reaches them. Their tests use loopback/multicast and are cheap.
         run: cargo test -p giochi-net --all-features --target x86_64-unknown-linux-gnu
 
+      - name: Test with the Growth Pack features
+        # Phases 19-24 are opt-in, and a test declared `required-features` is *skipped*
+        # by the default step above rather than failing: without this, `hot_reload`,
+        # `devtools`, the physics modules and the 3D HUD would be type-checked and never
+        # run. `--all-features` is deliberately not used at workspace level -- it enables
+        # `sdl2-bundled` and `sdl2-system` together, and `sdl2-sys` then links a mixture
+        # that has no SDL_mixer/SDL_image symbols (see scripts/check-features.sh).
+        env:
+          SDL_VIDEODRIVER: offscreen
+        run: |
+          cargo test --workspace --target x86_64-unknown-linux-gnu \
+            --features giochi-engine/hot_reload,giochi-engine-3d/hot_reload,giochi-engine-lua/hot_reload,giochi-demo/hot_reload,giochi-engine/devtools,giochi-engine/physics-2d,giochi-engine-3d/physics-3d,giochi-engine-3d/hud
+          cargo clippy --workspace --all-targets --target x86_64-unknown-linux-gnu \
+            --features giochi-engine/hot_reload,giochi-engine-3d/hot_reload,giochi-engine-lua/hot_reload,giochi-demo/hot_reload,giochi-engine/devtools,giochi-engine/physics-2d,giochi-engine-3d/physics-3d,giochi-engine-3d/hud \
+            -- -D warnings
+
       - name: Docs
         run: cargo doc --workspace --no-deps --document-private-items
 
@@ -352,6 +368,48 @@ jobs:
         run: |
           cargo run -q -p giochi-demo -- lua giochi-engine-lua/examples/mini_game.lua \
             --auto --frames 120
+
+      - name: Growth Pack examples
+        # Phases 19-24 each ship an example, and a `required-features` example is not even
+        # built by the default test step. Without this, `particles_2d_demo` could stop
+        # compiling, `platformer_2d` could stop reaching its goal, and nothing would say so.
+        # `model_viewer` is absent on purpose: it needs a path to an OBJ file and exits with
+        # an error without one, which is its documented behaviour, not a failure.
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_RENDER_DRIVER: software
+          SDL_AUDIODRIVER: dummy
+        run: |
+          cargo run -q -p giochi-engine --example particles_2d_demo -- --frames 120 --auto
+          cargo run -q -p giochi-engine --example animation_demo -- --frames 120 --auto
+          cargo run -q -p giochi-engine --features physics-2d --example physics_2d_demo \
+            -- --frames 300 --auto
+          # The platformer is the phase-24 acceptance check for "gravity and a jump": the
+          # scripted run either reaches the last platform or it does not.
+          cargo run -q -p giochi-engine --features physics-2d --example platformer_2d \
+            -- --frames 1800 --auto | tee /tmp/platformer.log
+          grep -q 'alvo_alcancado=true' /tmp/platformer.log
+          cargo run -q -p giochi-engine --features devtools --example devtools_demo -- --frames 120
+          cargo run -q -p giochi-engine --features devtools --example ui_demo -- --frames 120
+          cargo run -q -p giochi-engine --features hot_reload --example hot_reload_demo \
+            -- --frames 120
+          # The 3D side needs a real EGL context, so it uses `offscreen` in its own step
+          # below; here only the 2D renderer is exercised.
+
+      - name: Growth Pack in 3D
+        # `--physics` and `--hud` are the phase-24 and phase-21 pendencies: the walker has to
+        # stay inside the world and the HUD has to draw without a GL error.
+        env:
+          SDL_VIDEODRIVER: offscreen
+        run: |
+          cargo run -q -p giochi-engine-3d --features physics-3d --example physics_3d_demo \
+            -- --frames 420 --auto | tee /tmp/physics3d.log
+          grep -q 'bloqueado_pela_parede=true' /tmp/physics3d.log
+          grep -q 'apoiado_no_chao=true' /tmp/physics3d.log
+          cargo run -q -p giochi-engine-3d --features physics-3d,hud --example mini_fps \
+            -- --frames 200 --auto --physics --hud | tee /tmp/mini_fps_physics.log
+          grep -q 'hud:' /tmp/mini_fps_physics.log
+          grep -q 'no GL error' /tmp/mini_fps_physics.log
 
       - name: 3D context and mesh pipeline
         # `SDL_VIDEODRIVER=dummy` has no OpenGL at all; `offscreen` provides a real

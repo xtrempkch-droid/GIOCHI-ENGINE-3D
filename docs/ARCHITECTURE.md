@@ -12,12 +12,19 @@ they are. The decisions themselves are recorded in
 
 ```text
 giochi-engine         lib       idiomatic Rust API, C-shaped data, #![forbid(unsafe_code)]
+giochi-engine-3d      lib       GLES 2.0 over EGL, parallel to the 2D renderer (ADR-037)
 giochi-engine-capi    rlib +    #[no_mangle] extern "C", panics caught, generated giochi.h
                       cdylib +
                       staticlib
 giochi-engine-lua     lib       reference binding (Lua 5.4 via mLua, no unsafe)
+giochi-net            lib       host-authoritative UDP, zero-dependency by default
 giochi-demo           bin       the demo, --frames/--verify, and the `lua` subcommand
 ```
+
+Two renderers, never one mode switch: `giochi-engine-3d` depends on `giochi-engine` for
+the window, input, audio and handle discipline, and the 2D crate does not depend on it.
+That direction is what lets a 2D game ignore GLES entirely, and it is why the 3D physics
+and the 3D HUD live in the 3D crate rather than in `giochi-engine` (ADR-057, ADR-059).
 
 The core crate never depends on the FFI crate, the FFI crate never depends on Lua,
 and the demo is the only place that assembles a runnable application. Adding a
@@ -51,6 +58,27 @@ binding therefore never changes the engine.
    assets::{loader, ResourceManager}
    perf::{Profiler, DebugOverlay}  observes the frame; `profiling` feature
 ```
+
+Six modules were added by the Growth Pack (phases 19-24). None of them changes the
+picture above: each is either a leaf that depends on `math`/`render`, or a feature-gated
+field on `Engine` that is absent when the feature is off.
+
+| Module | Depends on | Feature |
+|---|---|---|
+| `hot_reload` | `platform` (for the watcher thread), `render` | `hot_reload` — brings `notify` |
+| `devtools` | `render`, `input`, `egui` | `devtools` — brings `egui` |
+| `ui` | `devtools`'s backend, `render` | `devtools` |
+| `particles` | `render`, `math` | none — pure arithmetic, no dependency |
+| `animation` | `render`, `particles` (`CurveValue`) | none — same reason |
+| `physics` | `math`, `rapier2d` | `physics-2d` — brings Rapier |
+
+`particles` and `animation` deliberately have no feature: a feature that only removes
+dead-stripped arithmetic adds eight gate combinations and buys no dependency (ADR-056).
+`physics` has one because Rapier is ~1.7 MB.
+
+In the 3D crate the same pattern applies: `physics` (`physics-3d`, Rapier 3D plus the
+character controller) and `ui` (`hud`, a GLES painter for `egui`) are opt-in, and
+`hot_reload` forwards to the core one.
 
 `perf` observes the frame instead of owning part of it: `core::engine` opens and closes
 the scopes around the scene callbacks, the renderers record their own counters, and the
@@ -258,13 +286,24 @@ per process, and cargo runs the tests inside one binary concurrently.
 
 ---
 
-## 8. What comes next
+## 8. Where the project stands
 
 | Phase | Scope |
 |---|---|
-| 6 ✅ | CI, release packaging, the remaining guides (this document among them) |
-| 7 ✅ | `giochi-engine-capi`: the `extern "C"` surface, `cbindgen`, C/Python smoke tests |
-| 8 ✅ | `giochi-engine-lua`: the `giochi` module, `mini_game.lua` and `giochi-demo lua` |
+| 0–8 ✅ | the 2D engine, the C ABI, the Lua binding, CI and release packaging |
+| 9–18 ✅ | `giochi-engine-3d` on EGL + GLES (ADR-037), instancing, static batching, the profiler |
+| 19–24 ✅ | the Growth Pack: hot reload, devtools, widget UI, particles, animation, physics, **C ABI v6** |
+| 25 ✅ | release 0.5.0 |
 
-Anything 3D is out of scope for v2; it would be a separate `giochi-engine-3d` crate
-on EGL + GLES, never a mode of this renderer (ADR-005).
+The 3D crate exists and is where 3D scope went — a separate crate on EGL + GLES, never a
+mode of the 2D renderer (ADR-005). The current state, per-phase gates and the open work are
+in [`PROGRESS.md`](../PROGRESS.md); out-of-scope ideas are in [`IDEAS.md`](../IDEAS.md).
+
+The known gaps, stated once so they are not rediscovered:
+
+* **No skeletal animation.** Sprite animation exists (`animation`); a rigged character is
+  still several meshes or geometry the game transforms.
+* **The 3D HUD is display-only.** It paints; it does not translate pointer or keyboard
+  events into `egui` (ADR-059).
+* **No UI or physics in the C ABI beyond what phase 24 exposed.** Section 20 of
+  `docs/C_ABI_CONTRACT.md` has the list.

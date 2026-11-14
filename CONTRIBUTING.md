@@ -71,6 +71,17 @@ scripts/gates.sh
 If a gate cannot pass for an environmental reason, document the blocker in
 `PROGRESS.md` and leave the phase open. Do not mark it complete.
 
+### Never run `--all-features` on the workspace
+
+`cargo test --workspace --all-features` **fails to link**, and the failure is not a bug in
+the code: `giochi-engine` has two mutually exclusive SDL2 features (`sdl2-bundled` and
+`sdl2-system`), `sdl2-sys` gives `bundled` priority when building but the link line then
+uses the pkg-config SDL2, so `IMG_*` and `Mix_*` are undefined. Cargo has no way to declare
+"exactly one of these".
+
+Spell the features out instead — `scripts/gates.sh` and CI do exactly that — and keep
+`--all-features` to crates where it is meaningful (`giochi-net`).
+
 The same gates run in GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)),
 plus a `smoke` job that executes the demo, every example and the Lua reference game
 headlessly (`SDL_VIDEODRIVER=dummy`), and an `ffi` job that compiles `c_smoke.c` against

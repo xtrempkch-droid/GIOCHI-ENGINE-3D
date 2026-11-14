@@ -15,6 +15,7 @@ use crate::context::instancing::InstancingBackend;
 use crate::error::{Error3D, Result3D};
 use giochi_engine::platform::window::Window;
 use giochi_engine::platform::Platform;
+use giochi_engine::PresentationMode;
 use glow::HasContext;
 use sdl2::video::{GLContext, GLProfile};
 
@@ -93,6 +94,39 @@ impl std::fmt::Debug for GlContext {
 /// created, so callers must use [`configure_attributes`] before
 /// `Window::new_opengl` and only then call this.
 pub fn create(window: &Window) -> Result3D<GlContext> {
+    create_with_optional_presentation(window, None)
+}
+
+/// Creates the context and requests `mode` from the driver.
+///
+/// [`create`] leaves the swap interval at whatever the driver defaults to; this sets it
+/// explicitly through `SDL_GL_SetSwapInterval` and **fails** when the driver rejects the
+/// request, rather than silently presenting with the wrong pacing. A driver that accepts
+/// interval `0` may still block internally — `Async` is a request, not a guarantee.
+///
+/// # Examples
+///
+/// ```no_run
+/// use giochi_engine::PresentationMode;
+/// use giochi_engine_3d::context;
+///
+/// # fn demo(window: &giochi_engine::Window) -> Result<(), Box<dyn std::error::Error>> {
+/// let gl = context::create_with_presentation_mode(window, PresentationMode::Async)?;
+/// # let _ = gl;
+/// # Ok(())
+/// # }
+/// ```
+pub fn create_with_presentation_mode(
+    window: &Window,
+    mode: PresentationMode,
+) -> Result3D<GlContext> {
+    create_with_optional_presentation(window, Some(mode))
+}
+
+fn create_with_optional_presentation(
+    window: &Window,
+    mode: Option<PresentationMode>,
+) -> Result3D<GlContext> {
     let requested = GlesVersion::from_env();
 
     if requested == GlesVersion::Gles3 {
@@ -103,6 +137,25 @@ pub fn create(window: &Window) -> Result3D<GlContext> {
         .sdl_window()
         .gl_create_context()
         .map_err(|err| Error3D::context(format!("SDL_GL_CreateContext failed: {err}")))?;
+
+    if let Some(mode) = mode {
+        // The interval is per context (EGL's `eglSwapInterval` under SDL's hood), so it
+        // has to be set after creation and before the first present. SDL exposes it on the
+        // video subsystem, not on the window.
+        let interval = match mode {
+            PresentationMode::Vsync => 1,
+            PresentationMode::Async => 0,
+        };
+        window
+            .sdl_window()
+            .subsystem()
+            .gl_set_swap_interval(interval)
+            .map_err(|error| {
+                Error3D::context(format!(
+                    "SDL_GL_SetSwapInterval({interval}) failed for {mode:?}: {error}"
+                ))
+            })?;
+    }
 
     // SAFETY: `gl_get_proc_address` returns a pointer valid for the current context,
     // which `sdl_gl` keeps alive. glow only stores the function pointers and calls

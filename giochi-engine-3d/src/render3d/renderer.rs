@@ -536,7 +536,7 @@ impl RenderContext3D {
     /// # Errors
     ///
     /// [`Error3D::Asset`] when the file cannot be read or parsed,
-    /// [`Error3D::InvalidArgument`](crate::Error3D::InvalidArgument) for a generated
+    /// [`Error3D::InvalidArgument`] for a generated
     /// mesh, and [`Error3D::GlObject`] for an unknown handle.
     pub fn reload_mesh(&mut self, handle: MeshHandle) -> Result3D<()> {
         let Some(path) = self.mesh_source(handle) else {

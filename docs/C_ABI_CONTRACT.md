@@ -1190,7 +1190,7 @@ while (rodando) {
 
 | Requisito | Como é verificado |
 |---|---|
-| `GIOCHI_ABI_VERSION == 4` | `lib.rs::abi_version_matches_contract` |
+| `GIOCHI_ABI_VERSION >= 4` (it is 6 today) | `lib.rs::abi_version_matches_contract` |
 | `GiochiNetInimigo` = 16 bytes, `GiochiNetSnapshot` = 1040, `GiochiNetInput` = 32, `GiochiNetGlobal` = 1216 | `net.rs::tamanho_das_structs_e_estavel` |
 | Handle `0` nunca é válido | `net.rs::handle_zero_nunca_e_valido` |
 | `NULL` é recusado sem escrever | `net.rs::argumentos_null_sao_recusados` |
@@ -1276,7 +1276,7 @@ corre no máximo 4 e descarta o resto.
 
 | Requisito | Como é verificado |
 |---|---|
-| `GIOCHI_ABI_VERSION == 5` | `lib.rs::abi_version_matches_contract` |
+| `GIOCHI_ABI_VERSION >= 5` (it is 6 today) | `lib.rs::abi_version_matches_contract` |
 | O header declara a parte V | `scripts/gen-header.sh --check` |
 | `NULL` é recusado sem crash | `c_smoke.c` (física, secção final) e `python_smoke.py` |
 | Um corpo dinâmico cai e assenta | `c_smoke.c` e `python_smoke.py` (posição final) |
@@ -1371,7 +1371,7 @@ mudanças pendentes e devolve quantas foram aplicadas: chame-o uma vez por frame
 
 | Requisito | Como é verificado |
 |---|---|
-| `GIOCHI_ABI_VERSION == 6` | `lib.rs::abi_version_matches_contract` |
+| `GIOCHI_ABI_VERSION == 6` (current) | `lib.rs::abi_version_matches_contract` |
 | `giochi_particles_*` / `giochi_animator_*` existem e recusam handles inválidos | `c_smoke.c`, `python_smoke.py` |
 | `GiochiParticleConfig` é copiável e o default é válido | `giochi_particles_default_config` nos dois testes |
 | Consola e hot reload existem com e sem feature | `scripts/ffi-smoke.sh` corre os dois builds |

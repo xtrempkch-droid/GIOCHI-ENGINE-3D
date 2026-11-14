@@ -625,6 +625,9 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
     let mut field_calls: u32 = 0;
     let mut particle_calls: u32 = 0;
     let mut frames: u64 = 0;
+    // Only the HUD reads it, and it is refreshed once a second: a HUD that recomputed the
+    // average every frame would flicker between 59 and 61.
+    #[cfg(feature = "hud")]
     let mut fps_display: f32 = 60.0;
     let mut fps_timer: f32 = 0.0;
     let mut fps_frames: u32 = 0;
@@ -926,10 +929,13 @@ fn run(options: Options) -> Result<(), Box<dyn std::error::Error>> {
             });
             #[cfg(not(feature = "physics-3d"))]
             let physics_note = String::new();
-            fps_display = fps_frames as f32 / fps_timer;
+            let fps_now = fps_frames as f32 / fps_timer;
+            #[cfg(feature = "hud")]
+            {
+                fps_display = fps_now;
+            }
             println!(
-                "fps: {:.1} (frame {frames}, position {:.1},{:.1},{:.1}{physics_note})",
-                fps_display,
+                "fps: {fps_now:.1} (frame {frames}, position {:.1},{:.1},{:.1}{physics_note})",
                 controller.position().x,
                 controller.position().y,
                 controller.position().z,

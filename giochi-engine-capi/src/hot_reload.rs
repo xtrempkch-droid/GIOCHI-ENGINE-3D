@@ -3,7 +3,7 @@
 //! Como a consola, cada função é **uma** definição com o `#[cfg]` dentro do corpo: o
 //! header não pode mudar com as features de quem compilou o `.so`. Sem a feature
 //! `hot_reload` as funções devolvem
-//! [`GIOCHI_ERROR_UNSUPPORTED`](crate::abi_types::GIOCHI_ERROR_UNSUPPORTED) e explicam
+//! [`GIOCHI_ERROR_UNSUPPORTED`] e explicam
 //! como recompilar.
 //!
 //! O caminho aceite é uma pasta (ou um ficheiro) que o C quer ver recarregado; o engine

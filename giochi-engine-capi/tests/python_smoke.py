@@ -261,10 +261,21 @@ class GiochiParticleConfig(Structure):
         ("lifetime", c_float),
         ("start_size", c_float),
         ("end_size", c_float),
-        ("start_color", c_uint32),
-        ("end_color", c_uint32),
+        # `GiochiColor`, not `uint32_t`: the engine's colour is four bytes plus a
+        # 16-byte reserved tail (20 bytes). Declaring it as a `c_uint32` made this struct
+        # 64 bytes where the library writes 96, so `giochi_particles_default_config`
+        # overran the ctypes buffer by 32 bytes and every field after `end_size` was read
+        # from the wrong offset.
+        ("start_color", GiochiColor),
+        ("end_color", GiochiColor),
         ("_reserved", c_uint32 * 4),
     ]
+
+    def __init__(self) -> None:
+        super().__init__(
+            *([0.0] * 10), GiochiColor(0, 0, 0, 255), GiochiColor(0, 0, 0, 255),
+            (c_uint32 * 4)(0, 0, 0, 0),
+        )
 
 def header_abi_version() -> int:
     """Reads `GIOCHI_ABI_VERSION` from the committed header.
@@ -367,10 +378,15 @@ def main() -> int:
     lib.giochi_animator_current_frame.argtypes = [c_uint64]
     lib.giochi_animator_destroy.argtypes = [c_uint64]
 
+    # The size assertion is the guard that the colours really are `GiochiColor`: with a
+    # narrower declaration the library wrote 96 bytes into a 64-byte buffer and every
+    # check below still passed, because `lifetime` happens to sit before the colours.
+    check(sizeof(GiochiParticleConfig) == 96, "GiochiParticleConfig size")
     config = GiochiParticleConfig()
     check(lib.giochi_particles_default_config(byref(config)) == GIOCHI_ERROR_OK,
           "particles default config")
     check(config.lifetime > 0.0, "particles default lifetime")
+    check(config.start_color.a == 255, "particles config writes the colours")
     check(all(word == 0 for word in config._reserved), "particles config zeroes reserved")
 
     # A non-zero texture handle is accepted without validating it against the registry:

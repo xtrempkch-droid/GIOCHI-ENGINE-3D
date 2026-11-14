@@ -48,17 +48,28 @@ the scene returns `SceneTransition::Quit`.
 ## 2. Configuration
 
 ```rust
-use giochi_engine::EngineConfig;
+use giochi_engine::{EngineConfig, PresentationMode};
 ```
 
 | Member | Purpose |
 |---|---|
 | `EngineConfig::new(width, height, title)` | 60 Hz target, vsync on |
+| `with_presentation_mode(PresentationMode::Async)` | requests presentation without waiting for vblank |
+| `with_async_presentation()` | shorthand for asynchronous presentation |
 | `with_title(title)` / `set_title(title)` | replaces the title |
 | `title_str()` | reads it back; `""` if the buffer is not valid UTF-8 |
-| `is_vsync_enabled()` | `vsync != 0` |
+| `presentation_mode()` / `is_vsync_enabled()` | read the selected presentation mode |
 | `window_config()` | the matching `WindowConfig` |
 | `target_fps` | 1–999 becomes the fixed timestep; anything else keeps 60 Hz |
+
+Async presentation can reduce display latency but may cause tearing. It disables
+VSync; it does not create a worker thread, guarantee a non-blocking backend, or
+remove the engine's `target_fps` pacing:
+
+```rust
+let config = EngineConfig::new(960, 540, "my game")
+    .with_presentation_mode(PresentationMode::Async);
+```
 
 `width` or `height` of `0` is rejected with `GIOCHI_ERROR_INVALID_ARGUMENT` before
 SDL is touched.

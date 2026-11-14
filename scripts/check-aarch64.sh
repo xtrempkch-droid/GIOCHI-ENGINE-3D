@@ -44,3 +44,12 @@ cargo check --workspace --target aarch64-unknown-linux-gnu "$@"
 # Se ela nao compilar para o aparelho, o substituto e broadcast UDP (ver
 # docs/REDE.md) -- mas isso so se decide com o resultado deste passo.
 cargo check -p giochi-net --features laminar,mdns --target aarch64-unknown-linux-gnu "$@"
+
+# Phase 19-24. The features above change the dependency graph, and the cross-compile is
+# where a new native or mis-declared MSRV dependency shows up first. `rapier` is pure
+# Rust, so it is expected to pass -- but "expected" is not "checked", and the HUD's
+# `egui` has no native part either. Explicit list rather than `--all-features` for the
+# same reason as the line above, plus one more: `--all-features` would enable
+# `sdl2-bundled` and `sdl2-system` together.
+cargo check --workspace --target aarch64-unknown-linux-gnu "$@" \
+    --features giochi-engine/hot_reload,giochi-engine-3d/hot_reload,giochi-engine-lua/hot_reload,giochi-demo/hot_reload,giochi-engine/devtools,giochi-engine/physics-2d,giochi-engine-3d/physics-3d,giochi-engine-3d/hud

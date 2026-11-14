@@ -62,6 +62,40 @@ pub const ENGINE_TITLE_CAPACITY: usize = 64;
 /// Default background colour: near-black with a slight blue cast.
 pub const DEFAULT_CLEAR_COLOR: Color = Color::rgb(12, 14, 22);
 
+/// Whether presentation waits for vertical sync.
+///
+/// The mode is **derived from** [`EngineConfig::vsync`] rather than stored in a second
+/// field: `EngineConfig` is 112 bytes and its layout is locked by `tests/abi_layout.rs`,
+/// and two fields that could disagree would be a bug the C side is able to create.
+/// `Async` is `vsync == 0`; `Vsync` is anything else.
+///
+/// # Examples
+///
+/// ```
+/// use giochi_engine::{EngineConfig, PresentationMode};
+///
+/// let config = EngineConfig::new(640, 360, "demo");
+/// assert_eq!(config.presentation_mode(), PresentationMode::Vsync);
+///
+/// let async_config = config.with_async_presentation();
+/// assert_eq!(async_config.presentation_mode(), PresentationMode::Async);
+/// assert!(!async_config.is_vsync_enabled());
+/// ```
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PresentationMode {
+    /// Presentation waits for the display's vertical blank. No tearing; the frame rate is
+    /// capped by the panel.
+    #[default]
+    Vsync = 0,
+    /// Presentation happens as soon as the frame is ready.
+    ///
+    /// Requests swap interval `0`. It **may tear**, it does not create a worker thread,
+    /// and it does not make a driver that blocks internally non-blocking; it also does not
+    /// remove the engine's `target_fps` pacing, which is a separate mechanism.
+    Async = 1,
+}
+
 /// Configuration passed to [`Engine::new`].
 ///
 /// The title is a fixed-size NUL-terminated UTF-8 buffer instead of a `String` so the
@@ -144,6 +178,31 @@ impl EngineConfig {
     /// Whether vsync was requested.
     pub fn is_vsync_enabled(&self) -> bool {
         self.vsync != 0
+    }
+
+    /// The presentation mode these settings ask for.
+    pub fn presentation_mode(&self) -> PresentationMode {
+        if self.is_vsync_enabled() {
+            PresentationMode::Vsync
+        } else {
+            PresentationMode::Async
+        }
+    }
+
+    /// Requests `mode`, which is `vsync = 1` for [`PresentationMode::Vsync`] and `0` for
+    /// [`PresentationMode::Async`].
+    pub fn with_presentation_mode(mut self, mode: PresentationMode) -> Self {
+        self.vsync = match mode {
+            PresentationMode::Vsync => 1,
+            PresentationMode::Async => 0,
+        };
+        self
+    }
+
+    /// Shorthand for [`EngineConfig::with_presentation_mode`] with
+    /// [`PresentationMode::Async`].
+    pub fn with_async_presentation(self) -> Self {
+        self.with_presentation_mode(PresentationMode::Async)
     }
 
     /// The window configuration matching these dimensions.

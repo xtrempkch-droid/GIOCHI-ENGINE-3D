@@ -828,7 +828,7 @@ about size and about the tick, not about frame rate.
 | `physics_2d_demo`, 1800 frames | 59.9 fps (SDL dummy/software) | Smoke test, not a baseline |
 | `physics_3d_demo`, 420 frames | 60.0 fps, 24 bodies, player blocked at x=5.18, `grounded=true` | EGL offscreen, GLES 2 on a desktop GPU |
 | `physics_3d_demo` | 0 crates moving at the end, stack top at 4.49 | 20 dynamic boxes settled |
-| `libgiochi.so` release | **2 569 008 B / 106 symbols**, 9 of them `giochi_physics_*` (was 912 888 B / 97 symbols) | +1.66 MB from Rapier 2D, which is unconditional in the capi: the header is a contract (ADR-057) |
+| `libgiochi.so` release | **2 569 008 B / 106 symbols** at ABI v5; **2 604 688 B / 130 symbols** at ABI v6, 9 of them `giochi_physics_*` | +1.66 MB from Rapier 2D, which is unconditional in the capi: the header is a contract (ADR-057). The 24 extra symbols of parts VI–IX cost 36 KB |
 | ARM64 `cargo check` with `physics-2d,physics-3d` | ok | Rapier is pure Rust; no new native dependency |
 
 ### The `detect_collisions` trap

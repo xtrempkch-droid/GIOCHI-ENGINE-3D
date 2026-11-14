@@ -5,7 +5,7 @@
 //! A consola vive atrás da feature `devtools`, que traz o `egui`. O header não pode
 //! mudar com a feature de quem compilou o `.so`, por isso cada função é **uma** definição
 //! com um `#[cfg]` *dentro* do corpo: com `devtools` ligada executa a sério; sem ela
-//! devolve [`GIOCHI_ERROR_UNSUPPORTED`](crate::abi_types::GIOCHI_ERROR_UNSUPPORTED) e
+//! devolve [`GIOCHI_ERROR_UNSUPPORTED`] e
 //! explica em `giochi_get_last_error()` como recompilar. Duas definições `#[cfg]`-adas
 //! seriam duas declarações no header, porque o cbindgen não avalia `cfg`.
 

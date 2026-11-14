@@ -93,7 +93,8 @@ personagem que nunca recebe deslocamento para baixo nunca toca no chão nem repo
 
 ## C ABI
 
-`GIOCHI_ABI_VERSION 5` expõe a física 2D a C (`docs/C_ABI.md` §20): criar/destruir mundo,
+`GIOCHI_ABI_VERSION 5` introduziu a física 2D na ABI C e a versão corrente é **6**
+(`docs/C_ABI.md` §20): criar/destruir mundo,
 criar corpo, anexar caixa, `step`, posição, impulso, destruir corpo, contagem. O mundo é um
 ponteiro opaco; os corpos são `uint64_t`. A física 2D está sempre compilada no
 `libgiochi.so` porque o header é um contrato e não pode mudar com uma feature.

@@ -62,8 +62,9 @@ fn ensure_image_subsystem() {
 /// A GL texture owned by a [`RenderContext3D`](super::RenderContext3D).
 ///
 /// Delete it through the renderer, never directly: the texture belongs to the GL
-/// context, and a caller that drops this value without [`RenderContext3D::destroy_texture`]
-/// leaks it exactly as it would a mesh.
+/// context, and a caller that drops this value without
+/// [`RenderContext3D::destroy_texture`](super::RenderContext3D::destroy_texture) leaks it
+/// exactly as it would a mesh.
 pub struct Texture3D {
     handle: glow::Texture,
     width: u32,
