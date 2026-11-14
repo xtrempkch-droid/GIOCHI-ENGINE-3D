@@ -14,6 +14,33 @@ Fases 0–18 concluídas. O Growth Pack começou em 2026-11-14.
 | 24 — Physics + C ABI | **concluída** (2026-11-14) | 9 testes de unidade em `physics` 2D + 9 em 3D, 5 de integração (`tests/physics_2d.rs`), `physics_2d_demo` 1800 frames com a torre a `0.000` de velocidade, `physics_3d_demo` 420 frames com o jogador bloqueado pela parede e apoiado no chão, `mini_fps --physics` e `platformer_2d` a chegar ao alvo; C ABI **v6** com `giochi_physics_*`, `giochi_particles_*`, `giochi_animator_*`, `giochi_console_*` e `giochi_hot_reload_*`, com testes C + Python nos dois perfis de features |
 | 25 — Release 0.5.0 | **concluída** (2026-11-14) | `check-version.sh` consistente em 0.5.0 (7 referências), `cargo build --release --workspace --examples`, artefacto empacotado e `verify-release-artifact.sh` verde: binários, `giochi.h` e `libgiochi` concordam em 0.5.0, `c_smoke` reporta `abi 6, engine 0.5.0`, demo + `mini_game.lua` correm com e sem PNGs |
 
+### Auditoria pós-release (2026-11-14)
+
+Uma passagem de auditoria sobre tudo o que as fases 19–25 produziram. Três bugs reais, e
+os buracos de verificação que os deixaram passar.
+
+| Achado | Gravidade | Correção |
+|---|---|---|
+| `python_smoke.py` declarava `GiochiColor` como `c_uint32` dentro de `GiochiParticleConfig`; a struct Python ficava com 64 bytes onde a biblioteca escreve 96 | **transbordo de 32 bytes** num buffer do teste | usa `GiochiColor`, afirma `sizeof == 96`, e o mesmo `assert` existe em Rust |
+| `GlesHud::draw` forçava `disable(BLEND)` na saída; quem desenhasse o HUD antes das partículas ficava sem blending | partículas opacas em certas ordens de desenho | guarda e repõe blend (enable + factores), depth, culling, scissor, unidade de textura, programa e buffers |
+| `mini_fps` nunca chamava `GlesHud::destroy` | programa + 2 buffers + atlas do egui por libertar | `finish` recebe o HUD, destrói-o e imprime o que libertou |
+| `PresentationMode` documentado em `docs/API_GUIDE.md` e `docs/3D.md` e inexistente no código | documentação a mentir sobre a API | implementado derivado de `vsync`, mais `create_with_presentation_mode` no crate 3D |
+| CI nunca compilava nem corria nenhuma feature das fases 19–24: os testes com `required-features` eram **ignorados** | seis fases sem cobertura em CI | passo com a matriz explícita + um passo que corre todos os exemplos do Growth Pack |
+| `scripts/gates.sh` sem `hud`; `scripts/check-aarch64.sh` sem física nem HUD | o maior risco de cross-compile (Rapier) só era verificado à mão | ambos actualizados; o `cargo check` ARM64 com todas as features passa |
+| `cargo test --workspace --all-features` falha no link (`sdl2-bundled` + `sdl2-system`) | armadilha silenciosa para quem experimenta | documentado em `CONTRIBUTING.md`, com a razão e a alternativa |
+| `ARCHITECTURE.md` dizia que 3D estava fora de âmbito; `UI.md` dizia que a UI sobre 3D não existia (e tinha dois §8); `PHYSICS.md` dizia ABI 5; `PERF_LOG.md` tinha o tamanho do artefacto de antes da v6 | documentação desactualizada em cinco sítios | corrigido nos cinco, mais `IDEAS.md` e as checklists de `C_ABI_CONTRACT.md` |
+
+O padrão nos três bugs de código é o mesmo: **cada um passava com todos os testes verdes**.
+O do Python porque `lifetime` fica antes das cores; o do HUD porque ninguém desenhava nada
+depois dele; o do leak porque o processo termina. Foi por isso que a correção incluiu um
+teste em cada caso — `sizeof == 96`, `the_hud_puts_the_gl_state_back_the_way_it_found_it`
+e a linha `hud released:` — e não só a mudança.
+
+Gates depois da auditoria: `scripts/gates.sh` exit 0 (fmt, clippy nas duas matrizes,
+testes nas duas, docs com `--document-private-items` a **zero avisos** — eram 4 —,
+shellcheck, versão, header, ARM64 com todas as features, FFI smoke), `ffi-smoke.sh` verde
+em `abi 6`, e o artefacto de release re-medido em **2 604 688 B / 130 símbolos**.
+
 ### Gates da Fase 25 — release 0.5.0
 
 - [x] `scripts/check-version.sh` — 0.5.0 consistente em `Cargo.toml`, nos seis membros,

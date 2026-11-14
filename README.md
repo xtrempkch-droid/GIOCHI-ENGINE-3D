@@ -154,6 +154,19 @@ cargo run -p giochi-engine --example audio_test      # Space plays a synthesised
 cargo run -p giochi-engine --example mini_game       # complete space shooter
 ```
 
+The Growth Pack (phases 19-24) adds one per phase, each behind the feature it
+demonstrates:
+
+```bash
+cargo run -p giochi-engine --features hot_reload --example hot_reload_demo
+cargo run -p giochi-engine --features devtools   --example devtools_demo   # F2 console, F3 draw
+cargo run -p giochi-engine --features devtools   --example ui_demo         # three themes
+cargo run -p giochi-engine --example particles_2d_demo
+cargo run -p giochi-engine --example animation_demo                        # spritesheet + tween
+cargo run -p giochi-engine --features physics-2d --example physics_2d_demo # tower, drag, raycast
+cargo run -p giochi-engine --features physics-2d --example platformer_2d   # gravity + jump
+```
+
 All examples accept `--frames N` to run for a fixed number of frames, which is how
 the smoke tests exercise them without a display.
 
@@ -164,7 +177,14 @@ cargo run -p giochi-engine-3d --example cube_demo      # one lit, textured cube
 cargo run -p giochi-engine-3d --example model_viewer   # any .obj, framed automatically
 cargo run -p giochi-engine-3d --example mini_fps       # F2 instancing, F3 render scale
 cargo run -p giochi-engine-3d --example ball_balance    # moving camera + physics-lite
+cargo run -p giochi-engine-3d --features physics-3d --example physics_3d_demo
+cargo run -p giochi-engine-3d --features physics-3d,hud --example mini_fps -- --physics --hud
 ```
+
+`mini_fps --physics` drives the walker with a Rapier capsule instead of the free
+camera, and `--hud` adds an egui overlay (fps, eye position, body count) through the
+GLES painter — the two phase-21/24 pendencies, both opt-in so the phase-12-17
+performance numbers stay comparable.
 
 They need a GL driver; `SDL_VIDEODRIVER=offscreen` runs them headless.
 
