@@ -5,8 +5,8 @@ Implementação do **Relatório 2** do
 rede P2P host-autoritativa com *Interest Management*, para o GIOCHI-OS em Linux
 ARM64.
 
-> **Estado: compilado e testado.** `cargo test -p giochi-net` dá **39/39**;
-> **43/43** com `--features laminar`; **43 + 1 ignorado** com `--features mdns`.
+> **Estado: compilado e testado.** `cargo test -p giochi-net` dá **43/43**;
+> **47/47** com `--features laminar`; **49/49 + 1 ignorado** com `--features mdns`.
 > `clippy -D warnings` e `fmt --check` passam, e o cross-compile AArch64 compila
 > o workspace e as duas features opcionais. O que falta está na §3: teste com
 > dois processos e validação em hardware.
@@ -196,15 +196,16 @@ tem asserts próprios em `net.rs::tamanho_das_structs_e_estavel`.
 ## 4. O que os testes cobrem
 
 `cargo test -p giochi-net` — **43 testes**; **47** com `--features laminar`;
-**49** com `--features mdns` (48 + 1 ignorado); **53** com `--all-features`
-(52 + 1 ignorado).
+**49** com `--features mdns`; **53** com `--all-features`. Em todas as
+configurações com mDNS há mais um teste `#[ignore]`, que não conta acima porque
+só roda a pedido (ver o fim desta secção).
 
 | Configuração | Testes | Observação |
 | --- | --- | --- |
 | padrão | 43 | zero dependência |
 | `--features laminar` | 47 | +4 do transporte |
-| `--features mdns` | 49 | +6 do mDNS e 1 `#[ignore]` |
-| `--all-features` | 53 | os dois |
+| `--features mdns` | 49 | +6 do mDNS, mais 1 `#[ignore]` |
+| `--all-features` | 53 | os dois, mais o mesmo `#[ignore]` |
 
 O teste ignorado (`encontra_o_proprio_anuncio`) **é** executado, com
 `-- --ignored`: depende de multicast numa interface real, então não pode rodar
