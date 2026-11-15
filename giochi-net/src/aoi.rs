@@ -5,11 +5,23 @@
 //! O relatório traz a conta: mapa de 4×4 telas, ~150 inimigos, 4 clientes.
 //!
 //! ```text
-//! sem AOI:  150 inimigos × 5 bytes × 15 Hz × 4 clientes = 45 KB/s de upload
-//! com AOI:  ~13 inimigos × 5 bytes × 15 Hz × 4 clientes =  4 KB/s
+//! 14 bytes por inimigo (protocolo v2), cabeçalho de 9, 1200 por datagrama
+//!
+//! sem AOI:  cabem 85 por snapshot -> 1199 B × 15 Hz × 4 clientes = 70 KB/s de upload
+//! com AOI:  ~13 inimigos          ->  191 B × 15 Hz × 4 clientes = 11 KB/s
 //! ```
 //!
-//! Num host ARM64 portátil alimentado por bateria e com rádio SDIO, 45 KB/s de
+//! Duas coisas nesta conta são fáceis de errar e já erraram aqui:
+//!
+//! * **O teto é o datagrama, não o número de inimigos.** Acima de
+//!   [`crate::wire::inimigos_por_datagrama`] o encoder trunca, então "sem AOI" não cresce
+//!   com a horda — ele satura em ~70 KB/s e o cliente simplesmente **não vê** os inimigos
+//!   que não couberam. O AOI não é só economia de banda: é o que decide quem aparece.
+//! * **`5 bytes` esteve escrito aqui** enquanto o codificador escrevia 9. A conta com o
+//!   número errado dava 45 KB/s, que é número de documento e não de fio. O teste
+//!   `tam_inimigo_e_o_que_o_codificador_escreve` mede o pacote para isto não repetir.
+//!
+//! Num host ARM64 portátil alimentado por bateria e com rádio SDIO, 70 KB/s de
 //! upload contínuo aparece como engasgo de framerate — e o culpado parece a
 //! GPU. É a diferença entre um jogo que roda e um que "trava sem motivo".
 //!

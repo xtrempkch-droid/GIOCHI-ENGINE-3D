@@ -325,7 +325,13 @@ impl Host {
                 inimigos: filtrados.to_vec(),
             };
             let _ = self.net.enviar(addr, &msg);
-            self.ultimos_envios.push((id, filtrados.len()));
+            // O que foi enviado, não o que o filtro devolveu: o encoder trunca no teto do
+            // datagrama, e contar antes dele reportava 150 quando 85 saíam. Este número é o
+            // que prova que o AOI economiza, por isso não pode mentir pró-AOI.
+            self.ultimos_envios.push((
+                id,
+                filtrados.len().min(crate::wire::inimigos_por_datagrama()),
+            ));
         }
         true
     }
@@ -562,5 +568,46 @@ mod testes {
         let envios = host.ultimos_envios().to_vec();
         assert_eq!(envios.len(), 1);
         assert_eq!(envios[0].1, 1, "só o inimigo dentro do raio");
+    }
+
+    #[test]
+    fn o_relatorio_conta_o_que_coube_no_datagrama_e_nao_o_que_o_filtro_devolveu() {
+        // `ultimos_envios` é o número que prova que o AOI economiza. Contava antes do
+        // encoder truncar, portanto dizia 150 quando 85 saíam no fio — uma mentira a favor
+        // do AOI, que é a pior direção para uma métrica errar.
+        let mut host = Host::escutar(("127.0.0.1", 0)).unwrap();
+        let addr = host.endereco().unwrap();
+        let mut cliente = Net::abrir("127.0.0.1:0", Modo::Cliente).unwrap();
+        cliente
+            .enviar(
+                addr,
+                &Mensagem::Handshake {
+                    versao: VERSAO_PROTOCOLO,
+                    tipo_controle: 0,
+                },
+            )
+            .unwrap();
+        assert!(esperar(
+            || {
+                host.processar(64);
+                host.clientes() == 1
+            },
+            500
+        ));
+
+        // Raio enorme: todos os 150 passam pelo filtro, e o datagrama não leva todos.
+        host.definir_area(1, 100_000.0);
+        let mundo: Vec<_> = (0..150).map(|i| inimigo(i, i as f32 * 0.1, 0.0)).collect();
+        std::thread::sleep(Duration::from_millis(80));
+        assert!(host.tick_snapshot(&mundo), "devia enviar");
+
+        let envios = host.ultimos_envios().to_vec();
+        assert_eq!(envios.len(), 1);
+        assert_eq!(
+            envios[0].1,
+            crate::wire::inimigos_por_datagrama(),
+            "o relatório tem de ser o que coube, não o que o filtro devolveu"
+        );
+        assert!(envios[0].1 < 150, "150 inimigos não cabem num datagrama");
     }
 }

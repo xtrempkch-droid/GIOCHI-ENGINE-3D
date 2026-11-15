@@ -66,6 +66,11 @@ impl core::fmt::Display for ErroLeitura {
 impl std::error::Error for ErroLeitura {}
 
 /// Um inimigo dentro de um snapshot.
+///
+/// Todos os campos atravessam o fio **sem conversão**: `x`/`z` como `f32` e `hp` como
+/// `u16`, exactamente como aqui. A versão 1 quantizava a posição em centímetros `u16` e
+/// mandava `hp` num byte — o que colapsava coordenadas negativas em `0` e truncava o byte
+/// alto. Ver `docs/TRANSFERENCIA.md` §3.1b.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SnapshotInimigo {
     /// Identificador estável durante a vida do inimigo.
@@ -75,6 +80,9 @@ pub struct SnapshotInimigo {
     /// Posição no plano do jogo.
     pub z: f32,
     /// Vida atual.
+    ///
+    /// `u16` inteiro no fio. Um jogo pode empacotar aqui qualquer valor de 16 bits — o rumo
+    /// de um carro, uma percentagem — e recebe-o de volta igual.
     pub hp: u16,
     /// Tipo do inimigo. O significado é do jogo, não da engine.
     pub tipo: u8,
@@ -193,13 +201,37 @@ const TAG_SHOP_BUY: u8 = 10;
 
 /// Bytes que um inimigo ocupa no snapshot.
 ///
-/// `id`(2) + `x`(2) + `z`(2) + `hp`(1) + `tipo`(1) + `fase_chefe`(1) = **9**.
+/// `id`(2) + `x`(4) + `z`(4) + `hp`(2) + `tipo`(1) + `fase_chefe`(1) = **14**.
 ///
-/// A primeira versão usava 5 aqui — número que eu tinha deduzido do campo
-/// "posição" e não do que o codificador realmente escreve. Com o divisor
-/// errado, 150 inimigos passavam do limite de datagrama e o crate produzia
-/// pacote grande demais. O teste pegou.
-const TAM_INIMIGO: usize = 9;
+/// Duas versões erraram este número antes: a primeira usava 5, deduzido do campo
+/// "posição" em vez do que o codificador realmente escreve, e a segunda usava 9 porque
+/// `x`/`z` viajavam quantizados em centímetros (`u16`) e `hp` em um byte. A quantização
+/// não assinada colapsava toda coordenada negativa em 0 e o byte baixo de `hp` perdia os
+/// 8 bits altos — nenhum dos dois se via num teste com coordenadas positivas (protocolo
+/// v1 → v2, ver `docs/TRANSFERENCIA.md` §3.1).
+///
+/// `pub` porque o host precisa do mesmo número para reportar quantos inimigos couberam de
+/// facto: o encoder trunca, e quem conta antes dele conta a mais.
+pub const TAM_INIMIGO: usize = 14;
+
+/// Bytes de cabeçalho de um [`Mensagem::Inimigos`], contando o cabeçalho do datagrama:
+/// versão(2) + tag(1) + tick(4) + contagem(2) = **9**.
+///
+/// Os 2 de versão não são um detalhe: é o que `codificar` já escreveu antes da variante, e
+/// a primeira versão deste constante esquecia deles — `tam_inimigo_e_o_que_o_codificador_escreve`
+/// mediu o pacote e apanhou a diferença, que era exactamente o tipo de erro que já tinha
+/// produzido um datagrama grande demais duas vezes.
+const CABECALHO_INIMIGOS: usize = 9;
+
+/// Quantos inimigos cabem num datagrama.
+///
+/// Acima disto o encoder trunca sem erro — o snapshot é um retrato, não uma fila, e um
+/// datagrama grande fragmenta (perder um fragmento é perder o snapshot inteiro). Um jogo
+/// com mais inimigos por perto do que isto precisa de área de interesse menor, não de um
+/// pacote maior.
+pub fn inimigos_por_datagrama() -> usize {
+    crate::DATAGRAMA_MAX.saturating_sub(CABECALHO_INIMIGOS) / TAM_INIMIGO
+}
 
 struct Escritor {
     buf: Vec<u8>,
@@ -344,19 +376,23 @@ impl Mensagem {
             Mensagem::Inimigos { tick, inimigos } => {
                 w.u8(TAG_INIMIGOS);
                 w.u32(*tick);
-                // Quantos cabem: `TAM_INIMIGO` bytes por inimigo + 2 do
-                // contador, sobre o que já foi escrito.
+                // Quantos cabem no datagrama, descontado o que já foi escrito.
                 let cabecalho = w.buf.len() + 2;
                 let cabe = crate::DATAGRAMA_MAX.saturating_sub(cabecalho) / TAM_INIMIGO;
                 let n = inimigos.len().min(cabe);
                 w.u16(n as u16);
                 for ini in &inimigos[..n] {
                     w.u16(ini.id);
-                    // Quantiza a posição em centímetros inteiros: 1000x menor que
-                    // float, e 1 cm de erro é invisível num mapa de 4x4 telas.
-                    w.u16(quantizar(ini.x));
-                    w.u16(quantizar(ini.z));
-                    w.u8(ini.hp.min(255) as u8);
+                    // `f32`, o mesmo tipo da API pública. A versão anterior quantizava em
+                    // centímetros `u16`, o que descartava o sinal: num mundo centrado na
+                    // origem metade do mapa colapsava em `x = 0` / `z = 0`, e o cliente
+                    // desenhava a horda toda em cima dos eixos.
+                    w.f32(ini.x);
+                    w.f32(ini.z);
+                    // `u16` inteiro. O `u8` anterior mandava só o byte baixo, então um
+                    // jogo que empacota o rumo do carro ou a percentagem de vida nos 16
+                    // bits recebia de volta um oitavo do valor.
+                    w.u16(ini.hp);
                     w.u8(ini.tipo);
                     w.u8(ini.fase_chefe);
                 }
@@ -448,9 +484,9 @@ impl Mensagem {
                 for _ in 0..n {
                     inimigos.push(SnapshotInimigo {
                         id: r.u16()?,
-                        x: desquantizar(r.u16()?),
-                        z: desquantizar(r.u16()?),
-                        hp: r.u8()? as u16,
+                        x: r.f32()?,
+                        z: r.f32()?,
+                        hp: r.u16()?,
                         tipo: r.u8()?,
                         fase_chefe: r.u8()?,
                     });
@@ -488,21 +524,6 @@ impl Mensagem {
 /// Coordenadas negativas saturam em 0 — o mapa deste projeto usa o primeiro
 /// quadrante —, e acima de 655.35 m satura no topo em vez de dar a volta,
 /// porque posição que "salta" no cliente é pior que posição colada na borda.
-fn quantizar(v: f32) -> u16 {
-    let cm = (v * 100.0).round();
-    if !cm.is_finite() || cm <= 0.0 {
-        return 0;
-    }
-    if cm >= u16::MAX as f32 {
-        return u16::MAX;
-    }
-    cm as u16
-}
-
-fn desquantizar(cm: u16) -> f32 {
-    cm as f32 / 100.0
-}
-
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -563,6 +584,17 @@ mod testes {
                     hp: 200,
                     tipo: 1,
                     fase_chefe: 2,
+                },
+                // Cruzar o sinal e o byte alto é o que faltava: a versão anterior deste
+                // teste usava só coordenadas positivas e `hp < 256`, ou seja, testava a
+                // identidade e não o fio.
+                SnapshotInimigo {
+                    id: 3,
+                    x: -77.25,
+                    z: -0.5,
+                    hp: 0xABCD,
+                    tipo: 255,
+                    fase_chefe: 255,
                 },
             ],
         });
@@ -638,8 +670,7 @@ mod testes {
 
     #[test]
     fn snapshot_trunca_no_ultimo_inimigo_inteiro() {
-        // 150 inimigos * 5 bytes + cabeçalho passa de 1200: tem de truncar sem
-        // produzir datagrama inválido.
+        // 150 inimigos passam do datagrama: tem de truncar sem produzir pacote inválido.
         let muitos: Vec<_> = (0..150)
             .map(|i| SnapshotInimigo {
                 id: i,
@@ -660,8 +691,12 @@ mod testes {
         let lido = Mensagem::decodificar(&bytes).expect("continua válido");
         match lido {
             Mensagem::Inimigos { inimigos, .. } => {
-                assert!(inimigos.len() < 150, "devia ter truncado");
-                assert!(!inimigos.is_empty());
+                assert_eq!(
+                    inimigos.len(),
+                    inimigos_por_datagrama(),
+                    "o truncamento não usou o teto que o crate publica"
+                );
+                assert!(inimigos.len() < 150);
             }
             outro => panic!("variante errada: {outro:?}"),
         }
@@ -695,8 +730,9 @@ mod testes {
 
     #[test]
     fn contagem_de_inimigos_maior_que_o_pacote_e_recusada() {
-        // Um datagrama de 9 bytes pode declarar 65535 inimigos. O decodificador
-        // não pode reservar o que o campo pede antes de saber se há bytes.
+        // Um datagrama de 9 bytes (versão 2 + tag 1 + tick 4 + contagem 2) pode
+        // declarar 65535 inimigos. O decodificador não pode reservar o que o campo pede
+        // antes de saber se há bytes.
         let mut bytes = VERSAO_PROTOCOLO.to_le_bytes().to_vec();
         bytes.push(TAG_INIMIGOS);
         bytes.extend_from_slice(&0u32.to_le_bytes());
@@ -708,11 +744,120 @@ mod testes {
     }
 
     #[test]
-    fn quantizacao_satura_em_vez_de_dar_a_volta() {
-        assert_eq!(quantizar(-1.0), 0);
-        assert_eq!(quantizar(f32::NAN), 0);
-        assert_eq!(quantizar(1e9), u16::MAX);
-        assert!((desquantizar(quantizar(2.5)) - 2.5).abs() < 0.011);
+    fn posicao_negativa_atravessa_o_fio_sem_perder_sinal() {
+        // O bug que este teste prende: `quantizar` devolvia 0 para qualquer valor <= 0, e
+        // num mundo centrado na origem metade das coordenadas é negativa. Um teste com
+        // coordenadas positivas passava e não testava o fio — testava a identidade.
+        let original = SnapshotInimigo {
+            id: 7,
+            x: -1.0,
+            z: -8.0,
+            hp: 0xABCD,
+            tipo: 200,
+            fase_chefe: 5,
+        };
+        let bytes = Mensagem::Inimigos {
+            tick: 1,
+            inimigos: vec![original],
+        }
+        .codificar();
+        match Mensagem::decodificar(&bytes).expect("ida e volta") {
+            Mensagem::Inimigos { inimigos, .. } => assert_eq!(inimigos, vec![original]),
+            outro => panic!("variante errada: {outro:?}"),
+        }
+    }
+
+    #[test]
+    fn a_posicao_atravessa_o_fio_bit_a_bit() {
+        // `f32` exacto, e não "aproximado o suficiente": a versão quantizada tinha 1 cm de
+        // erro que ninguém media. Um valor que não é representável em centímetros
+        // (0.001) e outro no limite do mapa provam que não há conversão nenhuma.
+        for (x, z) in [
+            (-48.123_456_f32, 21.5_f32),
+            (0.001, -0.001),
+            (f32::MIN_POSITIVE, -f32::MIN_POSITIVE),
+            (160.0, -160.0),
+        ] {
+            let inimigo = SnapshotInimigo {
+                id: 1,
+                x,
+                z,
+                hp: 1,
+                tipo: 0,
+                fase_chefe: 0,
+            };
+            let bytes = Mensagem::Inimigos {
+                tick: 0,
+                inimigos: vec![inimigo],
+            }
+            .codificar();
+            match Mensagem::decodificar(&bytes).expect("ida e volta") {
+                Mensagem::Inimigos { inimigos, .. } => {
+                    assert_eq!(inimigos[0].x.to_bits(), x.to_bits(), "x = {x}");
+                    assert_eq!(inimigos[0].z.to_bits(), z.to_bits(), "z = {z}");
+                }
+                outro => panic!("variante errada: {outro:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn hp_de_16_bits_chega_inteiro() {
+        for hp in [0u16, 1, 255, 256, 0xABCD, u16::MAX] {
+            let inimigo = SnapshotInimigo {
+                id: 2,
+                x: 0.0,
+                z: 0.0,
+                hp,
+                tipo: 0,
+                fase_chefe: 0,
+            };
+            let bytes = Mensagem::Inimigos {
+                tick: 0,
+                inimigos: vec![inimigo],
+            }
+            .codificar();
+            match Mensagem::decodificar(&bytes).expect("ida e volta") {
+                Mensagem::Inimigos { inimigos, .. } => {
+                    assert_eq!(inimigos[0].hp, hp, "hp = {hp}");
+                }
+                outro => panic!("variante errada: {outro:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn tam_inimigo_e_o_que_o_codificador_escreve() {
+        // A constante já esteve errada duas vezes, e nas duas o sintoma foi um datagrama
+        // grande demais em produção. Medir o que o encoder escreve é o único jeito de a
+        // constante não voltar a divergir do layout.
+        let um = Mensagem::Inimigos {
+            tick: 0,
+            inimigos: vec![SnapshotInimigo {
+                id: 1,
+                x: 0.0,
+                z: 0.0,
+                hp: 0,
+                tipo: 0,
+                fase_chefe: 0,
+            }],
+        }
+        .codificar();
+        assert_eq!(
+            um.len(),
+            CABECALHO_INIMIGOS + TAM_INIMIGO,
+            "o codificador e TAM_INIMIGO discordam do layout"
+        );
+
+        // E o teto derivado dele tem de ser o teto real.
+        assert_eq!(
+            inimigos_por_datagrama(),
+            (crate::DATAGRAMA_MAX - CABECALHO_INIMIGOS) / TAM_INIMIGO
+        );
+        assert!(
+            CABECALHO_INIMIGOS + inimigos_por_datagrama() * TAM_INIMIGO <= crate::DATAGRAMA_MAX,
+            "o teto calculado passa do datagrama"
+        );
     }
 
     #[test]

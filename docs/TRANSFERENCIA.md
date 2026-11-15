@@ -218,14 +218,45 @@ Repare no `+stable-x86_64-pc-windows-gnu` em tudo que **linka** (`test`,
 ### 3.1 Tamanho do inimigo no datagrama
 
 O truncamento do snapshot usava **5 bytes** por inimigo. O codificador escreve
-**9**: `id`(2) + `x`(2) + `z`(2) + `hp`(1) + `tipo`(1) + `fase_chefe`(1).
+**14** desde o protocolo v2: `id`(2) + `x`(4) + `z`(4) + `hp`(2) + `tipo`(1) +
+`fase_chefe`(1). Na v1 eram 9, porque `x`/`z` viajavam quantizados e `hp` num byte.
 
 Com 150 inimigos o pacote passava de `DATAGRAMA_MAX` (1200). Datagrama grande
 **fragmenta**, e perder um fragmento é perder o snapshot **inteiro**.
 
 Corrigido com a constante `TAM_INIMIGO` e teste que monta 150 inimigos.
 **Se você mudar o layout de `SnapshotInimigo`, atualize `TAM_INIMIGO` ou esse
-teste vai pegar — e é bom que pegue.**
+teste vai pegar — e é bom que pegue.** O teste `tam_inimigo_e_o_que_o_codificador_escreve`
+fecha o ciclo pelo outro lado: mede o pacote de um inimigo e compara com a
+constante, porque a constante já esteve errada duas vezes (5, depois 9) e nas
+duas o sintoma apareceu em campo e não no teste.
+
+### 3.1b A quantização descartava o sinal, e o `hp` perdia o byte alto
+
+Duas perdas que nenhum teste apanhava, porque o teste de ida e volta usava só
+coordenadas positivas e `hp < 256`:
+
+```rust
+fn quantizar(v: f32) -> u16 {
+    let cm = (v * 100.0).round();
+    if !cm.is_finite() || cm <= 0.0 { return 0; }   // negativo vira 0
+    ...
+}
+w.u8(ini.hp.min(255) as u8);                        // só o byte baixo
+```
+
+Num mundo **centrado na origem** metade do mapa colapsava em `x = 0` / `z = 0`:
+o cliente desenhava a horda toda sobre os eixos, e um jogo que empacota o rumo
+do carro nos 16 bits de `hp` recebia um oitavo do valor. O host, que simula,
+ficava certo — o defeito só existia no fio.
+
+Corrigido em v2: `x`/`z` como `f32` (o tipo do campo) e `hp` como `u16`. Se algum
+dia houver quantização de verdade, ela precisa de **sinal**, de teste com valores
+negativos e de um erro declarado — não de um `if v <= 0 { 0 }`.
+
+**O teto do datagrama baixou de 132 para 85 inimigos por snapshot.** Acima
+disso o encoder trunca em silêncio, então a área de interesse passou a ser o que
+decide quem o cliente vê, não só quanta banda se gasta.
 
 ### 3.2 `0.0.0.0` não é endereço de destino
 
@@ -412,13 +443,17 @@ errado em silêncio**.
 
 ### 5.4 O protocolo é versionado por um único número
 
-`VERSAO_PROTOCOLO` (hoje `1`) é checado **antes** de qualquer campo ser lido. Se
+`VERSAO_PROTOCOLO` (hoje `2`) é checado **antes** de qualquer campo ser lido. Se
 você mudar o layout de qualquer variante em `wire.rs`, **suba a versão**. Um
 cliente antigo falando com host novo produziria leitura deslocada — pior que
 recusar.
 
-Há teste prendendo `VERSAO_PROTOCOLO == 1` para forçar a decisão a ser
+Há teste prendendo `VERSAO_PROTOCOLO == 2` para forçar a decisão a ser
 consciente.
+
+A v1 → v2 trocou a posição do inimigo de centímetros `u16` para `f32` e o `hp`
+de um byte para `u16`: **9 → 14 bytes por inimigo**. Um cliente v1 não fala com
+host v2, e é isso que se quer — ver §3.1.
 
 ### 5.5 O transporte padrão tem zero dependência — preserve
 

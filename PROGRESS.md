@@ -13,6 +13,52 @@ Fases 0–18 concluídas. O Growth Pack começou em 2026-11-14.
 | 23 — Animation | **concluída** (2026-11-14) | 13 testes de unidade em `animation`, `animation_render` (a câmara escolhe o frame certo do spritesheet, pixel a pixel), `perf_regression` com 256 tweens + 1 spritesheet a 0 alocações/frame; `animation_demo` em 120 frames; gates x86_64, features, docs e check ARM64 aprovados |
 | 24 — Physics + C ABI | **concluída** (2026-11-14) | 9 testes de unidade em `physics` 2D + 9 em 3D, 5 de integração (`tests/physics_2d.rs`), `physics_2d_demo` 1800 frames com a torre a `0.000` de velocidade, `physics_3d_demo` 420 frames com o jogador bloqueado pela parede e apoiado no chão, `mini_fps --physics` e `platformer_2d` a chegar ao alvo; C ABI **v6** com `giochi_physics_*`, `giochi_particles_*`, `giochi_animator_*`, `giochi_console_*` e `giochi_hot_reload_*`, com testes C + Python nos dois perfis de features |
 | 25 — Release 0.5.0 | **concluída** (2026-11-14) | `check-version.sh` consistente em 0.5.0 (7 referências), `cargo build --release --workspace --examples`, artefacto empacotado e `verify-release-artifact.sh` verde: binários, `giochi.h` e `libgiochi` concordam em 0.5.0, `c_smoke` reporta `abi 6, engine 0.5.0`, demo + `mini_game.lua` correm com e sem PNGs |
+| 26 — Issue #8 (wire v2) | **concluída** (2026-11-15) | 43 testes do `giochi-net` (53 com `--all-features`), protocolo v2, gates completos verdes, release 0.5.1 |
+
+### Issue #8 — snapshot do `giochi-net` (2026-11-15)
+
+O issue foi verificado linha a linha contra o código antes de ser aplicado, porque um issue
+é uma afirmação como qualquer outra.
+
+| Afirmação do issue | Verificado |
+|---|---|
+| `quantizar` devolve 0 para `cm <= 0.0` | ✅ `wire.rs:493` |
+| `hp` vai como `w.u8(ini.hp.min(255) as u8)` | ✅ só o byte baixo |
+| `TAM_INIMIGO = 9` | ✅ |
+| `VERSAO_PROTOCOLO = 1` | ✅ |
+| `snapshot_ida_e_volta` só usa coordenadas positivas e `hp < 256` | ✅ (`x: 1.0, 2.0, 3.5`; `hp: 10, 200`) |
+| `aoi.rs` diz 5 bytes | ✅ |
+| `docs/TRANSFERENCIA.md` §5.4 diz "hoje `1`" | ✅ |
+| **"150 inimigos … 45 KB/s → 126 KB/s (passa de `DATAGRAMA_MAX`)"** | ❌ **errado** — ver abaixo |
+
+A tabela de impacto do issue assume que 150 inimigos cabem num datagrama, o que nunca
+aconteceu: o encoder trunca no teto. Medido, com cabeçalho de 9 bytes (versão 2 + tag 1 +
+tick 4 + contagem 2):
+
+| | bytes/inimigo | cabem por snapshot | pior caso por cliente |
+|---|---|---|---|
+| v1 | 9 | 132 | 1197 B × 15 Hz = 17,5 KB/s |
+| v2 | 14 | **85** | 1199 B × 15 Hz = 17,6 KB/s |
+
+A banda no pior caso é a mesma — o que muda é **quantos inimigos o cliente recebe**. Isso
+é mais grave que o número do issue: com 150 no raio, a v1 já escondia 18 e a v2 esconde
+65, sem erro nenhum. Foi o que levou a corrigir também `Host::ultimos_envios`, que
+reportava o pré-truncamento (dizia 150 quando 85 saíam) — uma métrica a mentir a favor do
+próprio AOI que ela existe para justificar.
+
+Aplicado: `f32`/`u16` no fio, `TAM_INIMIGO` 14, `VERSAO_PROTOCOLO` 2, `quantizar`/
+`desquantizar` removidos, `inimigos_por_datagrama()` publicado para o host contar a
+verdade, testes novos (posição negativa, posição bit a bit, `hp` de 16 bits, a constante
+igual ao que o codificador escreve, truncamento igual ao teto publicado, relatório do
+host) e os quatro documentos corrigidos.
+
+Um erro meu foi apanhado pelo teste que escrevi: `CABECALHO_INIMIGOS` esqueceu os 2 bytes
+de versão (7 em vez de 9), e `tam_inimigo_e_o_que_o_codificador_escreve` mediu o pacote e
+falhou na hora. Era exactamente o erro que já tinha produzido datagrama grande demais duas
+vezes.
+
+Release **0.5.1**: a mudança de formato do fio numa versão já publicada não pode sair com
+o mesmo número.
 
 ### Auditoria pós-release (2026-11-14)
 

@@ -195,15 +195,16 @@ tem asserts próprios em `net.rs::tamanho_das_structs_e_estavel`.
 
 ## 4. O que os testes cobrem
 
-`cargo test -p giochi-net` — **39 testes**; **43** com `--features laminar`;
-**46** com `--features mdns` (45 + 1 ignorado); **50** com `--all-features`.
+`cargo test -p giochi-net` — **43 testes**; **47** com `--features laminar`;
+**49** com `--features mdns` (48 + 1 ignorado); **53** com `--all-features`
+(52 + 1 ignorado).
 
 | Configuração | Testes | Observação |
 | --- | --- | --- |
-| padrão | 39 | zero dependência |
-| `--features laminar` | 43 | +4 do transporte |
-| `--features mdns` | 46 | +6 do mDNS e 1 `#[ignore]` |
-| `--all-features` | 50 | os dois |
+| padrão | 43 | zero dependência |
+| `--features laminar` | 47 | +4 do transporte |
+| `--features mdns` | 49 | +6 do mDNS e 1 `#[ignore]` |
+| `--all-features` | 53 | os dois |
 
 O teste ignorado (`encontra_o_proprio_anuncio`) **é** executado, com
 `-- --ignored`: depende de multicast numa interface real, então não pode rodar
@@ -211,10 +212,10 @@ no CI. Medido nesta máquina: encontra o próprio anúncio em **1,03 s**.
 
 | Arquivo | Testes | O que fixa |
 | --- | --- | --- |
-| `wire.rs` | 10 | ida e volta das 10 variantes, versão errada recusada, truncado com offset, tag inválida, bytes arbitrários sem pânico, snapshot truncado sem corromper, contagem de inimigos maior que o pacote recusada sem alocar o pedido, quantização saturando, payload grande |
+| `wire.rs` | 13 | ida e volta das 10 variantes (com coordenada negativa e `hp` de 16 bits), versão errada recusada, truncado com offset, tag inválida, bytes arbitrários sem pânico, snapshot truncado sem corromper, contagem de inimigos maior que o pacote recusada sem alocar o pedido, posição negativa sem perder sinal, posição bit a bit, `hp` de 16 bits inteiro, `TAM_INIMIGO` igual ao que o codificador escreve, payload grande |
 | `aoi.rs` | 8 | centro vê a região e não o mundo, fora não vê nada, borda inclusiva, raio 0 desliga (não esconde), raio negativo/NaN, fórmula da tela, buffer reaproveitado, a conta do relatório |
 | `peer.rs` | 6 | abre em porta efêmera, **não bloqueia** (mede tempo), envia e recebe, lixo vira evento e não derruba o socket, orçamento limita |
-| `host.rs` | 6 | sobe e escuta, handshake atribui id 1, versão errada não cria cliente, input sem handshake ignorado, snapshot respeita taxa e AOI, id não reusa jogador vivo na volta do contador |
+| `host.rs` | 7 | sobe e escuta, handshake atribui id 1, versão errada não cria cliente, input sem handshake ignorado, snapshot respeita taxa e AOI, id não reusa jogador vivo na volta do contador, o relatório de `ultimos_envios` conta o que coube no datagrama |
 | `client.rs` | 7 | entra e recebe id, input chega e snapshot volta filtrado, `enviar_input` recusa o que não é do cliente, pacote de outro endereço ignorado, id 0 é recusado, host silencioso faz desistir, RTT satura |
 | `lib.rs` | 2 | versão/porta/taxa estáveis, datagrama cabe no MTU mínimo de IPv6 |
 | `descobrir.rs` (feature `mdns`) | 6 + 1 ignorado | nome de instância utilizável, tipo de serviço com o sufixo obrigatório, `ip_anunciavel` recusa loopback, anúncio só com loopback é descartado, o caminho sem rota default acha uma interface utilizável, `fe80::/10` reconhecido sem confundir `fec0::/10`; o ignorado anuncia e encontra o próprio anúncio de verdade |

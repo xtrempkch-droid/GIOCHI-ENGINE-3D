@@ -57,7 +57,15 @@ pub use wire::{ErroLeitura, Mensagem, ResumoJogador, SnapshotInimigo};
 ///
 /// Mudar o layout de um `enum` em [`wire`] exige subir isto. Um cliente antigo
 /// falando com host novo produziria leitura deslocada — pior que recusar.
-pub const VERSAO_PROTOCOLO: u16 = 1;
+///
+/// | Versão | Mudança |
+/// |---|---|
+/// | 1 | primeira: posição do inimigo quantizada em centímetros `u16`, `hp` em um byte |
+/// | 2 | posição em `f32` e `hp` em `u16` — 14 bytes por inimigo em vez de 9 |
+///
+/// A 1 descartava o sinal da posição (num mundo centrado na origem metade do mapa
+/// colapsava em `x = 0`) e perdia os 8 bits altos de `hp`. Ver `docs/TRANSFERENCIA.md` §3.1.
+pub const VERSAO_PROTOCOLO: u16 = 2;
 
 /// Tamanho máximo de um datagrama que este crate aceita.
 ///
@@ -100,7 +108,7 @@ mod testes {
         // Se um destes mudar sem intenção, clientes e hosts deixam de se falar
         // e o sintoma aparece só em campo. Travar aqui obriga a mudança a ser
         // consciente.
-        assert_eq!(VERSAO_PROTOCOLO, 1);
+        assert_eq!(VERSAO_PROTOCOLO, 2);
         assert_eq!(PORTA_PADRAO, 47721);
         assert_eq!(SNAPSHOT_HZ, 15);
     }
