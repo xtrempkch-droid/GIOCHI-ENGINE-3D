@@ -22,7 +22,7 @@ O issue foi verificado linha a linha contra o código antes de ser aplicado, por
 
 | Afirmação do issue | Verificado |
 |---|---|
-| `quantizar` devolve 0 para `cm <= 0.0` | ✅ `wire.rs:493` |
+| `quantizar` devolvia 0 para `cm <= 0.0` | ✅ existia em `wire.rs` |
 | `hp` vai como `w.u8(ini.hp.min(255) as u8)` | ✅ só o byte baixo |
 | `TAM_INIMIGO = 9` | ✅ |
 | `VERSAO_PROTOCOLO = 1` | ✅ |
