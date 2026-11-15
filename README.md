@@ -10,7 +10,7 @@ language through a C ABI. **2D** through `sdl2::render`, and **3D** through Open
 over EGL in a separate crate. Primary target: `aarch64-unknown-linux-gnu` (Linux consoles
 with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 
-> **Status: 0.5.0.** Phases 0–24: the Growth Pack (hot reload, devtools, UI, particles,
+> **Status: 0.5.1.** Phases 0–24: the Growth Pack (hot reload, devtools, UI, particles,
 > animation, physics) plus the networking layer, and **C ABI v6**. The workspace,
 > the SDL2 platform layer, the fixed-timestep loop, the 2D renderer with opaque texture
 > handles, keyboard/mouse/gamepad input, the asset cache, the audio mixer, the scene

@@ -2,7 +2,7 @@
 
 **Contract version: `GIOCHI_ABI_VERSION 1` for part I (2D), `2` for part II (3D), `3` for
 part III (frame statistics), `4` for part IV (networking).**
-**Engine version: `0.5.0`**
+**Engine version: `0.5.1`**
 **Status: authoritative.** This document is the law of the project. If a Rust type
 cannot be expressed in the C form below, the *type* is redesigned — the contract
 is never relaxed.
@@ -1092,6 +1092,12 @@ typedef struct {
     uint8_t  dados[GIOCHI_NET_MAX_GLOBAL]; /* opaco: o jogo interpreta */
 } GiochiNetGlobal;        /* 1216 bytes */
 ```
+
+`GiochiNetInimigo` carrega os tipos exactos, sem quantização: `x`/`z` são o valor que
+o host pôs no fio e `hp` é um inteiro de 16 bits inteiro. No protocolo v1 a posição
+viajava como centímetros em `u16` — uma coordenada negativa chegava à C API como `0.0`
+— e `hp` viajava num só byte. Quem só usa a API C não teve de mudar nada; o valor é
+que passou a chegar certo.
 
 `GiochiNetGlobal` é o par de `giochi_net_broadcast`: o host publica onda, torre,
 chefe e loja como bytes opacos, e o cliente lê o último estado recebido. Também

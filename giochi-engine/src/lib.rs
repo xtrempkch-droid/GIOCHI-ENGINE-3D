@@ -71,7 +71,7 @@ pub const VERSION_MAJOR: u32 = 0;
 /// Minor component of [`VERSION`].
 pub const VERSION_MINOR: u32 = 5;
 /// Patch component of [`VERSION`].
-pub const VERSION_PATCH: u32 = 0;
+pub const VERSION_PATCH: u32 = 1;
 
 /// Version of **part I** of the C ABI (the 2D surface), described by
 /// `docs/C_ABI_CONTRACT.md` §1–§7.
@@ -134,6 +134,6 @@ mod tests {
 
     #[test]
     fn version_is_packed_as_major_minor_patch() {
-        assert_eq!(version_packed(), 0x00_05_00);
+        assert_eq!(version_packed(), 0x00_05_01);
     }
 }

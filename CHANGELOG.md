@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] — 2026-11-15
+
+### Corrigido — o snapshot descartava o sinal da posição e truncava `hp` (**protocolo v1 → v2**)
+
+- **`x`/`z` do inimigo iam quantizados em centímetros `u16`, o que descartava o sinal**
+  (`if cm <= 0.0 { return 0 }`). Num mundo centrado na origem — o caso de qualquer mapa de
+  arena — metade das coordenadas colapsava em `x = 0` / `z = 0`: o cliente desenhava a
+  horda toda sobre os eixos e, num jogo que empacota o rumo do carro nos 16 bits de `hp`,
+  os carros remotos andavam de lado. O host, que simula, ficava certo — o defeito só
+  existia no fio. Passam a viajar como `f32`, o mesmo tipo do campo, sem conversão nenhuma.
+- **`hp` ia como `u8`** (só o byte baixo de um `u16`). Um valor de 16 bits chegava dividido
+  por 256. Passa a viajar como `u16`.
+- **`VERSAO_PROTOCOLO` 1 → 2**, obrigatoriamente: o layout mudou e um cliente v1 contra
+  host v2 leria campos deslocados. O handshake recusa, que é o comportamento desejado.
+- Custo: **14 bytes por inimigo em vez de 9**. O teto por datagrama cai de 132 para 85
+  inimigos — acima disso o encoder trunca em silêncio, então a área de interesse passa a
+  ser o que decide quem o cliente vê, não só quanta banda se gasta.
+- **`Host::ultimos_envios` conta agora o que coube no datagrama**, não o que o filtro de
+  AOI devolveu. Era uma métrica a mentir a favor do AOI: dizia 150 quando 85 saíam.
+
+### Corrigido — testes que não cruzavam o tipo
+
+`todas_as_variantes_fazem_ida_e_volta` usava só coordenadas positivas e `hp < 256`, ou
+seja, testava a identidade e não o fio. Passa a incluir uma coordenada negativa e
+`hp = 0xABCD`, e há testes novos para posição exacta bit a bit, `hp` de 16 bits e para
+`TAM_INIMIGO` igual ao que o codificador escreve (a constante já estivera errada duas
+vezes, e nas duas o sintoma apareceu em campo).
+
 ## [0.5.0] — 2026-11-14
 
 O Growth Pack: reload, ferramentas, UI, partículas, animação e física — cada fase aditiva,
@@ -1544,7 +1572,9 @@ examples, `mini_game.lua`).
 - `giochi-engine/tests/abi_layout.rs`: byte-size and alignment assertions for
   every `#[repr(C)]` type in the contract.
 
-[Unreleased]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/compare/v0.4.0...main
+[Unreleased]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/compare/v0.5.1...main
+[0.5.1]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/releases/tag/v0.5.1
+[0.5.0]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/releases/tag/v0.5.0
 [0.4.0]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/releases/tag/v0.4.0
 [0.3.1]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/releases/tag/v0.3.1
 [0.3.0]: https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D/releases/tag/v0.3.0
