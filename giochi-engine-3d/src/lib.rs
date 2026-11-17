@@ -44,6 +44,7 @@
 #![warn(missing_docs)]
 #![warn(rust_2018_idioms)]
 
+pub mod camera;
 pub mod context;
 pub mod game;
 #[cfg(feature = "hot_reload")]
@@ -64,6 +65,7 @@ pub mod ui;
 mod error;
 mod registry;
 
+pub use camera::{CameraDirector, CameraKey, CutsceneCamera, Easing, FollowCamera, ShakeCamera};
 pub use error::{Error3D, Result3D};
 pub use particles::BillboardParticleSystem;
 pub use render3d::{

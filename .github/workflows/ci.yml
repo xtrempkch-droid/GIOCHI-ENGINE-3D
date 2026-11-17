@@ -356,6 +356,25 @@ jobs:
           scripts/package-editor.sh
           scripts/verify-editor-package.sh
 
+      - name: Production Pack modules
+        # Phase 26.6/26.7. The catalogue check is the one that only exists here: it compares
+        # the shipped translations against each other, and a missing key is a silent English
+        # sentence in the Portuguese menu at runtime.
+        run: |
+          cargo run -q -p giochi-engine --example i18n_demo | tee /tmp/i18n.log
+          grep -q 'i18n=ok' /tmp/i18n.log
+
+      - name: glTF viewer (GL)
+        # Needs a real EGL context (`dummy` has no OpenGL). The viewer loads a model from
+        # disk, uploads one mesh per primitive and draws each with its own material, which is
+        # the whole glTF path. The model is committed (`assets/models/car.gltf` plus its
+        # `.bin`), so the step also proves a model resolves its buffer next to itself.
+        env:
+          SDL_VIDEODRIVER: offscreen
+        run: |
+          cargo run -q -p giochi-engine-3d --example gltf_viewer -- \
+            assets/models/car.gltf --frames 3
+
       - name: Examples
         env:
           SDL_VIDEODRIVER: dummy

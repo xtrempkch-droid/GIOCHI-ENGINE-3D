@@ -80,6 +80,23 @@ In the 3D crate the same pattern applies: `physics` (`physics-3d`, Rapier 3D plu
 character controller) and `ui` (`hud`, a GLES painter for `egui`) are opt-in, and
 `hot_reload` forwards to the core one.
 
+The Production Pack (phase 26.6/26.7) added five modules, all of them leaves with no new
+dependencies:
+
+| Module | Depends on | Feature |
+|---|---|---|
+| `nav` (A\*) | nothing — `core` types and `std` | none |
+| `i18n` | nothing — a `key = value` parser and `BTreeMap` | none |
+| `save` | nothing — `std::fs` and a text header | none |
+| `camera` (3D crate) | `math3d` | none |
+| `mesh::gltf_loader` (3D crate) | `gltf` (no `import`), `base64` | none |
+
+None of them is feature-gated, for the reason ADR-056 gives: they are arithmetic and string
+handling with no native code, so a feature would only add gate combinations. The one new
+dependency in the workspace is `gltf`, and it is deliberate (ADR-073). `audio::Bus` and the
+`AudioSystem` bus table live inside the existing `audio` module rather than in a new one —
+a bus is a number the mixer already knew how to store.
+
 `perf` observes the frame instead of owning part of it: `core::engine` opens and closes
 the scopes around the scene callbacks, the renderers record their own counters, and the
 overlay draws through `RenderContext`. It never imports `sdl2` directly, and without

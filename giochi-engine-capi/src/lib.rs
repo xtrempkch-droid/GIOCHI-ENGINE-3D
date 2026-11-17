@@ -95,10 +95,10 @@ pub use animation::{
 };
 pub use assets::{giochi_asset_read, giochi_asset_size};
 pub use audio::{
-    giochi_audio_available, giochi_audio_set_volume, giochi_audio_volume, giochi_music_destroy,
-    giochi_music_is_playing, giochi_music_load, giochi_music_pause, giochi_music_play,
-    giochi_music_resume, giochi_music_stop, giochi_sound_destroy, giochi_sound_load,
-    giochi_sound_play,
+    giochi_audio_available, giochi_audio_bus_volume, giochi_audio_set_bus_volume,
+    giochi_audio_set_volume, giochi_audio_volume, giochi_music_destroy, giochi_music_is_playing,
+    giochi_music_load, giochi_music_pause, giochi_music_play, giochi_music_resume,
+    giochi_music_stop, giochi_sound_destroy, giochi_sound_load, giochi_sound_play,
 };
 pub use console::{
     giochi_console_clear, giochi_console_execute, giochi_console_output_count,

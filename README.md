@@ -234,6 +234,17 @@ in its own OpenGL window — through the scene→renderer conversion in `giochi-
 which is the piece the racer will consume (ADR-071). It ships as a self-contained folder whose
 assets are resolved relative to the binary (ADR-072).
 
+### Game systems
+
+The Production Pack's pieces — glTF/GLB models, PBR-lite materials, A* pathfinding, follow /
+shake / cutscene cameras, save slots with versioned headers, master/SFX/music/UI audio buses and
+translations — are documented together in [docs/GAME_SYSTEMS.md](docs/GAME_SYSTEMS.md).
+
+```bash
+cargo run -p giochi-engine-3d --example gltf_viewer -- assets/models/car.gltf
+cargo run -p giochi-engine    --example i18n_demo          # prints i18n=ok
+```
+
 ### Profiling
 
 Phase 15 adds an in-game overlay and a 60-frame frame-time window behind the

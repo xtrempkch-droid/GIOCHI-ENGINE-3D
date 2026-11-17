@@ -537,20 +537,21 @@ de expansão para manter — e a Fase 40 pode trocá-la sem tocar no `Project`.
   intervalo de autosave (0 desliga) e botão de gravar. `Play > Pause/Stop` ficam para o jogo
   (Fase 45), onde há algo para pausar.
 
-## Production Pack — o que faltava para as Fases 41+
+## Production Pack — fechada (pré-requisito das Fases 41+)
 
 O plano do Salto B assumia a Production Pack (Fases 25–29 do plano) pronta. Depois de fechar
-o editor, as pendências foram resolvidas uma a uma, antes de começar o jogo.
+o editor, as pendências foram resolvidas uma a uma, antes de começar o jogo. **Está completa:**
+nenhum item falta, e cada um tem ADR, testes e um exemplo executável.
 
 | Item | Estado | Onde |
 |---|---|---|
 | loader glTF/GLB | **concluído** (2026-11-17) | `mesh::load_gltf`, `RenderContext3D::load_gltf_meshes`, `example gltf_viewer` — ADR-073 |
 | materiais PBR-lite (emissive/metallic/roughness) | **concluído** (2026-11-17) | `render3d::Material`, `draw_mesh_material`, campos no formato de cena e no inspector — ADR-074 |
-| save/load com slots | pendente | — |
-| câmaras de jogo (follow/shake/cutscene) | pendente | — |
-| A* (pathfinding) | pendente | — |
-| buses de áudio | pendente | — |
-| i18n | pendente | — |
+| save/load com slots | **concluído** (2026-11-17) | `save::SaveSlots`, 14 testes — ADR-077 |
+| câmaras de jogo (follow/shake/cutscene) | **concluído** (2026-11-17) | `camera::{FollowCamera, ShakeCamera, CutsceneCamera, CameraDirector}`, 16 testes — ADR-076 |
+| A* (pathfinding) | **concluído** (2026-11-17) | `nav::{NavGrid, GridPoint, PathOptions}`, 17 testes — ADR-075 |
+| buses de áudio | **concluído** (2026-11-17) | `audio::Bus` + C ABI (`giochi_audio_set_bus_volume`/`giochi_audio_bus_volume`) |
+| i18n | **concluído** (2026-11-17) | `i18n::{Translator, Catalogue, Language}` + `assets/i18n/{en,pt,es}.txt`, 17 testes — ADR-078 |
 
 ### glTF/GLB — gates
 
@@ -584,6 +585,51 @@ o editor, as pendências foram resolvidas uma a uma, antes de começar o jogo.
 radeonsi responde `GL_INVALID_OPERATION`: o frame não desenha e a única pista é
 `take_gl_error()`. Os dois testes de GL passaram a exigir fila de erros vazia.
 
+### Production Pack, segunda parte — gates
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `SDL_VIDEODRIVER=offscreen cargo test --workspace` — **1316 testes**, 0 falhas
+- [x] `cargo run -p giochi-engine --example i18n_demo` — `i18n=ok` nas três línguas
+- [x] `cargo run -p giochi-engine-3d --example gltf_viewer -- assets/models/car.gltf --frames 3`
+- [x] **cadeia completa**: uma cena do editor com `"mesh": { "gltf": …car.gltf }` aberta com
+      `--play-frames 3` desenhou 3 frames na GPU real (`1 mesh(es), 1 instance(s),
+      0 unsupported`) — cena → glTF → materiais → renderer
+- [x] `scripts/gen-header.sh` — cabeçalho do C ABI regenerado com as funções de bus
+- [x] `cargo test -p giochi-engine-capi --test rust_ffi` — bus a fazer round-trip dentro da engine
+- [x] `scripts/gates.sh` completo — "All gates passed"
+- [x] `ci.yml` com `Production Pack modules` e `glTF viewer (GL)`, validado com parse YAML
+
+### Production Pack, segunda parte — entregue
+
+| Ficheiro | O que faz |
+|---|---|
+| `giochi-engine/src/nav.rs` | A* em grelha, heurística octile/Manhattan, corte de esquina recusado, desempate total, `smooth` com `line_of_sight`, `from_rows` para mapas ASCII |
+| `giochi-engine-3d/src/camera/mod.rs` | `FollowCamera` (lag exponencial independente do frame rate, look-ahead, `snap`), `ShakeCamera` (trauma², ruído hash determinístico), `CutsceneCamera` (keys + easing), `CameraDirector` |
+| `giochi-engine/src/save.rs` | `SaveSlots` com cabeçalho versionado, payload opaco com `payload_bytes`, escrita atómica, `list`/`newest`/`first_free`/`delete_all` |
+| `giochi-engine/src/i18n.rs` | `Language`, `Catalogue` (`key = value`), `Translator` (fallback, substituição de uma passagem, `missing_keys`) |
+| `giochi-engine/src/audio` | `Bus` (master/sfx/music/ui), `play_sound_on`, `set_bus_volume`, `stop_bus`, tabela de buses por canal |
+| `giochi-engine-capi` | `giochi_audio_set_bus_volume`, `giochi_audio_bus_volume`, cabeçalho regenerado |
+| `assets/i18n/{en,pt,es}.txt` | os catalogues que o jogo usa, verificados por `tests/i18n_catalogues.rs` |
+| `assets/models/car.gltf` + `.bin` | modelo de demonstração/CI, com dois materiais (pintura + farolim emissivo) |
+| `giochi-engine/examples/i18n_demo.rs` | carrega as três línguas e falha se faltar uma chave |
+| `giochi-engine-3d/examples/gltf_viewer.rs` | carrega um `.gltf`/`.glb`, enquadra e desenha por primitiva |
+| `docs/GAME_SYSTEMS.md` | os cinco sistemas numa página, com o que cada um não faz |
+
+### Notas da segunda parte
+
+- O A* recusa **corte de esquina** e tem desempate **total** (`f, h, y, x`): sem isso, o mesmo
+  mapa devolve caminhos diferentes em execuções diferentes (ADR-075).
+- As câmaras usam `1 − e^(−k·dt)` em vez de um lerp por frame: o mesmo comportamento a 30 e a
+  144 fps, e sem overshoot possível (ADR-076).
+- O save guarda um **payload opaco** com o comprimento no cabeçalho: um payload que contenha
+  `---` ou uma linha a parecer cabeçalho lê-se igual, e há um teste exatamente para isso
+  (ADR-077).
+- O i18n substitui **numa só passagem**: um valor que contenha `{x}` não é expandido outra vez,
+  e o teste dos catalogues compara também os *placeholders* entre línguas (ADR-078).
+- O teste de forma C (`c_shape`) ganhou uma lista de exceções explícita: estes tipos são API só
+  de Rust, e o C ABI mantém a sua própria representação (número de bus, por exemplo).
+
 ### Salto B — fecho das Fases 30–40
 
 O editor está completo para o que o plano pede: janela, viewport com câmara, hierarquia,
@@ -591,10 +637,9 @@ inspector, projeto e assets, gizmos de translação/rotação/escala, criação/
 reparenting, undo/redo, recentes, autosave e recuperação, preview com o renderer 3D real, e um
 pacote que corre fora do repositório. 1216 testes no workspace, todos os gates verdes.
 
-**O que o plano pedia e continua em falta**, herdado da Production Pack: save/load em slots,
-câmaras de jogo (follow/shake/cutscene), A*, buses de áudio e i18n. **O glTF e os materiais
-PBR-lite já estão feitos** (ver a secção da Production Pack acima), que era o que bloqueava a
-Fase 41.
+**Production Pack completa.** Todos os itens que o plano assumia prontos (glTF/GLB, materiais
+PBR-lite, save/load com slots, câmaras de jogo, A*, buses de áudio, i18n) estão implementados e
+testados. Nada bloqueia as Fases 41–45.
 
 ### Próxima fase
 

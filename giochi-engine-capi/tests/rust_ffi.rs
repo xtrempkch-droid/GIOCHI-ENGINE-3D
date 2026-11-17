@@ -24,6 +24,8 @@ struct Probe {
     /// Set when the callbacks observe a subsystem they should be able to use.
     saw_engine_running: bool,
     saw_texture_ok: bool,
+    /// Set when a bus volume round-trips through the C ABI inside a running engine.
+    saw_audio_bus_ok: bool,
 }
 
 /// Absolute path to a committed asset, independent of the working directory.
@@ -73,6 +75,19 @@ extern "C" fn update(user_data: *mut c_void, time: *const giochi_engine::Time) {
         probe.saw_engine_running |= giochi_engine_is_running() == 1;
     }
 
+    // Audio is only initialised inside the running engine, so the bus round trip happens
+    // here rather than in the test body: outside, `with_audio` refuses and the setter is a
+    // no-op by design.
+    if probe.updates == 1 {
+        giochi_audio_set_bus_volume(2, 32); // music
+        giochi_audio_set_bus_volume(0, 128); // master
+                                             // Master 128 x music 32 / 128 = 32. A silent system (no audio device, which is what
+                                             // CI has) still stores and reports the values, so the arithmetic is observable
+                                             // either way — which is the point of keeping it in the engine rather than in SDL.
+        let effective = giochi_audio_bus_volume(2);
+        probe.saw_audio_bus_ok = effective == 32;
+    }
+
     if probe.quit_after > 0 && probe.renders >= probe.quit_after {
         giochi_engine_request_quit();
     }
@@ -103,6 +118,20 @@ const DRAW_COLOR: giochi_engine::Color = giochi_engine::Color::rgb(40, 160, 90);
 /// The ABI layouts the header promises. Sizes are asserted here rather than in
 /// `giochi-engine/tests/abi_layout.rs` because the two boundary-only structs do not
 /// exist anywhere else.
+#[test]
+fn an_unknown_bus_number_is_ignored_outside_the_engine() {
+    // Before `giochi_engine_init` there is no audio system, so these must be harmless: a
+    // consumer that sets volumes during start-up is not making a mistake. An out-of-range
+    // bus number is ignored rather than wrapping into a real bus through a `u8` cast.
+    giochi_audio_set_bus_volume(-1, 10);
+    giochi_audio_set_bus_volume(99, 10);
+    giochi_audio_set_bus_volume(4, 10);
+    assert_eq!(giochi_audio_bus_volume(-1), 0);
+    assert_eq!(giochi_audio_bus_volume(99), 0);
+    assert_eq!(giochi_audio_bus_volume(4), 0);
+    assert_eq!(giochi_audio_bus_volume(2), 0, "no engine, no value");
+}
+
 #[test]
 fn abi_type_layouts_match_the_contract() {
     use std::mem::{align_of, size_of};
@@ -287,6 +316,10 @@ fn c_abi_end_to_end() {
     assert!(
         probe.saw_engine_running,
         "is_running must be 1 inside update"
+    );
+    assert!(
+        probe.saw_audio_bus_ok,
+        "a bus volume must round-trip through the C ABI inside the engine"
     );
 
     // The stack is empty afterwards, and the loop is not left claiming to run.

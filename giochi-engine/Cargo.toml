@@ -56,6 +56,10 @@ name = "ui_render"
 required-features = ["devtools"]
 
 [[example]]
+name = "i18n_demo"
+path = "examples/i18n_demo.rs"
+
+[[example]]
 name = "ui_demo"
 path = "examples/ui_demo.rs"
 required-features = ["devtools"]

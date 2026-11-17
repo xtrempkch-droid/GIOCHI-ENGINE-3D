@@ -2489,3 +2489,134 @@ does not carry.
 basis and the texture cache that ADR-073 also deferred. Verified by 7 tests on `Material`
 (conversion monotonicity, clamp, the marker rule) plus 4 on the scene conversion and the
 round trip through JSON.
+
+---
+
+## ADR-075 — A\* on a grid, with corner-cutting refused and a total tie-break
+
+**Context.** The Production Pack asked for pathfinding. A navmesh is the general answer and
+brings a mesh generator, a polygon clipper and a funnel algorithm; the games this engine has
+are a top-down racer, a platformer and a tile map, whose level data is already a grid.
+
+**Decision.**
+
+- `NavGrid` + A\* with two heuristics: **octile** when diagonals are allowed, **Manhattan**
+  when they are not. Both are admissible for their movement model, so the first time the goal
+  is popped the path is optimal, and both are integer (step costs 10 and 14) so there is no
+  floating-point tie to be unlucky about.
+- **Corner cutting is refused by default.** With diagonals allowed, a path can slip between
+  two cells that touch only at a corner; a character with any width at all walks through the
+  wall. `PathOptions::prevent_corner_cutting` is on, and [`NavGrid::line_of_sight`] applies the
+  same rule so smoothing cannot hand back a leg the search refused.
+- **The tie-break is total**: `(f, h, y, x)`. Two equal-cost routes are otherwise popped in
+  whatever order the heap produces, which gives a different path on two runs of the same map.
+  A replay, a test and a debugger all need the same answer twice.
+- **`max_expansions` is a parameter, not a constant**: a hopeless search on a big map is
+  bounded, and "no path" is something a game can show.
+- `from_rows` reads a map from ASCII, which is what the tests use and what a game's collision
+  layer already looks like.
+
+**Consequences.** A racer can route an AI car around a track and a platformer can route an
+enemy along a floor, with one implementation and no dependency. A navmesh would still be the
+right answer for arbitrary 3D geometry; nothing here promises it. Verified by 17 tests,
+including the corner-cut shape, determinism across eight runs, the expansion cap and the
+"path never repeats a cell" walk over a maze.
+
+---
+
+## ADR-076 — Cameras: an exponential lag, a deterministic shake, and keyframes with easing
+
+**Context.** A game needs three things the editor's orbit camera does not provide: a camera that
+follows the player, one that reacts to an impact, and one that shows a scripted moment.
+
+**Decision.**
+
+- `FollowCamera` converges with `1 - exp(-stiffness · dt)`, the exact solution of a first-order
+  lag over `dt`. A naive `position += (target - position) * 0.1` moves twice as fast at 120 fps
+  as at 60; this one is frame-rate independent **and** always in `0..=1`, so it cannot
+  overshoot. A spring with a badly chosen constant is the usual failure and is not reachable
+  here.
+- The look-at point **leads the target along its velocity** (a third of a second by default),
+  which is what makes a fast car show the road ahead instead of the road behind.
+- `snap` places the camera immediately, for a respawn.
+- `ShakeCamera` is **trauma that decays**, mapped to an offset by `trauma²` and a hash-based
+  noise with no state to seed. `trauma²` makes a small hit a small shake; the hash makes two
+  runs of the same replay shake identically, which a `rand` would not without a seeded
+  generator anyway. The look-at point shakes less than the eye.
+- `CutsceneCamera` is keys with **per-segment easing** (`Linear`, `SmoothStep`, `EaseIn`,
+  `EaseOut`). Sampling before the first key or after the last clamps instead of extrapolating,
+  so a caller that runs one frame too long gets the last shot, not a camera flying into space.
+- `CameraDirector` composes them: a playing cutscene wins, the shake is added on top, and the
+  follow camera keeps updating during a cutscene so the return is seamless rather than a jump.
+- Everything is `f32` math with no GL and no window, so the whole subsystem is tested without a
+  driver.
+
+**Consequences.** Phase 41's chase camera and phase 44's impact feedback are `CameraDirector`
+calls. Verified by 16 tests: convergence without overshoot, 60-vs-240 fps agreement, the
+look-ahead direction, every easing's endpoints and monotonicity, trauma clamping, decay,
+determinism, cutscene interpolation and handing back to the follow camera.
+
+---
+
+## ADR-077 — Saves are a header the engine owns and a payload it never looks at
+
+**Context.** "Save/load with slots" is on the Production Pack list, and it is the feature where
+a bug destroys the player's progress rather than a frame.
+
+**Decision.**
+
+- `SaveSlots` stores a **text header** (magic, version, slot, name, timestamp, playtime,
+  `payload_bytes`) followed by `---` and the game's payload, which the engine treats as an
+  **opaque string**. Parsing it is the game's job; not mangling it is the engine's.
+- `payload_bytes` is what makes that promise real: a payload may contain `---`, a line that
+  looks like a header, or no trailing newline at all, and it still reads back byte for byte.
+  There is a test whose payload is exactly those traps.
+- **Atomic write**: `.tmp` + rename. On GIOCHI-OS the save folder is on an SD card, where losing
+  power mid-write is not hypothetical.
+- **Versioned**: a file from a newer build is refused with both numbers
+  (`SaveError::Version { found, supported }`); an older one is read, which is what a version
+  number is for.
+- **The slot number is the only input to the file name** (`slot-N.save`), and it is range
+  checked. A caller cannot hand a path in, so there is no traversal to get wrong.
+- `info()` treats a damaged file as *no save* rather than as an error: a load menu with eight
+  rows should draw seven and leave one empty. `load()` reports it in full.
+- The header carries the display name and playtime, so a menu draws its rows without parsing
+  eight payloads.
+- The clock is injected in `save_at` so the tests do not depend on the time.
+
+**Consequences.** Phase 41's championship progress and phase 45's best lap times go through one
+implementation with the atomicity and the version check already right. Verified by 14 tests:
+round trip, the header-looking payload, empty payload, out-of-range slots, newer/older versions,
+four kinds of damage, ordering, replacement without a `.tmp` left behind, name sanitising, and
+a save a human can read.
+
+---
+
+## ADR-078 — i18n is a `key = value` file, and a one-pass substitution
+
+**Context.** Strings in three languages, in a crate that deliberately has no `serde`.
+
+**Decision.**
+
+- A catalogue is a text file of `key = value` lines; `#` starts a comment, everything after the
+  first `=` is the value, and only `\n` and `\\` are escapes. A JSON parser for a flat list
+  would be three times the code and would need a dependency to justify, and a value is allowed
+  to contain `{`, `%` or `$` without escaping — which is exactly what translations contain.
+- A line without `=` is **skipped and counted**, not fatal: a translator who leaves a paragraph
+  in the file should not blank the menu.
+- **One-pass substitution** of `{name}`. Repeat-until-stable turns a translation into a template
+  engine and lets a bad string recurse; one pass means a value containing a placeholder stays
+  literal, and there is a test for it.
+- An unknown placeholder stays visible (`Lap 1 of {total}`) rather than being deleted: a missing
+  value should be seen, not silently swallowed.
+- Fallback chain: active language → fallback language → the key. An **empty** translation counts
+  as missing, because `menu.quit =` is a mistake and showing the key is more useful than showing
+  nothing.
+- `Translator::missing_keys(other, reference)` is the check a shipping build runs. The shipped
+  catalogues are covered by `tests/i18n_catalogues.rs`, which also compares the **placeholders**
+  of every string across languages — the failure mode that otherwise ships as "Volta  of 5".
+- The engine exposes `Language::is_rtl` and nothing else about direction: the engine does not
+  lay out text, so it can answer the question and the game's UI code decides.
+
+**Consequences.** A game ships `assets/i18n/*.txt` and calls `Translator::format`. Verified by
+12 unit tests and 5 on the shipped catalogue.

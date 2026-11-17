@@ -119,6 +119,45 @@ pub extern "C" fn giochi_audio_volume() -> i32 {
     })
 }
 
+/// Sets one bus's volume, clamped to `0..=128`. An unknown bus number is ignored.
+///
+/// Buses are `0` master, `1` SFX, `2` music, `3` UI. A bus multiplies the master: the
+/// volume a channel plays at is `master * bus / 128`. The master bus is the same number as
+/// [`giochi_audio_set_volume`].
+///
+/// # C ABI
+///
+/// ```c
+/// void giochi_audio_set_bus_volume(int32_t bus, int32_t volume);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_audio_set_bus_volume(bus: i32, volume: i32) {
+    guard((), || {
+        let Some(bus) = bus_from_index(bus) else {
+            return;
+        };
+        let _ = state::with_audio(AUDIO_HINT, |audio| audio.set_bus_volume(bus, volume));
+    })
+}
+
+/// Returns one bus's effective volume (its own slider scaled by the master), or `0` for an
+/// unknown bus number.
+///
+/// # C ABI
+///
+/// ```c
+/// int32_t giochi_audio_bus_volume(int32_t bus);
+/// ```
+#[no_mangle]
+pub extern "C" fn giochi_audio_bus_volume(bus: i32) -> i32 {
+    guard(0, || {
+        let Some(bus) = bus_from_index(bus) else {
+            return 0;
+        };
+        state::with_audio(AUDIO_HINT, |audio| audio.bus_volume(bus)).unwrap_or(0)
+    })
+}
+
 /// Returns `1` when a working audio device is open.
 ///
 /// Check this once at start-up instead of provoking a failure: a `0` here means the
@@ -271,5 +310,20 @@ fn string(pointer: *const c_char) -> Option<String> {
             state::set_last_error("path must be a non-NULL, valid UTF-8 string");
             None
         }
+    }
+}
+
+/// The engine bus for a C bus number, or `None` for anything out of range.
+///
+/// A free function rather than a cast so a negative number cannot become a valid bus by
+/// wrapping, and so the numbers stay pinned to the contract in `docs/C_ABI_CONTRACT.md`
+/// rather than to the Rust enum's discriminant.
+fn bus_from_index(bus: i32) -> Option<giochi_engine::Bus> {
+    match bus {
+        0 => Some(giochi_engine::Bus::Master),
+        1 => Some(giochi_engine::Bus::Sfx),
+        2 => Some(giochi_engine::Bus::Music),
+        3 => Some(giochi_engine::Bus::Ui),
+        _ => None,
     }
 }

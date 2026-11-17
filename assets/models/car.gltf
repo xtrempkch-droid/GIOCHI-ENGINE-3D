@@ -1,0 +1,166 @@
+{
+ "asset": {
+  "version": "2.0",
+  "generator": "hand-written for GIOCHI-ENGINE tests and demos"
+ },
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "children": [
+    1,
+    2
+   ],
+   "name": "carro"
+  },
+  {
+   "mesh": 0
+  },
+  {
+   "mesh": 1,
+   "translation": [
+    0,
+    0,
+    0
+   ]
+  }
+ ],
+ "meshes": [
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0
+     },
+     "indices": 2,
+     "material": 0
+    }
+   ],
+   "name": "body"
+  },
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 1
+     },
+     "indices": 3,
+     "material": 1
+    }
+   ],
+   "name": "tail-light"
+  }
+ ],
+ "materials": [
+  {
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.15,
+     0.35,
+     0.8,
+     1.0
+    ],
+    "metallicFactor": 0.7,
+    "roughnessFactor": 0.25
+   },
+   "name": "paint"
+  },
+  {
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.4,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "roughnessFactor": 0.4
+   },
+   "emissiveFactor": [
+    1.0,
+    0.05,
+    0.0
+   ],
+   "name": "tail-light"
+  }
+ ],
+ "accessors": [
+  {
+   "bufferView": 0,
+   "componentType": 5126,
+   "count": 8,
+   "type": "VEC3",
+   "min": [
+    -1,
+    0.15,
+    -0.5
+   ],
+   "max": [
+    1,
+    0.65,
+    0.5
+   ]
+  },
+  {
+   "bufferView": 1,
+   "componentType": 5126,
+   "count": 8,
+   "type": "VEC3",
+   "min": [
+    -0.8,
+    0.29,
+    0.49
+   ],
+   "max": [
+    0.8,
+    0.41,
+    0.55
+   ]
+  },
+  {
+   "bufferView": 2,
+   "componentType": 5123,
+   "count": 36,
+   "type": "SCALAR"
+  },
+  {
+   "bufferView": 3,
+   "componentType": 5123,
+   "count": 36,
+   "type": "SCALAR"
+  }
+ ],
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteOffset": 0,
+   "byteLength": 96
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 96,
+   "byteLength": 96
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 192,
+   "byteLength": 72
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 264,
+   "byteLength": 72
+  }
+ ],
+ "buffers": [
+  {
+   "byteLength": 336,
+   "uri": "car.bin"
+  }
+ ]
+}

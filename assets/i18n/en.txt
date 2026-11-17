@@ -1,0 +1,27 @@
+# GIOCHI-ENGINE UI strings, English.
+# Format: `key = value`; `#` starts a comment; `{name}` is a placeholder.
+
+menu.start = Start
+menu.continue = Continue
+menu.options = Options
+menu.quit = Quit
+menu.back = Back
+
+options.music = Music
+options.sfx = Sound effects
+options.language = Language
+options.autosave = Autosave
+
+hud.lap = Lap {current} of {total}
+hud.time = Time {minutes}:{seconds}
+hud.position = {position} of {total}
+hud.paused = Paused
+
+race.countdown = {seconds}
+race.finished = Race finished
+race.new_best = New best lap!
+
+common.yes = Yes
+common.no = No
+common.ok = OK
+common.cancel = Cancel

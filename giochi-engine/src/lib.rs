@@ -49,14 +49,17 @@ pub mod devtools;
 pub mod error;
 #[cfg(feature = "hot_reload")]
 pub mod hot_reload;
+pub mod i18n;
 pub mod input;
 pub mod math;
+pub mod nav;
 pub mod particles;
 pub mod perf;
 #[cfg(feature = "physics-2d")]
 pub mod physics;
 pub mod platform;
 pub mod render;
+pub mod save;
 pub mod scene;
 #[cfg(feature = "devtools")]
 pub mod ui;
@@ -93,7 +96,7 @@ pub use crate::animation::{
     Tween,
 };
 pub use crate::assets::{asset_size, read_asset, ResourceManager, MAX_ASSET_SIZE};
-pub use crate::audio::{AudioSystem, MusicHandle, MusicState, SoundHandle};
+pub use crate::audio::{AudioSystem, Bus, MusicHandle, MusicState, SoundHandle};
 pub use crate::core::engine::{
     Engine, EngineConfig, PresentationMode, RunStats, DEFAULT_CLEAR_COLOR,
 };
@@ -102,8 +105,10 @@ pub use crate::core::time::{FrameClock, Time};
 #[cfg(feature = "devtools")]
 pub use crate::devtools::{CommandRegistry, Console, DebugDraw, DevFlags, DevTools};
 pub use crate::error::{codes, GiochiError, GiochiResult};
+pub use crate::i18n::{Catalogue, Language, Translator};
 pub use crate::input::{Input, KeyboardState, MouseState};
 pub use crate::math::{Color, Rect, Vec2};
+pub use crate::nav::{GridPoint, NavGrid, PathOptions};
 pub use crate::particles::{
     AreaEmitter, CircleEmitter, Curve, CurveError, CurveValue, Interpolation, Keyframe,
     LineEmitter, ParticleConfig, ParticleEmitter, ParticleError, ParticleRng, ParticleSystem,
@@ -116,6 +121,7 @@ pub use crate::render::{
     AtlasRegion, Camera, RenderContext, Sprite, SpriteBatch, SpriteBatchConfig, TextureAtlas,
     TextureHandle, TextureRegistry, TextureSize,
 };
+pub use crate::save::{Loaded, SaveError, SaveRequest, SaveSlots, SlotInfo};
 pub use crate::scene::{EmptyScene, Scene, SceneHandle, SceneManager, SceneTransition};
 #[cfg(feature = "devtools")]
 pub use crate::ui::{

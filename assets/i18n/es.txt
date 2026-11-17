@@ -1,0 +1,25 @@
+# GIOCHI-ENGINE UI strings, Español.
+menu.start = Empezar
+menu.continue = Continuar
+menu.options = Opciones
+menu.quit = Salir
+menu.back = Volver
+
+options.music = Música
+options.sfx = Efectos de sonido
+options.language = Idioma
+options.autosave = Guardado automático
+
+hud.lap = Vuelta {current} de {total}
+hud.time = Tiempo {minutes}:{seconds}
+hud.position = {position} de {total}
+hud.paused = En pausa
+
+race.countdown = {seconds}
+race.finished = Carrera terminada
+race.new_best = ¡Mejor vuelta!
+
+common.yes = Sí
+common.no = No
+common.ok = Aceptar
+common.cancel = Cancelar

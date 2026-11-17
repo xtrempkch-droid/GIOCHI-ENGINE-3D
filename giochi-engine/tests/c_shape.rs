@@ -27,6 +27,57 @@ const NON_C_EXCEPTIONS: &[(&str, &str)] = &[
         "ParticleError",
         "R4: particle errors carry Rust string references and are never exposed in the C ABI",
     ),
+    // ---- Phase 26.7 (Production Pack) ------------------------------------------------
+    //
+    // None of these crosses the boundary. The C ABI keeps its own representation where it
+    // needs one (`giochi_audio_set_bus_volume` takes an `int32_t` and maps it to `Bus`), and
+    // the rest are Rust-only conveniences: a grid of cells, a catalogue of strings, a folder
+    // of save files. Giving them a C layout would freeze an internal shape into an interface
+    // nobody asked for.
+    (
+        "Bus",
+        "R1: the C ABI passes a bus number as `int32_t` and maps it; the Rust enum's \
+         discriminant is not part of the contract",
+    ),
+    (
+        "Language",
+        "R1: a game picks a language in Rust; the C ABI has no i18n surface",
+    ),
+    (
+        "Catalogue",
+        "R1: owns a map of `String`s, which cannot be `repr(C)`",
+    ),
+    (
+        "Translator",
+        "R1: owns a map of catalogues, which cannot be `repr(C)`",
+    ),
+    (
+        "GridPoint",
+        "R1: a pathfinding index in `usize`; the ABI uses fixed-width integers and no \
+         game passes a path to C",
+    ),
+    (
+        "NavGrid",
+        "R1: owns a `Vec<bool>`, which cannot be `repr(C)`",
+    ),
+    (
+        "PathOptions",
+        "R1: a bag of tuning flags consumed inside Rust only",
+    ),
+    (
+        "SaveSlots",
+        "R1: owns a `PathBuf`, which cannot be `repr(C)`",
+    ),
+    (
+        "SlotInfo",
+        "R1: owns `String` and `PathBuf`, which cannot be `repr(C)`",
+    ),
+    ("Loaded", "R1: owns a `String` payload and its metadata"),
+    (
+        "SaveError",
+        "R4: a `thiserror` enum with `String` payloads, like `GiochiError`",
+    ),
+    ("SaveRequest", "R1: borrows the game's payload as `&str`"),
 ];
 
 /// Every `.rs` file under `src/`.
@@ -181,6 +232,9 @@ fn every_public_type_is_repr_c() {
 fn public_fields_hold_only_c_shaped_types() {
     // A field of one of these in a public struct cannot be expressed in C.
     const FORBIDDEN: &[&str] = &["Rc<", "Arc<", "Box<", "String", "Vec<", "HashMap<"];
+    // The same types recorded in `NON_C_EXCEPTIONS`: a type that is deliberately Rust-only
+    // may hold whatever it likes, and one list drives both checks.
+    let exceptions: Vec<&str> = NON_C_EXCEPTIONS.iter().map(|(name, _)| *name).collect();
 
     let mut offenders = Vec::new();
 
@@ -188,6 +242,9 @@ fn public_fields_hold_only_c_shaped_types() {
         let Some(body) = item.body.as_ref() else {
             continue;
         };
+        if exceptions.contains(&item.name.as_str()) {
+            continue;
+        }
 
         for line in body.lines() {
             let trimmed = line.trim();

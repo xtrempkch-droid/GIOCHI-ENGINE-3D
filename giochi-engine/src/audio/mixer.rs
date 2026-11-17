@@ -4,7 +4,8 @@ use sdl2::mixer::{Channel, Chunk, Music};
 use std::cell::Cell;
 
 use crate::audio::sound::{
-    clamp_volume, MusicHandle, MusicState, SoundHandle, CHUNK_SIZE, MIXING_CHANNELS, SAMPLE_RATE,
+    clamp_volume, effective_volume, Bus, MusicHandle, MusicState, SoundHandle, CHUNK_SIZE,
+    MIXING_CHANNELS, SAMPLE_RATE,
 };
 use crate::error::GiochiError;
 use crate::handle_registry::HandleRegistry;
@@ -32,7 +33,13 @@ pub struct AudioSystem {
     sounds: HandleRegistry<Chunk>,
     music: HandleRegistry<Music<'static>>,
     audio: Option<MixerAudio>,
+    /// The master volume: everything plays at `effective_volume(master, bus)`.
     volume: Cell<i32>,
+    /// Per-bus volume, in `0..=MAX_VOLUME`, indexed by [`Bus::index`].
+    buses: [Cell<i32>; Bus::COUNT],
+    /// Which bus each mixer channel was last started on, so a volume change can be applied
+    /// to the channels that are already playing. `None` means "never used".
+    channel_bus: [Cell<Option<Bus>>; MIXING_CHANNELS as usize],
     #[cfg(feature = "profiling")]
     profile_ns: Cell<u64>,
     _reserved: [u32; 4],
@@ -45,6 +52,7 @@ impl std::fmt::Debug for AudioSystem {
             .field("sounds", &self.sounds.len())
             .field("music", &self.music.len())
             .field("volume", &self.volume.get())
+            .field("buses", &self.bus_volumes())
             .field("state", &self.music_state())
             .finish_non_exhaustive()
     }
@@ -110,6 +118,8 @@ impl AudioSystem {
             music: HandleRegistry::new(),
             audio,
             volume: Cell::new(crate::audio::MAX_VOLUME),
+            buses: default_buses(),
+            channel_bus: default_channel_buses(),
             #[cfg(feature = "profiling")]
             profile_ns: Cell::new(0),
             _reserved: [0; 4],
@@ -128,6 +138,8 @@ impl AudioSystem {
             music: HandleRegistry::new(),
             audio: None,
             volume: Cell::new(crate::audio::MAX_VOLUME),
+            buses: default_buses(),
+            channel_bus: default_channel_buses(),
             #[cfg(feature = "profiling")]
             profile_ns: Cell::new(0),
             _reserved: [0; 4],
@@ -207,12 +219,27 @@ impl AudioSystem {
         self.sounds.remove(handle)
     }
 
-    /// Plays `sound` on the first free channel.
+    /// Plays `sound` on the first free channel, at the SFX bus volume.
     ///
     /// `loops` is the number of *extra* repetitions: `0` plays once,
     /// [`crate::audio::LOOPS_INFINITE`] loops forever. Negative values other than
     /// `-1` are clamped to `0`.
     pub fn play_sound(&mut self, sound: SoundHandle, loops: i32) -> Result<(), GiochiError> {
+        self.play_sound_on(Bus::Sfx, sound, loops)
+    }
+
+    /// Plays `sound` on the first free channel, at `bus`'s effective volume.
+    ///
+    /// The channel's volume is set **after** it is allocated, because `SDL_mixer` picks the
+    /// channel. A channel reused by a UI click then plays at the UI volume rather than at
+    /// whatever the previous sound left on it, which is the bug a naive bus implementation
+    /// ships: the first click is right and the next twenty are not.
+    pub fn play_sound_on(
+        &mut self,
+        bus: Bus,
+        sound: SoundHandle,
+        loops: i32,
+    ) -> Result<(), GiochiError> {
         #[cfg(feature = "profiling")]
         let _timer = self.timer();
         self.require_device()?;
@@ -221,10 +248,14 @@ impl AudioSystem {
             .get(sound)
             .ok_or(GiochiError::InvalidHandle(sound))?;
 
-        Channel::all()
+        let channel = Channel::all()
             .play(&chunk, normalise_loops(loops))
-            .map(|_| ())
-            .map_err(|err| GiochiError::Audio(format!("failed to play sound: {err}")))
+            .map_err(|err| GiochiError::Audio(format!("failed to play sound: {err}")))?;
+        channel.set_volume(self.bus_volume(bus));
+        if let Some(slot) = self.channel_bus.get(channel.0 as usize) {
+            slot.set(Some(bus));
+        }
+        Ok(())
     }
 
     /// Stops every sound effect channel.
@@ -323,6 +354,73 @@ impl AudioSystem {
         self.volume.get()
     }
 
+    /// Sets a bus's volume, clamped to `0..=MAX_VOLUME`.
+    ///
+    /// SDL_mixer stores one volume per channel, so a bus is a *value to write* rather than a
+    /// live multiplier: every channel already playing on that bus is updated here, and the
+    /// music stream with it (music is not a channel). Setting the master is the same number
+    /// `set_volume` has always taken, so the C ABI and the settings screen cannot disagree
+    /// about which volume is "the" volume.
+    pub fn set_bus_volume(&mut self, bus: Bus, volume: i32) {
+        #[cfg(feature = "profiling")]
+        let _timer = self.timer();
+        let volume = clamp_volume(volume);
+        self.buses[bus.index()].set(volume);
+        if bus == Bus::Master {
+            self.volume.set(volume);
+        }
+        self.apply_bus_volumes();
+    }
+
+    /// A bus's own slider value, in `0..=MAX_VOLUME`.
+    pub fn bus_setting(&self, bus: Bus) -> i32 {
+        self.buses[bus.index()].get()
+    }
+
+    /// The volume `bus` actually plays at: its own slider scaled by the master.
+    pub fn bus_volume(&self, bus: Bus) -> i32 {
+        if bus == Bus::Master {
+            return self.volume.get();
+        }
+        effective_volume(self.volume.get(), self.buses[bus.index()].get())
+    }
+
+    /// Every bus's effective volume, master first.
+    pub fn bus_volumes(&self) -> [i32; Bus::COUNT] {
+        Bus::ALL.map(|bus| self.bus_volume(bus))
+    }
+
+    /// Halts every channel started on `bus`, leaving the others playing. Returns how many.
+    ///
+    /// This is what a pause menu wants: the engine noise stops and the music does not.
+    /// Without per-channel bookkeeping the only options are "stop everything" or nothing.
+    pub fn stop_bus(&mut self, bus: Bus) -> usize {
+        #[cfg(feature = "profiling")]
+        let _timer = self.timer();
+        if self.audio.is_none() {
+            return 0;
+        }
+        let mut stopped = 0;
+        for index in 0..MIXING_CHANNELS {
+            let Ok(slot) = usize::try_from(index) else {
+                continue;
+            };
+            let Some(recorded) = self.channel_bus.get(slot) else {
+                continue;
+            };
+            if recorded.get() != Some(bus) {
+                continue;
+            }
+            Channel(index).halt();
+            recorded.set(None);
+            stopped += 1;
+        }
+        if bus == Bus::Music {
+            Music::halt();
+        }
+        stopped
+    }
+
     /// Returns `true` while a music stream is playing (paused counts as not
     /// playing).
     pub fn is_music_playing(&self) -> bool {
@@ -379,11 +477,31 @@ impl AudioSystem {
     }
 
     fn apply_volume(&self) {
-        if self.audio.is_some() {
-            let volume = self.volume.get();
-            Channel::all().set_volume(volume);
-            Music::set_volume(volume);
+        self.apply_bus_volumes();
+    }
+
+    /// Re-applies every playing channel's volume from its bus, and the music stream's.
+    ///
+    /// Called on any volume change. Walking sixteen channels is nothing next to a mixer
+    /// callback, and it is what keeps "the slider moved" and "the sounds changed" the same
+    /// event.
+    fn apply_bus_volumes(&self) {
+        if self.audio.is_none() {
+            return;
         }
+        for index in 0..MIXING_CHANNELS {
+            let Ok(slot) = usize::try_from(index) else {
+                continue;
+            };
+            let Some(recorded) = self.channel_bus.get(slot) else {
+                continue;
+            };
+            let Some(bus) = recorded.get() else {
+                continue;
+            };
+            Channel(index).set_volume(self.bus_volume(bus));
+        }
+        Music::set_volume(self.bus_volume(Bus::Music));
     }
 }
 
@@ -391,6 +509,22 @@ impl Drop for AudioSystem {
     fn drop(&mut self) {
         self.clear();
     }
+}
+
+/// Every bus starts at full volume: a game that never touches a slider sounds exactly like
+/// one from before this phase existed.
+fn default_buses() -> [Cell<i32>; Bus::COUNT] {
+    [
+        Cell::new(crate::audio::MAX_VOLUME),
+        Cell::new(crate::audio::MAX_VOLUME),
+        Cell::new(crate::audio::MAX_VOLUME),
+        Cell::new(crate::audio::MAX_VOLUME),
+    ]
+}
+
+/// No channel has been used yet.
+fn default_channel_buses() -> [Cell<Option<Bus>>; MIXING_CHANNELS as usize] {
+    [const { Cell::new(None) }; MIXING_CHANNELS as usize]
 }
 
 /// Maps the engine's loop convention (`-1` = forever, `n` = n extra repeats) onto
@@ -451,6 +585,57 @@ pub fn mixer_version() -> (u32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audio::MAX_VOLUME;
+
+    #[test]
+    fn every_bus_starts_at_full_volume() {
+        let system = AudioSystem::silent();
+        assert_eq!(system.bus_volumes(), [MAX_VOLUME; Bus::COUNT]);
+        assert_eq!(system.volume(), MAX_VOLUME);
+    }
+
+    #[test]
+    fn setting_a_bus_volume_clamps_and_scales_the_master() {
+        let mut system = AudioSystem::silent();
+        system.set_bus_volume(Bus::Music, 64);
+        assert_eq!(system.bus_setting(Bus::Music), 64);
+        assert_eq!(system.bus_volume(Bus::Music), 64);
+        assert_eq!(
+            system.bus_volume(Bus::Sfx),
+            MAX_VOLUME,
+            "other buses are untouched"
+        );
+
+        // Halving the master halves what every bus plays, without changing their sliders.
+        system.set_bus_volume(Bus::Master, 64);
+        assert_eq!(system.bus_volume(Bus::Music), 32);
+        assert_eq!(system.bus_volume(Bus::Sfx), 64);
+        assert_eq!(system.bus_setting(Bus::Music), 64);
+
+        // Out of range is clamped, not an error.
+        system.set_bus_volume(Bus::Ui, 9999);
+        assert_eq!(system.bus_setting(Bus::Ui), MAX_VOLUME);
+        system.set_bus_volume(Bus::Ui, -5);
+        assert_eq!(system.bus_setting(Bus::Ui), 0);
+    }
+
+    #[test]
+    fn the_master_bus_and_the_legacy_volume_are_the_same_number() {
+        // The C ABI's `giochi_audio_set_volume` calls `set_volume`; the settings screen sets
+        // the master bus. They cannot disagree.
+        let mut system = AudioSystem::silent();
+        system.set_volume(48);
+        assert_eq!(system.bus_volume(Bus::Master), 48);
+        system.set_bus_volume(Bus::Master, 96);
+        assert_eq!(system.volume(), 96);
+    }
+
+    #[test]
+    fn stopping_a_bus_on_a_silent_system_stops_nothing_and_does_not_panic() {
+        let mut system = AudioSystem::silent();
+        assert_eq!(system.stop_bus(Bus::Sfx), 0);
+        assert_eq!(system.stop_bus(Bus::Music), 0);
+    }
 
     #[test]
     fn a_silent_system_reports_unavailable_and_rejects_playback() {

@@ -547,6 +547,9 @@ int32_t     giochi_sound_play(GiochiSound sound, int32_t loops); /* phase 4 */
 void        giochi_audio_set_volume(int32_t volume);             /* phase 4, 0..=128 */
 int32_t     giochi_audio_volume(void);                           /* phase 4 */
 
+void        giochi_audio_set_bus_volume(int32_t bus, int32_t v); /* phase 26.7, 0..=128 */
+int32_t     giochi_audio_bus_volume(int32_t bus);                /* phase 26.7 */
+
 int32_t     giochi_audio_available(void);                        /* phase 4 */
 
 GiochiMusic giochi_music_load(const char* path);                 /* phase 4 */
@@ -570,6 +573,13 @@ int32_t     giochi_music_is_playing(void);                       /* phase 4 */
   stream.
 * Sound effects have 16 mixing channels; playing more than that steals the oldest
   channel (SDL_mixer's behaviour).
+* **Buses** (phase 26.7): `0` master, `1` SFX, `2` music, `3` UI. A bus is a
+  multiplier on the master — a channel on bus `b` plays at `master * b / 128` — so
+  the master at `0` still mutes everything. `giochi_audio_set_volume` and
+  `giochi_audio_set_bus_volume(0, v)` are the same value. An unknown bus number is
+  ignored (the setter does nothing, the getter returns `0`), never an error.
+  `giochi_audio_bus_volume` returns the *effective* volume, not the slider: with the
+  master at 64 and the music bus at 64 it returns 32.
 
 ### 5.7 Assets
 

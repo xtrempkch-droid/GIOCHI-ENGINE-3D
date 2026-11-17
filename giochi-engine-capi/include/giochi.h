@@ -161,6 +161,9 @@ typedef uint64_t GiochiGlTextureHandle; /* 0 invalid */
 // que o protocolo aceita.
 #define GIOCHI_NET_MAX_GLOBAL 1200
 
+// How many buses there are, for a fixed-size table.
+#define Bus_COUNT 4
+
 // Um mundo físico 2D, opaco para o C.
 //
 // Criado por `giochi_physics_world_create` e destruído por
@@ -915,6 +918,29 @@ void giochi_audio_set_volume(int32_t volume);
 // int32_t giochi_audio_volume(void);
 // ```
 int32_t giochi_audio_volume(void);
+
+// Sets one bus's volume, clamped to `0..=128`. An unknown bus number is ignored.
+//
+// Buses are `0` master, `1` SFX, `2` music, `3` UI. A bus multiplies the master: the
+// volume a channel plays at is `master * bus / 128`. The master bus is the same number as
+// [`giochi_audio_set_volume`].
+//
+// # C ABI
+//
+// ```c
+// void giochi_audio_set_bus_volume(int32_t bus, int32_t volume);
+// ```
+void giochi_audio_set_bus_volume(int32_t bus, int32_t volume);
+
+// Returns one bus's effective volume (its own slider scaled by the master), or `0` for an
+// unknown bus number.
+//
+// # C ABI
+//
+// ```c
+// int32_t giochi_audio_bus_volume(int32_t bus);
+// ```
+int32_t giochi_audio_bus_volume(int32_t bus);
 
 // Returns `1` when a working audio device is open.
 //
