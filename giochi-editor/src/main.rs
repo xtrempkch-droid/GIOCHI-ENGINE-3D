@@ -20,6 +20,7 @@ Options:
   --project DIR  open a project (a folder containing project.toml)
   --scene FILE   open a .scene file before the first frame
   --config DIR   where settings and autosaves live (default: $XDG_CONFIG_HOME/giochi-editor)
+  --play-frames N  render N frames of the preview window and return (headless check)
   --frames N     render N frames and exit (used by the headless check)
   -h, --help     show this help
 
@@ -64,6 +65,16 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
+            "--play-frames" => {
+                let parsed = args.next().and_then(|value| value.parse::<u64>().ok());
+                match parsed {
+                    Some(frames) if frames > 0 => options.play_frames = Some(frames),
+                    _ => {
+                        eprintln!("--play-frames needs a positive integer\n\n{USAGE}");
+                        return ExitCode::from(2);
+                    }
+                }
+            }
             "--frames" => {
                 let parsed = args.next().and_then(|value| value.parse::<u64>().ok());
                 match parsed {

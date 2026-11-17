@@ -223,6 +223,8 @@ pub struct EditorState {
     pub autosave_dir: PathBuf,
     /// The "save before quitting?" prompt, while it is up.
     pub quit_prompt: Option<QuitPrompt>,
+    /// Set when the user asked for a play preview; the loop takes it and opens the window.
+    play_requested: bool,
     /// Set when the user answered "save" on the quit prompt for a scene that had never been
     /// saved: once the save dialog produces a path, the editor quits.
     quit_after_save: bool,
@@ -260,6 +262,7 @@ impl EditorState {
             autosave: Autosave::default(),
             autosave_dir: EditorSettings::config_dir(),
             quit_prompt: None,
+            play_requested: false,
             quit_after_save: false,
             quit_requested: false,
         }
@@ -367,6 +370,20 @@ impl EditorState {
     /// The label the Edit menu should show for Redo.
     pub fn redo_label(&self) -> Option<String> {
         self.commands.redo_label()
+    }
+
+    /// Asks for a play preview. Refused with a status line when there is nothing to play.
+    pub fn request_play(&mut self) {
+        if self.scene.is_none() {
+            self.report(Status::warning("Open a scene before playing it"));
+            return;
+        }
+        self.play_requested = true;
+    }
+
+    /// Whether a play preview is waiting, clearing the request.
+    pub fn take_play_request(&mut self) -> bool {
+        std::mem::take(&mut self.play_requested)
     }
 
     /// Asks the loop to stop after the current frame.

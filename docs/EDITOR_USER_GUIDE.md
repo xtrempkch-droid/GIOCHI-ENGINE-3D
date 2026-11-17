@@ -353,6 +353,33 @@ confirma. Tem `Up`, `Refresh` e campo de nome. ADR-064 regista a troca.
 
 ---
 
+## 3.6 Play (Fase 39)
+
+`F5` ou `Play > Play` abre uma **segunda janela** com a cena desenhada pelo renderer 3D do
+motor: malhas, cores, a luz da cena e a câmara da cena (ou uma que enquadra a geometria, se a
+cena não tiver câmara). Na janela do preview:
+
+| Gesto | Efeito |
+|---|---|
+| arrastar com o botão direito | orbitar |
+| roda do rato | zoom |
+| `Esc` ou o ✕ da janela | terminar o preview |
+
+A janela do editor fica **exatamente como estava** — é para isso que o preview abre noutra
+janela: uma janela não pode ter ao mesmo tempo o `SDL_Renderer` dos painéis e um contexto GL
+(ADR-037, ADR-064).
+
+Porque é que não há movimento: o preview desenha a cena como ela está. Física, gameplay e
+movimento pertencem ao jogo (Fases 41–45), que usa a mesma conversão (`PlayPlan`). O editor
+não ganhou um runtime de jogo nesta fase.
+
+Nós que não podem ser desenhados — um `.gltf`, que não tem loader (ADR-063), ou um `.obj` que
+já não está no disco — aparecem contados na barra de estado (`1 mesh(es), 3 instance(s), 1
+unsupported`), em vez de deixarem um buraco silencioso na cena.
+
+Em KMSDRM (GIOCHI-OS) o SDL só consegue abrir uma janela: o preview falha e a barra de estado
+diz porquê. Nesse caso a alternativa é abrir a cena no jogo (`giochi-racer`, Fases 41–45).
+
 ## 4. A consola (`F2`)
 
 Reutiliza a consola da Fase 20 tal e qual: os mesmos comandos (`help`, `fps`, `entities`,

@@ -389,9 +389,20 @@ fn menu_bar(ctx: &egui::Context, state: &mut EditorState, theme: &EditorTheme) {
             });
 
             ui.menu_button("Play", |ui| {
-                planned(ui, "Play", "F5", 39);
-                planned(ui, "Pause", "F7", 39);
-                planned(ui, "Stop", "F6", 39);
+                if ui
+                    .add(egui::Button::new("Play  F5").shortcut_text("F5"))
+                    .on_hover_text(
+                        "Render the scene with the engine's 3D renderer in its own window. \
+                         The editor stays as it is; Esc or the window's ✕ stops it.",
+                    )
+                    .clicked()
+                {
+                    state.request_play();
+                    ui.close();
+                }
+                ui.separator();
+                planned(ui, "Pause", "F7", 45);
+                planned(ui, "Stop", "F6", 45);
             });
 
             ui.menu_button("Help", |ui| {

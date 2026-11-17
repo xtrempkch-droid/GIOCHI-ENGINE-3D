@@ -40,6 +40,7 @@ use sdl2::keyboard::Keycode;
 pub mod editor;
 pub mod gizmos;
 pub mod panels;
+pub mod play;
 pub mod project;
 pub mod settings;
 
@@ -69,6 +70,10 @@ pub struct EditorOptions {
     pub scene: Option<std::path::PathBuf>,
     /// A project directory to open before the first frame, as `--project`.
     pub project: Option<std::path::PathBuf>,
+    /// Render this many frames in the play preview and return. `None` runs until stopped.
+    ///
+    /// Exists so the preview can be exercised in CI, where nothing can press `Esc`.
+    pub play_frames: Option<u64>,
     /// Where the settings file and autosaves live, as `--config`.
     ///
     /// `None` means the platform default (`$XDG_CONFIG_HOME/giochi-editor`). A field rather
@@ -86,6 +91,7 @@ impl Default for EditorOptions {
             title: format!("giochi-editor v{VERSION}"),
             scene: None,
             project: None,
+            play_frames: None,
             config_dir: None,
         }
     }
@@ -132,6 +138,9 @@ pub fn run(options: EditorOptions) -> Result<EditorRunStats, GiochiError> {
             state.report(editor::Status::error(error));
         }
     }
+    // `--play-frames` is the headless form of pressing Play: the preview runs once, and the
+    // editor loop continues afterwards. Without it nothing plays until the user asks.
+    let mut play_once = options.play_frames.is_some();
     let mut window_title = state.window_title();
     if let Err(error) = engine.render_mut().set_title(&window_title) {
         log::warn!("could not set the editor title: {error}");
@@ -244,6 +253,42 @@ pub fn run(options: EditorOptions) -> Result<EditorRunStats, GiochiError> {
             let camera = state.viewport_camera;
             apply_viewport_interaction(&mut state, &metrics.input, rect, &camera);
         }
+        if play_once {
+            play_once = false;
+            if state.scene.is_some() {
+                state.request_play();
+            }
+        }
+
+        // Play-in-editor (phase 39): the scene is handed to the 3D renderer in its own window
+        // while this loop waits. That is the only way to show materials — the editor's window
+        // has a 2D renderer and cannot host a GL context too (ADR-037, ADR-064).
+        if state.take_play_request() {
+            let Some(scene) = state.scene.clone() else {
+                continue;
+            };
+            let base = state.project.as_ref().map(|project| project.root.clone());
+            let options = play::PlayOptions {
+                frames: options.play_frames,
+                ..play::PlayOptions::default()
+            };
+            match play::play(engine.platform(), &scene, base.as_deref(), options) {
+                Ok(stats) => {
+                    state.report(editor::Status::info(format!(
+                        "Played {} frame(s) on {} ({})",
+                        stats.frames, stats.adapter, stats.summary
+                    )));
+                }
+                Err(error) => {
+                    state.report(editor::Status::warning(format!(
+                        "Could not open the preview window: {error}"
+                    )));
+                }
+            }
+            // The editor's window is new-current after the preview's GL context released it.
+            window_title.clear();
+        }
+
         // Autosave, once per frame: the timer decides. Only a dirty scene is written, and
         // the file is a separate `.autosave`, never the scene itself.
         if state.tick_autosave(std::time::Instant::now()) {
@@ -570,7 +615,14 @@ fn handle_shortcuts(ctx: &egui::Context, state: &mut editor::EditorState, wants_
         }
     });
 
-    if redo_key {
+    let mut play = false;
+    ctx.input_mut(|input| {
+        play = input.consume_key(egui::Modifiers::NONE, egui::Key::F5);
+    });
+
+    if play {
+        state.request_play();
+    } else if redo_key {
         state.redo();
     } else if undo_key {
         state.undo();

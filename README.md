@@ -209,6 +209,7 @@ cargo run -p giochi-editor -- --frames 3        # headless check, then exit
 cargo run -p giochi-editor -- --scene giochi-editor/assets/scenes/default.scene
 cargo run -p giochi-editor -- --project /path/to/project
 cargo run -p giochi-editor -- --config /tmp/scratch   # settings + autosaves somewhere else
+cargo run -p giochi-editor -- --play-frames 3        # open the play preview once, then exit
 cargo run -p giochi-editor --example editor_default_scene   # writes + reloads the default scene
 cargo run -p giochi-editor --example editor_project_demo    # project + import, prints project=ok
 ```
@@ -221,7 +222,9 @@ started with, so one drag is one edit (ADR-066), and the scale handles follow th
 rather than the world's (ADR-067), and every edit is an undoable command pushed through one
 stack (ADR-069), plus a persisted recent list, a 60-second autosave to a separate
 `.autosave` file, recovery of a newer autosave, and a "save before quitting" prompt
-(ADR-070).
+(ADR-070). `F5` opens a **play preview** — the scene rendered by the engine's real 3D renderer
+in its own OpenGL window — through the scene→renderer conversion in `giochi-editor/src/play/`,
+which is the piece the racer will consume (ADR-071).
 
 ### Profiling
 

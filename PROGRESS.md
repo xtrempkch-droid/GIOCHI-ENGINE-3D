@@ -18,7 +18,7 @@ ADR-061). O Salto B começou em **2026-11-17**.
 | 36 — Hierarquia (create/delete/duplicate/reparent) | **concluída** (2026-11-17) | 209 testes de unidade no editor + 4 de integração (`tests/node_editing.rs`: construir → editar → gravar → reabrir, ids não reutilizados, cópia independente, todos os tipos criados e apagados) |
 | 37 — Undo/redo | **concluída** (2026-11-17) | 226 testes de unidade no editor (15 do `CommandStack`, merge de gesto, marcador de save) + `a_whole_drag_is_one_undo_step` e `ctrl_z_and_ctrl_y_walk_the_history` |
 | 38 — Save/load, recentes, autosave | **concluída** (2026-11-17) | 256 testes de unidade no editor (12 de `settings`, 8 de autosave, 6 do quit prompt) + 6 de integração (`tests/session_flow.rs`: recentes através de reinício, crash → autosave → recuperação, autosave obsoleto, autosave desligado) |
-| 39 — Play-in-editor | pendente | — |
+| 39 — Play-in-editor | **concluída** (2026-11-17) | 15 testes de unidade no `PlayPlan` + 2 do preview + teste GL offscreen `play_render`; `--frames 5 --play-frames 3` abriu a janela GL e desenhou 3 frames na GPU real (`Played 3 frame(s) ... 1 mesh(es), 1 instance(s)`) |
 | 40 — Build standalone + polimento | pendente | — |
 
 ### Gates da Fase 30
@@ -458,10 +458,51 @@ de expansão para manter — e a Fase 40 pode trocá-la sem tocar no `Project`.
   escrevia no `$XDG_CONFIG_HOME` do utilizador. `EditorState` também deixou de gravar settings
   que nunca leu.
 
+### Gates da Fase 39
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — exit 0
+- [x] `cargo test --workspace` — **1215 testes**, 0 falhas; o `giochi-editor` passou a
+      **271** de unidade + 17 de integração
+- [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-editor --test play_render` — a cena
+      chega ao framebuffer (120 de 30000 píxeis iluminados)
+- [x] `cargo doc --workspace --no-deps --document-private-items`
+- [x] `scripts/gates.sh` completo — "All gates passed"
+- [x] `cargo run -p giochi-editor -- --scene …/default.scene --frames 5 --play-frames 3` (x11)
+      — o preview abriu na GPU real e devolveu `Played 3 frame(s)`
+- [x] `cargo check -p giochi-editor --target aarch64-unknown-linux-gnu`
+- [x] `ci.yml` com o passo `Editor play preview (GL)` (`offscreen`), validado com parse YAML
+
+### Entregue na Fase 39
+
+| Ficheiro | O que faz |
+|---|---|
+| `play/plan.rs` | `MeshSpec` (chave `Eq+Hash`, milímetros), `PlayInstance`, `PlayCamera`, `PlayPlan::from_scene` com transformações de mundo, luz e câmara derivadas, `unsupported`, `bounds`, `summary` |
+| `play/mod.rs` | `play(platform, scene, base, options)`: janela OpenGL própria, shader Phong, upload com dedupe, câmara orbitável, `Esc`/`✕`/`--play-frames` para terminar, `PlayStats` |
+| `editor/editor_state.rs` | `request_play`/`take_play_request`, recusa com aviso quando não há cena |
+| `lib.rs` / `main.rs` | `Play` no loop (bloqueia o editor e devolve o resultado à barra de estado), `F5`, `--play-frames N` |
+| `editor/layout.rs` | `Play > Play F5` com a explicação na dica |
+| `tests/play_render.rs` | aceitação GL offscreen: a cena do `default.scene` chega ao framebuffer |
+
+### Desvios e notas da Fase 39
+
+- O plano dizia "janela separada ou no viewport". Ficou **janela separada**, e não por
+  preferência: uma janela não pode ter `SDL_Renderer` e contexto GL ao mesmo tempo (ADR-037,
+  ADR-064). O preview é a única forma de ver materiais e luz no editor.
+- **Não há simulação.** "Play" desenha a cena como está, com câmara orbitável; física e
+  gameplay são do jogo (Fases 41–45). Inventar um runtime de jogo no editor seria âmbito novo.
+- A conversão cena→renderer (`PlayPlan`) é **dados puros**, sem GL: é o que permitiu testar as
+  regras (matrizes de mundo, câmara, luz) sem GPU — e é a peça que as Fases 41–45 vão consumir.
+- Malhas iguais são **deduplicadas** por uma chave arredondada ao milímetro: dez cubos são um
+  upload e dez desenhos.
+- Em KMSDRM a segunda janela não existe; o erro do driver vai para a barra de estado em vez de
+  um preview que não faz nada.
+
 ### Próxima fase
 
-**Fase 39 — Play-in-editor**: um botão Play que corre a cena dentro do editor (janela do
-viewport ou janela separada), com Stop e o estado do editor intacto.
+**Fase 40 — Build standalone e polimento**: empacotar o editor (binário + assets + docs),
+escolher o que vai no pacote, `--config` portátil, e fechar as pendências de UI (atalhos no
+`Help`, sobre, preferências).
 
 ## Growth Pack (Fases 19–24)
 

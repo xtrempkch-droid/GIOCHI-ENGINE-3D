@@ -335,6 +335,15 @@ jobs:
           cargo run -q -p giochi-editor -- --project /tmp/giochi-ci-project \
             --scene /tmp/giochi-ci-project/scenes/demo.scene --frames 30
 
+      - name: Editor play preview (GL)
+        # Phase 39. The preview opens an OpenGL window, which `dummy` cannot provide: this
+        # step needs `offscreen` (a real EGL context with no display) exactly like the
+        # engine's own 3D render tests. The test skips itself when the runner has no Mesa,
+        # and prints why.
+        env:
+          SDL_VIDEODRIVER: offscreen
+        run: cargo test -q -p giochi-editor --test play_render
+
       - name: Examples
         env:
           SDL_VIDEODRIVER: dummy

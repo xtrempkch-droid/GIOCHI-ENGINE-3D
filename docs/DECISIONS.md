@@ -2310,3 +2310,54 @@ memory card. Verified by 12 settings tests, 8 autosave tests (timer, newer-than-
 corrupt file), 6 `EditorState` tests for the quit prompt and the dirty-scene rules, and 6
 integration tests in `tests/session_flow.rs` (recent list across a restart, crash → autosave →
 recover, stale autosave not offered, autosave off, project in the recent list).
+
+---
+
+## ADR-071 — Play-in-editor opens a second, OpenGL window; the scene→renderer conversion is pure data
+
+**Context.** Phase 39 asks for a Play button that runs the scene from inside the editor, with
+Stop and the editor state intact. The obvious implementation — draw the scene into the
+viewport — is the exact thing ADR-037 and ADR-064 refuse: a window cannot reliably host both
+an `SDL_Renderer` and a GL context, and an FBO round trip is the fragile path those ADRs
+rejected for the Mali drivers this project targets.
+
+**Decision.**
+
+- Play opens a **second window** built with `Window::new_opengl`, the only kind that can host a
+  GL context, and renders the scene there with `RenderContext3D`. The editor's window is
+  untouched and the editor loop simply waits, which is what keeps the editor state intact.
+- The scene→renderer conversion lives in `play/plan.rs` as **pure data**
+  (`PlayPlan { instances, light, camera, meshes, unsupported }`): no GL, no window, no
+  `Platform`. The upload happens in `play/mod.rs`. This split is what makes the risky part —
+  world transforms, the camera's look-at point, which node supplies the light — testable in a
+  plain `#[test]` on a machine with no GPU.
+- **Meshes are deduplicated by a rounded spec** (`MeshSpec`, sizes in millimetres): ten cubes
+  are one upload and ten draws, and the millimetre rounding keeps the key `Eq + Hash`, which
+  an `f32` size is not. Two cubes that differ in the fourth decimal are the same cube on
+  screen.
+- **The camera's look-at point is transformed by its node's world matrix too**, not only the
+  eye. Moving a camera node without re-aiming it is the classic way to get a preview that
+  stares at where the camera used to be, and the unit tests pin both ends.
+- **The light comes from the first light node, turned by its world rotation.** A directional
+  light has no position in the engine; the node's rotation is the only part of its transform
+  that means anything.
+- **A scene with no camera gets one framing the geometry.** A preview of a black screen is
+  indistinguishable from a broken preview.
+- **Unsupported nodes are reported, not hidden**: a `.gltf` (no loader, ADR-063) or an `.obj`
+  that is not on disk lands in `PlayPlan::unsupported` and the status bar says how many. A
+  silent hole in the scene reads as an editor bug.
+- **Physics and gameplay are not here.** "Play" renders the scene as it is, with an orbit
+  camera the user can drive (right-drag, wheel). Movement, physics and game logic belong to
+  the game (phases 41–45), which consumes `PlayPlan` — the plan did not ask the editor to
+  grow a gameplay runtime, and inventing one would be scope, not progress.
+- `--play-frames N` runs the preview once at startup and returns, which is what lets the
+  preview be exercised in a script and in CI; the preview window is the one thing a headless
+  run cannot click.
+
+**Consequences.** Phases 41–45 now have the piece they were missing: a scene file can be
+turned into draw calls with no editor in the loop. The cost is that Play needs a driver that
+can open a second window — on KMSDRM it cannot, and the editor says so in the status bar
+instead of failing silently. Verified by 15 unit tests on `PlayPlan` (world transforms, shared
+meshes, camera derivation with and without a node, light rotation, bounds, unsupported files),
+2 on the play options, the offscreen GL test `play_render`, and a real x11 run of
+`--frames 5 --play-frames 3` that reported `Played 3 frame(s)` on the actual GPU.
