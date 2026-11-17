@@ -30,9 +30,14 @@ Todos verdes, com o comando da raiz:
       novos do `giochi-editor`
 - [x] `cargo doc --workspace --no-deps` — exit 0 (3 avisos pré-existentes: links de
       `DevTools::expanded_overlay`, `Theme::apply` e `epaint::Mesh`)
-- [x] `cargo build -p giochi-editor --release`
-- [x] `cargo run -p giochi-editor -- --frames 120` (x11)
-- [x] `SDL_VIDEODRIVER=dummy cargo run -p giochi-editor -- --frames 3`
+- [x] `scripts/gates.sh` completo (inclui `check-version.sh`, `check-features.sh`,
+      `check-aarch64.sh` e os gates de documentação) — "All gates passed"
+- [x] `cargo build -p giochi-editor --release` — 2m06s
+- [x] `cargo run -p giochi-editor -- --frames 120` (x11) e o mesmo com
+      `SDL_VIDEODRIVER=dummy`
+- [x] `cargo check -p giochi-editor --target aarch64-unknown-linux-gnu`
+- [x] `ci.yml` ganhou o passo `Editor boot` (30 frames, dummy + software renderer);
+      o ficheiro foi validado com um parse YAML
 
 ### Entregue na Fase 30
 
@@ -84,9 +89,47 @@ usou `egui-sdl2` (o plano sugeria): a ADR-052 já o tinha recusado por MSRV e po
 - Os painéis mostram a fase que os preenche, em vez de ficarem mudos; esconder um painel
   devolve o espaço ao viewport (testado medindo o retângulo central em duas configurações).
 
-### Próxima fase
+### Bloqueio da Fase 31 — a Production Pack (25–29 **do plano**) não existe neste repositório
 
-**Fase 31 — Viewport**: render da cena 3D no centro, `OrbitCamera` (botão direito orbita,
+O plano do Salto B assume que as Fases 25–29 foram a Production Pack: loader glTF/GLB,
+material system (normal/emissive/roughness), formato de cena JSON, save/load versionado,
+câmaras (follow/shake/cutscene) + A*, audio buses + i18n. E manda **recusar** o editor se
+alguma delas faltar, porque "o editor depende de formato de cena e save/load".
+
+As Fases 25–29 **deste** repositório foram outra coisa — release 0.5.0, o wire v2 do
+`giochi-net` (issue #8), a correcção do CI de release, o `mdns-sd` 0.21 (PR #10) e o
+`egui` 0.33.3 (PR #9). Verificado, não inferido:
+
+| Item da Production Pack | Estado medido |
+|---|---|
+| loader glTF/GLB | **ausente** — nenhuma dependência `gltf`; o crate 3D só tem `tobj` (OBJ) |
+| material system | **ausente** — não existe `Material` em `giochi-engine-3d/src` |
+| formato de cena | **ausente** — nenhum ficheiro `.scene` no repositório |
+| save/load versionado | **ausente** |
+| câmaras follow/shake/cutscene, A*, buses de áudio, i18n | **ausentes** |
+| `serde` num crate `giochi-*` | **ausente** — só entra pela dev-dependency `criterion` (`cargo tree -i serde`) |
+
+A Fase 30 foi entregue porque **não consome nada** dessa pack: só precisou de janela,
+renderer, backend egui e um layout. A Fase 31 é a primeira que consome: os critérios de
+aceite falam em abrir "um `.scene` existente (criado na Fase 27)" e em `File > New Scene`
+com cubo + luz + câmara carregados "do formato de cena da Fase 27".
+
+**Decisão:** parar antes da Fase 31 e não inventar um formato de cena dentro do editor. Um
+formato de cena é estrutural — o `giochi-racer` (Fases 41–45) tem de o ler sem depender do
+editor — e a R2 manda avisar o utilizador em vez de o improvisar. As opções, com custo, em
+`IDEAS.md` não: isto não é uma ideia fora de âmbito, é a dependência em falta.
+
+| Opção | O que é | Custo estimado |
+|---|---|---|
+| **A (recomendada)** — "Fase 26.5": formato de cena só | `giochi-engine-3d::scene`: `Scene`/`SceneNode` (`Id` estável `u64`, nome, parent, `Transform3D`, mesh path, material, light, camera), JSON via `serde` + `serde_json`, `version` + migração, round-trip testado | 1 sessão pequena |
+| B — Production Pack completa | A + glTF/GLB + material PBR-lite + save/load com slots + câmaras + A* + buses + i18n | 4–6 sessões; é a Fase 25–29 do plano |
+| C — formato dentro do editor | mais rápido agora, mas o jogo passa a depender do editor para ler cenas, contra a estrutura do plano | 1 sessão + dívida permanente |
+
+Sem A nem B, os critérios de aceite da Fase 31 não são verificáveis e a Fase 38 (save/load)
+não tem sobre o que assentar. A Fase 30 fica como está: verde, commitada e inofensiva.
+
+### Próxima fase
+: render da cena 3D no centro, `OrbitCamera` (botão direito orbita,
 meio faz pan, scroll zoom), grid e eixos via `debug_draw`, `File > New Scene` /
 `File > Open Scene` (com `rfd`), cena de exemplo com cubo + luz + câmara.
 
