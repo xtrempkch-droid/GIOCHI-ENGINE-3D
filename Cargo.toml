@@ -49,6 +49,9 @@ thiserror = "2.0"
 log = "0.4"
 env_logger = "0.11"
 serde = { version = "1", features = ["derive"] }
+# Phase 26.5/27: the scene format is JSON. `serde_json` is the only consumer of the
+# `serde` derive above and has no optional native part.
+serde_json = "1"
 mlua = { version = "0.12", features = ["lua54", "vendored"] }
 cbindgen = "0.27"
 # Phase 16: statistical benchmarks. The `html_reports` feature is what phase 18's

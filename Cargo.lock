@@ -606,6 +606,8 @@ dependencies = [
  "egui",
  "env_logger",
  "giochi-engine",
+ "giochi-engine-3d",
+ "glam 0.34.3",
  "log",
  "sdl2",
 ]
@@ -639,6 +641,8 @@ dependencies = [
  "log",
  "rapier3d",
  "sdl2",
+ "serde",
+ "serde_json",
  "thiserror",
  "tobj",
 ]

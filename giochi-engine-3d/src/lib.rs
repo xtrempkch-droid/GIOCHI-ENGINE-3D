@@ -54,6 +54,9 @@ pub mod particles;
 #[cfg(feature = "physics-3d")]
 pub mod physics;
 pub mod render3d;
+// Phase 26.5/27: the scene format. Data only — no GL, no window — so the editor and a
+// game can read the same file (ADR-063).
+pub mod scene;
 pub mod shader;
 #[cfg(feature = "hud")]
 pub mod ui;

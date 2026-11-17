@@ -28,6 +28,11 @@ tobj = { workspace = true }
 glam = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
+# Phase 26.5/27. The scene format is data, not rendering: it is compiled in
+# unconditionally so that the editor, the racer and a C consumer all read the same
+# definition. `serde` + `serde_json` add no native code and no unsafe.
+serde = { workspace = true }
+serde_json = { workspace = true }
 log = { workspace = true }
 # Window, input and audio only. The 3D path never touches `sdl2::render`, which
 # belongs to the 2D renderer (ADR-037).
