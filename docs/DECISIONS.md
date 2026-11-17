@@ -2406,3 +2406,86 @@ verifier rather than assumed. Verified by `scripts/verify-editor-package.sh` (ma
 version, icons, headless run of the packaged binary from inside the package), the unit test
 `the_assets_folder_next_to_the_executable_wins`, and a real `giochi-editor 0.1.0` package built
 and run in this session.
+
+---
+
+## ADR-073 — glTF without the `import` feature, and node transforms baked into the vertices
+
+**Context.** The Production Pack's loader (phase 41's prerequisite) is glTF/GLB. The obvious
+dependency is the `gltf` crate with its default features, which include `import` — and
+`import` brings in `image`, whose declared MSRV is **1.88**, above the 1.86 this crate
+promises (the same class of problem as ADR-061's `egui` ceiling).
+
+**Decision.**
+
+- `gltf` is depended on with `default-features = false, features = ["utils"]`. `utils` is the
+  accessor reader — the fiddly part (normalised integers, strided buffers, sparse accessors)
+  that nobody should rewrite. `import` is not used: the buffers are loaded here, from the
+  GLB binary chunk, a base64 `data:` URI, or a file resolved against **the model's own
+  directory** rather than the process's working directory.
+- `base64` 0.22 (MSRV 1.48) decodes `data:` URIs. That is the crate's only new dependency,
+  and it is pure Rust.
+- **Node transforms are baked into the vertices** at load time (`world = parent · node`),
+  and normals go through the inverse-transpose of the 3×3. The renderer draws one mesh with
+  one model matrix; a scene graph in the renderer is the game's job (phase 41), not the
+  loader's. The consequence is stated: a glTF's node animation cannot be replayed from the
+  loaded mesh.
+- **One mesh per primitive**, each with its material factors. That is what makes a model
+  with a painted body and emissive lights look like the file's preview, instead of one
+  averaged colour.
+- Materials are the **factors** only (`baseColorFactor`, `emissiveFactor`, `metallicFactor`,
+  `roughnessFactor`, `doubleSided`, `alphaMode`). Textures would need a texture cache keyed
+  by image, mime type and sampler — a different piece of work, and the `image` dependency
+  that MSRV forbids.
+- **Triangles only.** Lines, points, strips and fans are refused *by name*, and Draco/meshopt
+  with them: a compressed file needs a decoder, and a message that says so is worth more
+  than a model that half-loads.
+- **A file with no triangle geometry is an error.** Lights, cameras and skins are legal glTF
+  and are not geometry; a scene node pointing at such a file should be reported, not drawn as
+  nothing.
+- `MeshSource` gained a **`gltf` variant** rather than storing a glTF path in `obj`: two
+  formats, two loaders, and a tool that knows one of them can tell which it is looking at.
+  The scene format stays additive — an old file loads unchanged.
+
+**Consequences.** Phase 41 can load a car. The editor's preview draws glTF scenes with their
+own materials, and the "(no loader)" marker is gone from the asset browser. Verified by 13
+loader unit tests (data URIs, GLB, external buffers, transforms, materials, refusals) plus a
+4-test integration file — including one that loads a `.gltf` from a *different* working
+directory, and one that uploads through the real renderer, draws, and asserts
+`take_gl_error() == 0`.
+
+---
+
+## ADR-074 — PBR-lite means emissive, metalness and roughness; `roughness` and `shininess` coexist
+
+**Context.** The Production Pack asked for a "material system with normal/emissive/roughness".
+A full metallic-roughness BRDF needs image-based lighting to look like anything; on a single
+directional light it is a dark grey blob. Normal maps need a tangent basis the vertex layout
+does not carry.
+
+**Decision.**
+
+- `render3d::Material` carries `base_color`, `emissive`, `specular`, `metallic`, `roughness`,
+  `shininess`, `double_sided`. The three additions are the ones a GLES 2.0 Blinn-Phong term
+  can express **visibly**:
+  - `emissive` is added after lighting (a tail light reads as lit, not merely bright);
+  - `metallic` tints the highlight with the surface colour and removes the diffuse term (the
+    difference between chrome and white plastic);
+  - `roughness` converts to the Phong exponent with `2/r² − 2`, clamped to `1..=128`.
+- **Both numbers exist**, and the rule between them is explicit: `roughness == 0.5` is the
+  "not set" marker and lets `shininess` win; any other roughness wins. That is what lets every
+  scene written before this phase look identical afterwards — a promise with its own test
+  (`an_old_scene_without_the_pbr_fields_still_loads`).
+- Two new uniforms (`u_emissive`, `u_metallic`) instead of a new shader: `Phong` and
+  `Instanced` still share one fragment source, so an instanced cube and a plain one remain
+  pixel-identical, which phase 17's A/B depends on.
+- **`u_emissive` is a `vec3` and must be uploaded with `glUniform3f`.** Uploading it with
+  `glUniform4f` is legal GLSL, and radeonsi answers `GL_INVALID_OPERATION`: the frame does not
+  draw and the only clue is `take_gl_error()`. Both GL tests now assert the error queue is
+  empty after drawing.
+
+**Consequences.** A glTF model and a hand-written scene shade the same way, through the same
+`draw_mesh_material`. Normal maps and textured roughness stay out — they need the tangent
+basis and the texture cache that ADR-073 also deferred. Verified by 7 tests on `Material`
+(conversion monotonicity, clamp, the marker rule) plus 4 on the scene conversion and the
+round trip through JSON.

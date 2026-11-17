@@ -45,7 +45,7 @@ pub enum AssetKind {
     /// Everything.
     #[default]
     All,
-    /// Meshes: `.obj` loads; `.gltf`/`.glb` are recognised (see the module docs).
+    /// Meshes: `.obj`, `.gltf` and `.glb` all load.
     Model,
     /// Images.
     Texture,
@@ -110,16 +110,13 @@ impl AssetKind {
         }
     }
 
-    /// Whether this project can load the format today.
+    /// Whether the engine can load this file.
     ///
-    /// `false` for `.gltf`/`.glb`, which are the one hole the module documents.
-    pub fn is_loadable(self, path: &Path) -> bool {
-        if self != AssetKind::Model {
-            return true;
-        }
-        path.extension()
-            .map(|extension| extension.eq_ignore_ascii_case("obj"))
-            .unwrap_or(false)
+    /// Every kind the browser lists is loadable since phase 26.6 added the glTF loader;
+    /// the method stays because the browser and the drop handler both ask, and a future
+    /// format that is *listed but not loadable* (a `.fbx`, say) has one place to say so.
+    pub fn is_loadable(self, _path: &Path) -> bool {
+        true
     }
 }
 
@@ -657,11 +654,14 @@ mod tests {
     }
 
     #[test]
-    fn a_gltf_is_recognised_but_reported_as_not_loadable() {
-        let gltf = Path::new("assets/models/car.gltf");
-        assert_eq!(AssetKind::of(gltf), AssetKind::Model);
-        assert!(!AssetKind::Model.is_loadable(gltf));
-        assert!(AssetKind::Model.is_loadable(Path::new("assets/models/car.OBJ")));
+    fn every_model_format_the_browser_lists_can_be_loaded() {
+        // Phase 26.6 added the glTF/GLB loader; the "(no loader)" marker is gone, and this
+        // test is what stops it from coming back by accident.
+        for name in ["car.obj", "car.gltf", "car.glb", "car.OBJ", "car.GLTF"] {
+            let path = Path::new("assets/models").join(name);
+            assert_eq!(AssetKind::of(&path), AssetKind::Model, "{name}");
+            assert!(AssetKind::Model.is_loadable(&path), "{name}");
+        }
     }
 
     #[test]

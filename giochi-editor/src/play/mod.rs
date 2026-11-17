@@ -103,37 +103,66 @@ pub fn play(
         RenderContext3D::new(context::create(&window).map_err(|error| error.to_string())?);
     let adapter = render.adapter().to_owned();
 
-    // Upload one mesh per distinct spec: ten cubes are one upload and ten draws.
+    // Upload one entry per distinct spec: ten cubes are one upload and ten draws. A glTF
+    // spec is *several* meshes (one per primitive), which is why an entry is a list of
+    // pieces with their own materials rather than a single handle.
     let shader = render
         .create_builtin_shader(BuiltinShader::Phong)
         .map_err(|error| error.to_string())?;
-    let mut meshes = Vec::with_capacity(plan.meshes.len());
+    let mut meshes: Vec<Vec<Piece>> = Vec::with_capacity(plan.meshes.len());
     for spec in &plan.meshes {
-        let handle = match spec {
-            MeshSpec::Obj { path } => render.load_obj_mesh(path),
-            _ => match spec.primitive_values() {
-                Some(giochi_engine_3d::scene::Primitive::Cube { size }) => {
-                    render.create_cube_mesh(size)
+        let pieces = match spec {
+            MeshSpec::Obj { path } => {
+                let handle = render
+                    .load_obj_mesh(path)
+                    .map_err(|error| format!("could not load {}: {error}", path.display()))?;
+                vec![Piece {
+                    handle,
+                    material: None,
+                }]
+            }
+            MeshSpec::Gltf { path } => {
+                let loaded = render
+                    .load_gltf_meshes(path)
+                    .map_err(|error| format!("could not load {}: {error}", path.display()))?;
+                loaded
+                    .primitives
+                    .iter()
+                    .map(|(handle, material)| Piece {
+                        handle: *handle,
+                        material: material.clone(),
+                    })
+                    .collect()
+            }
+            _ => {
+                let handle = match spec.primitive_values() {
+                    Some(giochi_engine_3d::scene::Primitive::Cube { size }) => {
+                        render.create_cube_mesh(size)
+                    }
+                    Some(giochi_engine_3d::scene::Primitive::Sphere {
+                        radius,
+                        rings,
+                        segments,
+                    }) => render.create_sphere_mesh(radius, rings, segments),
+                    Some(giochi_engine_3d::scene::Primitive::Plane { size, subdivisions }) => {
+                        render.create_plane_mesh(size, subdivisions)
+                    }
+                    None => continue,
                 }
-                Some(giochi_engine_3d::scene::Primitive::Sphere {
-                    radius,
-                    rings,
-                    segments,
-                }) => render.create_sphere_mesh(radius, rings, segments),
-                Some(giochi_engine_3d::scene::Primitive::Plane { size, subdivisions }) => {
-                    render.create_plane_mesh(size, subdivisions)
-                }
-                None => continue,
-            },
-        }
-        .map_err(|error| format!("could not upload {spec:?}: {error}"))?;
-        meshes.push(handle);
+                .map_err(|error| format!("could not upload {spec:?}: {error}"))?;
+                vec![Piece {
+                    handle,
+                    material: None,
+                }]
+            }
+        };
+        meshes.push(pieces);
     }
-    let handle_for = |spec: &MeshSpec| -> Option<u64> {
+    let pieces_for = |spec: &MeshSpec| -> Option<&Vec<Piece>> {
         plan.meshes
             .iter()
             .position(|candidate| candidate == spec)
-            .and_then(|index| meshes.get(index).copied())
+            .and_then(|index| meshes.get(index))
     };
 
     render.set_light(plan.light);
@@ -180,12 +209,22 @@ pub fn play(
         let view = camera_camera(&camera, width, height);
         render.begin_frame(&window);
         for instance in &plan.instances {
-            let Some(handle) = handle_for(&instance.mesh) else {
+            let Some(pieces) = pieces_for(&instance.mesh) else {
                 continue;
             };
-            render
-                .draw_mesh_colored(handle, shader, &instance.transform, &view, instance.color)
-                .map_err(|error| error.to_string())?;
+            for piece in pieces {
+                // A glTF primitive's own material wins over the node's, because that is what
+                // the file says and what its author saw in their editor. The node's colour
+                // is the fallback for a primitive that names no material — which is also
+                // what makes tinting a whole imported model by its scene node work.
+                let material = match &piece.material {
+                    Some(material) => material.to_material(),
+                    None => instance.material,
+                };
+                render
+                    .draw_mesh_material(piece.handle, shader, &instance.transform, &view, &material)
+                    .map_err(|error| error.to_string())?;
+            }
         }
         render.end_frame(&window);
 
@@ -199,6 +238,15 @@ pub fn play(
             return Ok(stats(frames, adapter, &plan));
         }
     }
+}
+
+/// One uploaded mesh of a spec, with the material its file gave it.
+#[derive(Debug, Clone)]
+struct Piece {
+    /// The GPU mesh.
+    handle: u64,
+    /// The material from the file (a glTF primitive), or `None` for a primitive or an OBJ.
+    material: Option<giochi_engine_3d::mesh::GltfMaterial>,
 }
 
 fn stats(frames: u64, adapter: String, plan: &PlayPlan) -> PlayStats {

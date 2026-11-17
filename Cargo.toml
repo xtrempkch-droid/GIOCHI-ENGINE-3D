@@ -52,6 +52,12 @@ serde = { version = "1", features = ["derive"] }
 # Phase 26.5/27: the scene format is JSON. `serde_json` is the only consumer of the
 # `serde` derive above and has no optional native part.
 serde_json = "1"
+# Production Pack (phase 41 prerequisite): glTF 2.0 and GLB. `default-features = false` drops
+# `import`, which is the only thing that pulls in `image` (MSRV 1.88) — this loader reads
+# geometry, not textures, so the buffers are loaded here instead and the crate's MSRV stays
+# where it is (ADR-073). `utils` is the accessor reader; `base64` decodes `data:` URIs.
+gltf = { version = "1.4", default-features = false, features = ["utils"] }
+base64 = "0.22"
 # Phase 34. `project.toml` is the one file a project owns. `toml` 0.8 declares MSRV
 # 1.65 (measured from the crates.io manifest), well below the workspace floor, and it
 # reuses the `serde` derive already in the tree.

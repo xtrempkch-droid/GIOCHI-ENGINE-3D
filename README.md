@@ -16,7 +16,7 @@ with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 > handles, keyboard/mouse/gamepad input, the asset cache, the audio mixer, the scene
 > stack, the `Engine` facade, the **C ABI** (`libgiochi.so` / `libgiochi.a` + generated
 > `giochi.h`, parts I–IV, version 4), the **Lua binding** (`giochi` module + a complete
-> reference game), the **3D crate** — GLES/EGL context, arbitrary OBJ or generated
+> reference game), the **3D crate** — GLES/EGL context, arbitrary OBJ/glTF or generated
 > geometry, textures, Blinn-Phong lighting, `Camera3D` with a controller, instancing,
 > static batching and upscaling — the **networking crate** (`giochi-net`:
 > host-authoritative UDP, interest management, optional `laminar` transport and mDNS

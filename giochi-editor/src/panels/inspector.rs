@@ -237,7 +237,7 @@ pub fn euler_degrees_to_quat(euler: [f32; 3]) -> [f32; 4] {
 
 // ---- Mesh --------------------------------------------------------------------
 
-/// The mesh source: a primitive kind with its parameters, or an OBJ path.
+/// The mesh source: a primitive kind with its parameters, an `.obj` path or a glTF path.
 pub fn mesh_editor(ui: &mut egui::Ui, mesh: &mut Option<MeshSource>) -> bool {
     let mut changed = false;
     let mut kind = match mesh {
@@ -246,13 +246,14 @@ pub fn mesh_editor(ui: &mut egui::Ui, mesh: &mut Option<MeshSource>) -> bool {
         Some(MeshSource::Primitive(Primitive::Sphere { .. })) => "sphere",
         Some(MeshSource::Primitive(Primitive::Plane { .. })) => "plane",
         Some(MeshSource::Obj(_)) => "obj",
+        Some(MeshSource::Gltf(_)) => "gltf",
     }
     .to_owned();
 
     egui::ComboBox::from_id_salt("inspector-mesh-kind")
         .selected_text(&kind)
         .show_ui(ui, |ui| {
-            for option in ["none", "cube", "sphere", "plane", "obj"] {
+            for option in ["none", "cube", "sphere", "plane", "obj", "gltf"] {
                 changed |= ui
                     .selectable_value(&mut kind, option.to_owned(), option)
                     .changed();
@@ -272,6 +273,7 @@ pub fn mesh_editor(ui: &mut egui::Ui, mesh: &mut Option<MeshSource>) -> bool {
                 subdivisions: 1,
             })),
             "obj" => Some(MeshSource::Obj("model.obj".to_owned())),
+            "gltf" => Some(MeshSource::Gltf("model.gltf".to_owned())),
             _ => None,
         };
     }
@@ -338,6 +340,14 @@ pub fn mesh_editor(ui: &mut egui::Ui, mesh: &mut Option<MeshSource>) -> bool {
         Some(MeshSource::Obj(path)) => {
             changed |= ui.text_edit_singleline(path).changed();
         }
+        Some(MeshSource::Gltf(path)) => {
+            changed |= ui.text_edit_singleline(path).changed();
+            ui.label(
+                egui::RichText::new(".gltf or .glb, relative to the scene")
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
+            );
+        }
         None => {}
     }
     changed
@@ -400,6 +410,48 @@ pub fn material_editor(ui: &mut egui::Ui, material: &mut MaterialDesc) -> bool {
             egui::Slider::new(&mut material.shininess, 1.0..=128.0)
                 .text("shininess")
                 .logarithmic(true),
+        )
+        .changed();
+
+    // PBR-lite (phase 26.6 / ADR-074). `emissive` gets a colour picker with alpha forced to
+    // 1: an emissive surface emits light, and what would a transparent light mean.
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.label("emissive");
+        let mut emissive = [
+            material.emissive[0],
+            material.emissive[1],
+            material.emissive[2],
+            1.0,
+        ];
+        if ui
+            .color_edit_button_rgba_unmultiplied(&mut emissive)
+            .changed()
+        {
+            material.emissive = [emissive[0], emissive[1], emissive[2]];
+            changed = true;
+        }
+        if material.emissive != [0.0; 3] && ui.small_button("off").clicked() {
+            material.emissive = [0.0; 3];
+            changed = true;
+        }
+    });
+    changed |= ui
+        .add(
+            egui::Slider::new(&mut material.roughness, 0.0..=1.0)
+                .text("roughness")
+                .fixed_decimals(2),
+        )
+        .on_hover_text("0 is a mirror, 1 is fully diffuse. Overrides shininess when set.")
+        .changed();
+    changed |= ui
+        .add(
+            egui::Slider::new(&mut material.metallic, 0.0..=1.0)
+                .text("metallic")
+                .fixed_decimals(2),
+        )
+        .on_hover_text(
+            "A metal tints its highlight with its own colour and loses the diffuse term.",
         )
         .changed();
     changed

@@ -537,6 +537,53 @@ de expansão para manter — e a Fase 40 pode trocá-la sem tocar no `Project`.
   intervalo de autosave (0 desliga) e botão de gravar. `Play > Pause/Stop` ficam para o jogo
   (Fase 45), onde há algo para pausar.
 
+## Production Pack — o que faltava para as Fases 41+
+
+O plano do Salto B assumia a Production Pack (Fases 25–29 do plano) pronta. Depois de fechar
+o editor, as pendências foram resolvidas uma a uma, antes de começar o jogo.
+
+| Item | Estado | Onde |
+|---|---|---|
+| loader glTF/GLB | **concluído** (2026-11-17) | `mesh::load_gltf`, `RenderContext3D::load_gltf_meshes`, `example gltf_viewer` — ADR-073 |
+| materiais PBR-lite (emissive/metallic/roughness) | **concluído** (2026-11-17) | `render3d::Material`, `draw_mesh_material`, campos no formato de cena e no inspector — ADR-074 |
+| save/load com slots | pendente | — |
+| câmaras de jogo (follow/shake/cutscene) | pendente | — |
+| A* (pathfinding) | pendente | — |
+| buses de áudio | pendente | — |
+| i18n | pendente | — |
+
+### glTF/GLB — gates
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo test --workspace` — **1246 testes**, 0 falhas
+- [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --test gltf_loading` — 4 testes,
+      incluindo upload pelo renderer real com `take_gl_error() == 0`
+- [x] `cargo run -p giochi-engine-3d --example gltf_viewer -- /tmp/gltfrun/car.gltf --frames 3`
+      — 2 primitivas, 24 triângulos, 3 frames, sem erro de GL
+- [x] `scripts/gates.sh` completo — "All gates passed"
+- [x] `cargo check -p giochi-editor --target aarch64-unknown-linux-gnu`
+
+### glTF/GLB — entregue
+
+| Ficheiro | O que faz |
+|---|---|
+| `mesh/gltf_loader.rs` | `.gltf`/`.glb`, buffers (GLB binário, `data:` URI, ficheiro ao lado), transformações de nó assadas nos vértices, materiais por primitiva, recusas por nome |
+| `mesh/mod.rs` | `GltfModel`, `GltfPrimitive`, `GltfMaterial`, `GltfLoaded` |
+| `render3d/renderer.rs` | `load_gltf_meshes` (uma malha por primitiva) |
+| `render3d/material.rs` | `Material` PBR-lite e a conversão roughness↔shininess |
+| `shaders/phong.frag` | `u_emissive` (somado) e `u_metallic` (tinge o brilho, corta o difuso) |
+| `scene/mod.rs` | `MeshSource::Gltf`, `MaterialDesc::{emissive, roughness, metallic}`, `to_material` |
+| `examples/gltf_viewer.rs` | carrega, enquadra pela AABB, desenha por primitiva com o material do ficheiro |
+| `giochi-editor` | preview desenha glTF com os materiais do ficheiro; inspector edita emissive/roughness/metallic; drop de `.gltf` instancia |
+| `tests/gltf_loading.rs` | 4 testes: `.gltf`+`.bin` de outro cwd, ficheiros inválidos, e desenho com GL |
+
+### Um bug encontrado pelo caminho
+
+`u_emissive` é `vec3` e estava a ser enviado com `glUniform4f`. É legal na especificação e o
+radeonsi responde `GL_INVALID_OPERATION`: o frame não desenha e a única pista é
+`take_gl_error()`. Os dois testes de GL passaram a exigir fila de erros vazia.
+
 ### Salto B — fecho das Fases 30–40
 
 O editor está completo para o que o plano pede: janela, viewport com câmara, hierarquia,
@@ -544,10 +591,10 @@ inspector, projeto e assets, gizmos de translação/rotação/escala, criação/
 reparenting, undo/redo, recentes, autosave e recuperação, preview com o renderer 3D real, e um
 pacote que corre fora do repositório. 1216 testes no workspace, todos os gates verdes.
 
-**O que o plano pedia e continua em falta**, herdado da Production Pack (registado desde a
-Fase 30): glTF/GLB, materiais PBR-lite (`emissive`/`roughness`), save/load em slots, câmaras de
-jogo (follow/shake/cutscene), A*, buses de áudio e i18n. Nada disto bloqueia o editor; o glTF
-bloqueia a Fase 41.
+**O que o plano pedia e continua em falta**, herdado da Production Pack: save/load em slots,
+câmaras de jogo (follow/shake/cutscene), A*, buses de áudio e i18n. **O glTF e os materiais
+PBR-lite já estão feitos** (ver a secção da Production Pack acima), que era o que bloqueava a
+Fase 41.
 
 ### Próxima fase
 

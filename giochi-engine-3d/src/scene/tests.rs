@@ -322,3 +322,87 @@ fn a_transform_survives_the_round_trip_through_the_engine_type() {
     assert!((back.scale.x - 2.0).abs() < 1e-6);
     assert!((back.rotation.w - transform.rotation.w).abs() < 1e-5);
 }
+
+#[test]
+fn a_material_description_becomes_the_renderer_material() {
+    let desc = MaterialDesc {
+        base_color: [0.5, 0.25, 0.125, 1.0],
+        specular: 0.4,
+        emissive: [0.9, 0.1, 0.0],
+        roughness: 0.2,
+        metallic: 0.8,
+        ..MaterialDesc::default()
+    };
+    let material = desc.to_material();
+    assert!((material.base_color.r - 0.5).abs() < 1e-6);
+    assert!((material.emissive.r - 0.9).abs() < 1e-6);
+    assert!((material.metallic - 0.8).abs() < 1e-6);
+    // Roughness 0.2 is a fairly tight highlight, and it overrides the shininess field.
+    assert!(
+        material.shininess_from_roughness() > 32.0,
+        "{}",
+        material.shininess_from_roughness()
+    );
+    assert_eq!(
+        material.resolved_shininess(),
+        material.shininess_from_roughness()
+    );
+    assert!(material.emits());
+}
+
+#[test]
+fn a_material_that_never_mentions_roughness_keeps_its_shininess() {
+    // The compatibility promise: every scene written before roughness existed has to look
+    // exactly the same afterwards.
+    let desc = MaterialDesc {
+        shininess: 96.0,
+        ..MaterialDesc::default()
+    };
+    let material = desc.to_material();
+    assert_eq!(material.resolved_shininess(), 96.0);
+    assert!(!material.emits());
+}
+
+#[test]
+fn a_material_with_emissive_survives_a_round_trip() {
+    let mut scene = Scene::new("emissive");
+    let mut node = SceneNode::new(SceneNodeId::new(0), "Tail light");
+    node.mesh = Some(MeshSource::Primitive(Primitive::Cube { size: 0.2 }));
+    node.material = MaterialDesc {
+        base_color: [0.4, 0.0, 0.0, 1.0],
+        emissive: [1.0, 0.05, 0.0],
+        roughness: 0.15,
+        metallic: 0.0,
+        ..MaterialDesc::default()
+    };
+    scene.add_node(node);
+
+    let text = scene.to_json().expect("serialised");
+    let reloaded = Scene::from_json(&text).expect("reloaded");
+    let material = reloaded.nodes[0].material.clone();
+    assert_eq!(material.emissive, [1.0, 0.05, 0.0]);
+    assert!((material.roughness - 0.15).abs() < 1e-6);
+}
+
+#[test]
+fn an_old_scene_without_the_pbr_fields_still_loads() {
+    // The exact JSON a phase 26.5 scene wrote: no emissive, no roughness, no metallic.
+    let json = r#"{
+        "format": "giochi-scene",
+        "version": 1,
+        "next_id": 2,
+        "nodes": [{
+            "id": 1,
+            "name": "Cube",
+            "transform": {"position": [0.0, 0.5, 0.0]},
+            "mesh": {"primitive": {"kind": "cube", "size": 1.0}},
+            "material": {"base_color": [0.75, 0.78, 0.85, 1.0], "specular": 0.35}
+        }]
+    }"#;
+    let scene = Scene::from_json(json).expect("an old scene loads");
+    let material = &scene.nodes[0].material;
+    assert_eq!(material.emissive, [0.0; 3]);
+    assert_eq!(material.metallic, 0.0);
+    assert_eq!(material.roughness, 0.5, "the 'not set' marker");
+    assert_eq!(material.shininess, 32.0, "and the shininess it had");
+}

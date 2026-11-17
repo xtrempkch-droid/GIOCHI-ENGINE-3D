@@ -320,6 +320,13 @@ pub enum MeshSource {
     Primitive(Primitive),
     /// An `.obj` file on disk, relative to the scene's asset root.
     Obj(String),
+    /// A `.gltf` or `.glb` file, relative to the scene's asset root.
+    ///
+    /// A separate variant rather than a second extension on `Obj`: the two are different
+    /// formats with different loaders, a glTF file holds several primitives with their own
+    /// materials, and a scene that says which is which can be read by a tool that only knows
+    /// one of them.
+    Gltf(String),
 }
 
 /// How a node's surface is shaded.
@@ -338,6 +345,24 @@ pub struct MaterialDesc {
     /// Specular exponent.
     #[serde(default = "default_shininess")]
     pub shininess: f32,
+    /// Linear emissive RGB, added after lighting. `[0, 0, 0]` is off.
+    ///
+    /// The one channel a GLES 2.0 shader can afford and an artist notices: a tail light, a
+    /// neon strip, an instrument panel that reads as lit instead of merely bright.
+    #[serde(default)]
+    pub emissive: [f32; 3],
+    /// `0.0` is a mirror, `1.0` is fully diffuse.
+    ///
+    /// Kept alongside `shininess` rather than replacing it: `shininess` is the number the
+    /// shader takes, `roughness` is the number a glTF file and a human both speak. The
+    /// conversion lives in [`MaterialDesc::to_material`] and is the only place that knows
+    /// both (ADR-074).
+    #[serde(default = "default_roughness")]
+    pub roughness: f32,
+    /// Metalness, `0.0..=1.0`. Tints the highlight and removes the diffuse term, which is
+    /// what makes chrome read as chrome and not as white plastic.
+    #[serde(default)]
+    pub metallic: f32,
 }
 
 fn default_base_color() -> [f32; 4] {
@@ -354,7 +379,51 @@ impl Default for MaterialDesc {
             texture: None,
             specular: 0.0,
             shininess: default_shininess(),
+            emissive: [0.0; 3],
+            roughness: default_roughness(),
+            metallic: 0.0,
         }
+    }
+}
+
+fn default_roughness() -> f32 {
+    0.5
+}
+
+impl MaterialDesc {
+    /// This surface as the renderer takes it.
+    ///
+    /// `roughness` wins over `shininess` when a file sets it: a glTF import fills roughness
+    /// and leaves shininess at its default, and the reverse is true of a hand-written scene.
+    /// The `shininess` field is kept as the escape hatch for a caller that wants the exact
+    /// exponent, so a roughness of the default `0.5` still respects a hand-set `shininess`.
+    pub fn to_material(&self) -> crate::render3d::Material {
+        let mut material = crate::render3d::Material {
+            base_color: crate::math3d::Color3D::new(
+                self.base_color[0],
+                self.base_color[1],
+                self.base_color[2],
+                self.base_color[3],
+            ),
+            specular: self.specular,
+            metallic: self.metallic.clamp(0.0, 1.0),
+            roughness: self.roughness.clamp(0.0, 1.0),
+            ..crate::render3d::Material::default()
+        };
+        material.emissive = crate::math3d::Color3D::new(
+            self.emissive[0].max(0.0),
+            self.emissive[1].max(0.0),
+            self.emissive[2].max(0.0),
+            1.0,
+        );
+        // `shininess` is honoured when it was set to something other than the default, so a
+        // scene written before roughness existed keeps its highlight.
+        if (self.roughness - default_roughness()).abs() > f32::EPSILON {
+            material.shininess = material.shininess_from_roughness();
+        } else {
+            material.shininess = self.shininess;
+        }
+        material
     }
 }
 

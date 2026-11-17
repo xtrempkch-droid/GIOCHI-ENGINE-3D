@@ -343,14 +343,6 @@ fn apply_asset_drop(
         )));
         return false;
     }
-    if !drag.is_loadable() {
-        state.report(editor::Status::warning(format!(
-            "{}: the glTF loader is part of the pending Production Pack (ADR-063); \
-             use an .obj model",
-            drag.node_name()
-        )));
-        return false;
-    }
     let Some(scene) = state.scene.as_mut() else {
         state.report(editor::Status::warning(
             "open or create a scene before dropping an asset",
@@ -365,7 +357,13 @@ fn apply_asset_drop(
         .unwrap_or_else(|| state.viewport_camera.target.to_array());
 
     let mut node = SceneNode::new(SceneNodeId::new(0), drag.node_name());
-    node.mesh = Some(MeshSource::Obj(drag.relative.clone()));
+    // The scene format keeps the two model formats apart: a glTF is several primitives with
+    // their own materials, and a reader that only knows OBJ has to be able to tell.
+    node.mesh = Some(if drag.is_gltf() {
+        MeshSource::Gltf(drag.relative.clone())
+    } else {
+        MeshSource::Obj(drag.relative.clone())
+    });
     node.transform.position = position;
     let node = scene.add_node(node);
     let id = node.id;
@@ -1200,14 +1198,24 @@ mod tests {
     }
 
     #[test]
-    fn dropping_a_gltf_explains_the_missing_loader_instead_of_doing_nothing() {
+    fn dropping_a_gltf_adds_a_gltf_mesh_source() {
+        // Phase 26.6 added the loader: dropping a .gltf must instantiate it, and it must be
+        // stored as `MeshSource::Gltf` so a reader can tell the two model formats apart.
         let mut state = state_with_default_scene();
         let drag = model_drag("/p/assets/models/car.gltf", "assets/models/car.gltf");
         let rect = test_rect();
-        assert!(!apply_asset_drop(&mut state, &drag, rect, rect.center()));
-        assert_eq!(state.scene.as_ref().map(|s| s.nodes.len()), Some(3));
-        assert!(state.status.text.contains("glTF"), "{}", state.status.text);
-        assert_eq!(state.status.kind, editor::StatusKind::Warning);
+        assert!(apply_asset_drop(&mut state, &drag, rect, rect.center()));
+
+        let scene = state.scene.as_ref().expect("scene");
+        let node = scene.nodes.last().expect("new node");
+        assert_eq!(node.name, "car");
+        assert_eq!(
+            node.mesh,
+            Some(giochi_engine_3d::scene::MeshSource::Gltf(
+                "assets/models/car.gltf".to_owned()
+            ))
+        );
+        assert_eq!(state.primary(), Some(node.id));
     }
 
     #[test]

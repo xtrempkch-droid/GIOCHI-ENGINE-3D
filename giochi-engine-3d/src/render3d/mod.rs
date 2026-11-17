@@ -6,12 +6,14 @@
 
 mod instanced;
 mod light;
+pub mod material;
 mod renderer;
 mod texture;
 pub mod upscale;
 
 pub use instanced::{InstancedRenderer, DEFAULT_INSTANCE_CAPACITY};
 pub use light::DirectionalLight;
+pub use material::Material;
 pub use renderer::{MeshHandle, RenderContext3D, ShaderHandle, TextureHandle};
 pub use texture::Texture3D;
 pub use upscale::{sanitise_scale, scaled_size, Upscaler, MAX_SCALE, MIN_SCALE};

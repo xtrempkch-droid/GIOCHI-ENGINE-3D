@@ -8,7 +8,8 @@
 //! | inspector's material slot | texture | sets `MaterialDesc::texture` |
 //! | anywhere else | anything | nothing; the drag is cancelled |
 //!
-//! A `.gltf`/`.glb` is listed and draggable, and dropping one reports in the status bar
+//! A `.gltf`/`.glb` is listed, draggable and instantiable since phase 26.6 added the glTF
+//! loader; before that a drop reported in the status bar
 //! that its loader belongs to the pending Production Pack and that `.obj` is what works.
 //! That is the honest version of "drag a glTF to the viewport instantiates it" in a
 //! repository whose 3D crate has no glTF loader (ADR-063): the alternative is a drop that
@@ -54,7 +55,14 @@ impl AssetDrag {
         }
     }
 
-    /// Whether the engine can load it today (`.gltf`/`.glb` cannot).
+    /// Whether this drag is a glTF/GLB, which the scene stores as its own mesh variant.
+    pub fn is_gltf(&self) -> bool {
+        self.path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("gltf") || ext.eq_ignore_ascii_case("glb"))
+    }
+
+    /// Whether the engine can load it (every listed kind can, since phase 26.6).
     pub fn is_loadable(&self) -> bool {
         self.kind.is_loadable(&self.path)
     }
@@ -220,16 +228,7 @@ pub fn draw(ui: &mut egui::Ui, state: &mut EditorState, theme: &EditorTheme) -> 
         .show(ui, |ui| {
             for entry in state.assets.entries.clone() {
                 let is_selected = state.assets.selected.as_deref() == Some(entry.path.as_path());
-                let label = format!(
-                    "{}  {}{}",
-                    entry.kind.label(),
-                    entry.label,
-                    if entry.is_loadable() {
-                        ""
-                    } else {
-                        "  (no loader)"
-                    }
-                );
+                let label = format!("{}  {}", entry.kind.label(), entry.label);
                 let dragged = ui
                     .dnd_drag_source(
                         egui::Id::new(("giochi-asset", &entry.relative)),
@@ -327,19 +326,6 @@ fn preview(ui: &mut egui::Ui, state: &mut EditorState, project: &Project, theme:
         AssetKind::All | AssetKind::Other => {}
     }
 
-    if !entry.is_loadable() {
-        ui.label(
-            egui::RichText::new(format!(
-                "{} is recognised, but the glTF loader is part of the pending Production \
-                 Pack. Import an .obj to place a model.",
-                path.extension()
-                    .map(|extension| extension.to_string_lossy().to_uppercase())
-                    .unwrap_or_default()
-            ))
-            .small()
-            .color(egui::Color32::from_rgb(0xd8, 0xa8, 0x40)),
-        );
-    }
     let _ = project;
 }
 

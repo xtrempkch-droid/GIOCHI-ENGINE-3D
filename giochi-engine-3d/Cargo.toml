@@ -25,6 +25,10 @@ egui = { workspace = true, optional = true }
 glow = { workspace = true }
 bytemuck = { workspace = true }
 tobj = { workspace = true }
+# Production Pack: glTF/GLB. Deliberately without the crate's `import` feature (see the
+# workspace manifest and ADR-073): geometry only, no `image` dependency.
+gltf = { workspace = true }
+base64 = { workspace = true }
 glam = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
@@ -57,6 +61,10 @@ path = "examples/mini_fps.rs"
 [[example]]
 name = "ball_balance"
 path = "examples/ball_balance.rs"
+
+[[example]]
+name = "gltf_viewer"
+path = "examples/gltf_viewer.rs"
 
 [[example]]
 name = "model_viewer"

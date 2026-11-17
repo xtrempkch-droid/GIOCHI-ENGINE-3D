@@ -220,6 +220,8 @@ mod tests {
             "u_specular_strength",
             "u_shininess",
             "u_camera_position",
+            "u_emissive",
+            "u_metallic",
         ] {
             assert!(
                 declares(fragment, uniform),

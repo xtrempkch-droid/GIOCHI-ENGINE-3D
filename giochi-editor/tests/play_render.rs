@@ -100,23 +100,25 @@ fn the_scene_reaches_the_three_d_renderer() {
             .position(|spec| spec == &instance.mesh)
             .expect("uploaded");
         render
-            .draw_mesh_colored(
+            .draw_mesh_material(
                 meshes[index],
                 shader,
                 &instance.transform,
                 &camera,
-                instance.color,
+                &instance.material,
             )
             .expect("drawn");
     }
     let pixels = render.read_pixels(WIDTH, HEIGHT).expect("pixels");
+    let error = render.take_gl_error();
     render.end_frame(&window);
     drop(render);
     drop(window);
 
-    // Anything the cube drew is not the black clear colour. A frame that is entirely black
-    // means the camera is looking at nothing, which is exactly the failure a "did it not
-    // panic?" test would miss.
+    // A frame that draws *and* leaves an error behind is a frame that will fail on the next
+    // driver. This check caught `u_emissive` being uploaded as a `vec4` to a `vec3` uniform.
+    assert_eq!(error, 0, "the preview left GL error 0x{error:04x}");
+
     let lit = pixels
         .as_chunks::<4>()
         .0

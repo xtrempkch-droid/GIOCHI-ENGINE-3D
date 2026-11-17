@@ -13,6 +13,11 @@ uniform float u_ambient_strength;
 uniform float u_specular_strength;
 uniform float u_shininess;
 uniform vec3 u_camera_position;
+// PBR-lite (ADR-074): the two numbers a metallic-roughness material owns that a Blinn-Phong
+// term can express. `u_emissive` is added after lighting; `u_metallic` tints the highlight
+// with the surface colour and removes the diffuse term.
+uniform vec3 u_emissive;
+uniform float u_metallic;
 
 varying vec3 v_world_normal;
 varying vec3 v_world_position;
@@ -37,9 +42,16 @@ void main() {
         specular = pow(max(dot(normal, half_vector), 0.0), u_shininess);
     }
 
-    vec3 ambient = u_color.rgb * u_ambient_strength;
-    vec3 direct = u_color.rgb * u_light_color * diffuse;
-    vec3 highlight = u_light_color * specular * u_specular_strength;
+    // A metal has no diffuse term: what it does not reflect specularly it does not
+    // reflect at all. Its highlight is tinted by its own colour, which is the whole
+    // visible difference between chrome and white plastic.
+    float metallic = clamp(u_metallic, 0.0, 1.0);
+    vec3 surface = u_color.rgb * (1.0 - metallic);
+    vec3 tint = mix(vec3(1.0), u_color.rgb, metallic);
 
-    gl_FragColor = vec4(ambient + direct + highlight, u_color.a);
+    vec3 ambient = u_color.rgb * u_ambient_strength;
+    vec3 direct = surface * u_light_color * diffuse;
+    vec3 highlight = tint * u_light_color * specular * u_specular_strength;
+
+    gl_FragColor = vec4(ambient + direct + highlight + u_emissive, u_color.a);
 }

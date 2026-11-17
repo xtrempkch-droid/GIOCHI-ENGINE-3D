@@ -14,9 +14,11 @@
 //!
 //! # What is deliberately not converted
 //!
-//! - **glTF.** There is no loader (ADR-063); the plan lists the file under
-//!   [`PlayPlan::unsupported`] so the editor can say which nodes it is not drawing instead of
-//!   leaving a hole in the scene.
+//! - **glTF materials beyond the factors.** The loader reads base colour, emissive, metallic
+//!   and roughness; metallic-roughness *textures* and normal maps need a texture cache the
+//!   scene format does not carry yet.
+//! - **A model file's real size.** Framing a scene uses a one-unit guess per model, because
+//!   reading the file to measure it would parse every model to draw a grid.
 //! - **Materials beyond colour.** The engine's shaders take a base colour and a texture; the
 //!   scene format's `specular`/`shininess` feed [`DirectionalLight`], not the mesh. Emissive
 //!   and roughness do not exist in the format yet.
@@ -27,7 +29,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use giochi_engine_3d::math3d as m3;
-use giochi_engine_3d::math3d::Color3D;
+use giochi_engine_3d::render3d::material as m3_material;
 use giochi_engine_3d::render3d::DirectionalLight;
 use giochi_engine_3d::scene::{MeshSource, Primitive, Scene, SceneNode};
 use glam::{Mat4, Quat, Vec3};
@@ -61,6 +63,11 @@ pub enum MeshSpec {
     },
     /// An `.obj` file.
     Obj {
+        /// The resolved path.
+        path: PathBuf,
+    },
+    /// A `.gltf` or `.glb` file, which the renderer uploads as one mesh per primitive.
+    Gltf {
         /// The resolved path.
         path: PathBuf,
     },
@@ -100,24 +107,34 @@ impl MeshSpec {
             MeshSource::Obj(path) => {
                 let path = PathBuf::from(path);
                 Self::Obj {
-                    path: match base {
-                        Some(base) if path.is_relative() => base.join(path),
-                        _ => path,
-                    },
+                    path: resolve(base, path),
+                }
+            }
+            MeshSource::Gltf(path) => {
+                let path = PathBuf::from(path);
+                Self::Gltf {
+                    path: resolve(base, path),
                 }
             }
         }
     }
 
     /// The edge length or diameter the spec draws, in world units.
+    ///
+    /// A model file has no declared size in the scene — reading it to find out would mean
+    /// loading every model to frame a scene — so both model kinds report a one-unit guess.
     pub fn extent(&self) -> f32 {
         match self {
             Self::Cube { size } => *size as f32 / 1000.0,
             Self::Sphere { radius_mm, .. } => 2.0 * *radius_mm as f32 / 1000.0,
             Self::Plane { size_mm, .. } => *size_mm as f32 / 1000.0,
-            // An `.obj` has no declared size; a caller framing a scene uses this as a guess.
-            Self::Obj { .. } => 1.0,
+            Self::Obj { .. } | Self::Gltf { .. } => 1.0,
         }
+    }
+
+    /// Whether the spec names a model file rather than a generated primitive.
+    pub const fn is_model(&self) -> bool {
+        matches!(self, Self::Obj { .. } | Self::Gltf { .. })
     }
 
     /// The spec as the millimetre-free values the renderer needs.
@@ -142,13 +159,21 @@ impl MeshSpec {
                 size: *size_mm as f32 / 1000.0,
                 subdivisions: *subdivisions,
             }),
-            Self::Obj { .. } => None,
+            Self::Obj { .. } | Self::Gltf { .. } => None,
         }
     }
 }
 
 fn millimetres(value: f32) -> i32 {
     (value * 1000.0).round() as i32
+}
+
+/// `path` joined to `base` when it is relative.
+fn resolve(base: Option<&Path>, path: PathBuf) -> PathBuf {
+    match base {
+        Some(base) if path.is_relative() => base.join(path),
+        _ => path,
+    }
 }
 
 /// One mesh to draw, with its world transform and colour.
@@ -158,8 +183,8 @@ pub struct PlayInstance {
     pub mesh: MeshSpec,
     /// Where it is, in world space.
     pub transform: m3::Transform3D,
-    /// Its base colour, linear RGBA.
-    pub color: Color3D,
+    /// Its surface: colour, emissive, metalness and roughness.
+    pub material: m3_material::Material,
     /// The node it came from, for logs.
     pub node: u64,
 }
@@ -239,16 +264,13 @@ impl PlayPlan {
                 continue;
             };
             let spec = MeshSpec::from_source(source, base);
-            if let MeshSpec::Obj { path } = &spec {
-                if path
-                    .extension()
-                    .is_some_and(|ext| ext == "gltf" || ext == "glb")
-                {
-                    // No loader (ADR-063). Saying so is the difference between "the editor
-                    // is broken" and "this file needs the Production Pack".
-                    unsupported.push((node.id.raw(), format!("no loader for {}", path.display())));
-                    continue;
-                }
+            // A model that is not on disk is the one failure worth reporting per node: the
+            // preview would otherwise draw the rest of the scene and leave a hole.
+            let model_path = match &spec {
+                MeshSpec::Obj { path } | MeshSpec::Gltf { path } => Some(path),
+                _ => None,
+            };
+            if let Some(path) = model_path {
                 if !path.exists() {
                     unsupported.push((node.id.raw(), format!("missing {}", path.display())));
                     continue;
@@ -300,11 +322,10 @@ fn bounds_of(instances: &[PlayInstance]) -> Option<([f32; 3], [f32; 3])> {
 
 fn instance(scene: &Scene, node: &SceneNode, mesh: MeshSpec) -> PlayInstance {
     let world = crate::editor::viewport::world_transform(scene, node);
-    let color = node.material.base_color;
     PlayInstance {
         mesh,
         transform: world.to_transform3d(),
-        color: Color3D::new(color[0], color[1], color[2], color[3]).clamped(),
+        material: node.material.to_material(),
         node: node.id.raw(),
     }
 }
@@ -447,13 +468,30 @@ mod tests {
     }
 
     #[test]
-    fn the_material_colour_reaches_the_instance() {
+    fn the_material_reaches_the_instance() {
         let scene = shadowed_scene();
         let plan = PlayPlan::from_scene(&scene, None);
-        let color = plan.instances[0].color;
+        let color = plan.instances[0].material.base_color;
         assert!((color.r - 0.5).abs() < 1e-5);
         assert!((color.g - 0.25).abs() < 1e-5);
         assert!((color.b - 0.125).abs() < 1e-5);
+    }
+
+    #[test]
+    fn emissive_and_roughness_survive_into_the_plan() {
+        let mut scene = Scene::new("pbr");
+        let mut node = SceneNode::new(SceneNodeId::new(0), "Tail light");
+        node.mesh = Some(MeshSource::Primitive(Primitive::Cube { size: 0.2 }));
+        node.material.emissive = [1.0, 0.1, 0.0];
+        node.material.roughness = 0.15;
+        node.material.metallic = 0.9;
+        scene.add_node(node);
+        let plan = PlayPlan::from_scene(&scene, None);
+        let material = plan.instances[0].material;
+        assert!((material.emissive.r - 1.0).abs() < 1e-5);
+        assert!((material.roughness - 0.15).abs() < 1e-5);
+        assert!((material.metallic - 0.9).abs() < 1e-5);
+        assert!(material.emits());
     }
 
     #[test]
@@ -509,15 +547,36 @@ mod tests {
     }
 
     #[test]
-    fn a_gltf_is_reported_as_having_no_loader() {
+    fn a_gltf_on_disk_becomes_a_gltf_spec() {
+        // The loader exists since phase 26.6, so a glTF must reach the preview instead of
+        // being listed as unsupported.
+        let dir = std::env::temp_dir().join(format!("giochi-plan-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("car.gltf");
+        std::fs::write(&path, b"{}").expect("file");
+
         let mut scene = Scene::new("gltf");
         let mut node = SceneNode::new(SceneNodeId::new(0), "Car");
-        node.mesh = Some(MeshSource::Obj("car.gltf".to_owned()));
+        node.mesh = Some(MeshSource::Gltf("car.gltf".to_owned()));
         scene.add_node(node);
-        let plan = PlayPlan::from_scene(&scene, None);
+        let plan = PlayPlan::from_scene(&scene, Some(&dir));
+        assert!(plan.unsupported.is_empty(), "{:?}", plan.unsupported);
+        assert_eq!(plan.instances.len(), 1);
+        assert!(matches!(plan.instances[0].mesh, MeshSpec::Gltf { .. }));
+        assert!(plan.instances[0].mesh.is_model());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_gltf_that_is_not_there_is_reported_as_missing() {
+        let mut scene = Scene::new("gltf");
+        let mut node = SceneNode::new(SceneNodeId::new(0), "Car");
+        node.mesh = Some(MeshSource::Gltf("car.gltf".to_owned()));
+        scene.add_node(node);
+        let plan = PlayPlan::from_scene(&scene, Some(Path::new("/tmp/giochi-nothing-here")));
         assert_eq!(plan.unsupported.len(), 1);
         assert!(
-            plan.unsupported[0].1.contains("no loader"),
+            plan.unsupported[0].1.contains("missing"),
             "{:?}",
             plan.unsupported
         );

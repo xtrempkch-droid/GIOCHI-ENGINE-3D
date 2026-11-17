@@ -11,10 +11,10 @@ use glow::HasContext;
 
 use crate::context::{GlContext, GlState, InstancingSupport};
 use crate::error::{Error3D, Result3D};
-use crate::math3d::{Camera3D, Color3D, Mat4, Transform3D};
+use crate::math3d::{Camera3D, Color3D, Mat4, Transform3D, Vec3};
 use crate::mesh::{Mesh, Vertex};
 use crate::registry::HandleRegistry;
-use crate::render3d::{DirectionalLight, InstancedRenderer, Texture3D, Upscaler};
+use crate::render3d::{DirectionalLight, InstancedRenderer, Material, Texture3D, Upscaler};
 use crate::shader::{BuiltinShader, Program};
 
 /// Opaque handle to a mesh. `0` is invalid.
@@ -521,6 +521,34 @@ impl RenderContext3D {
             .borrow_mut()
             .insert(handle, path.to_path_buf());
         Ok(handle)
+    }
+
+    /// Loads a `.gltf`/`.glb` and uploads one mesh per primitive.
+    ///
+    /// Each entry is the uploaded mesh and the material the primitive named, so a caller can
+    /// draw a model's pieces with their own colours. The full model (with its node transforms
+    /// already baked into the vertices) is returned alongside, which is what a caller wants
+    /// for bounds, a summary line or a collision shape.
+    ///
+    /// glTF meshes are **not** registered for [`Self::reload_mesh`]: hot reload rebuilds a
+    /// mesh from one file, and a glTF file holds several primitives that would each need to
+    /// find their own index again. OBJ keeps that path until it is worth the bookkeeping.
+    ///
+    /// # Errors
+    ///
+    /// [`Error3D::Asset`] when the file cannot be parsed, or [`Error3D::GlObject`] when a
+    /// primitive cannot be uploaded.
+    pub fn load_gltf_meshes(
+        &mut self,
+        path: &std::path::Path,
+    ) -> Result3D<crate::mesh::GltfLoaded> {
+        let model = crate::mesh::load_gltf(path)?;
+        let mut primitives = Vec::with_capacity(model.primitives.len());
+        for primitive in &model.primitives {
+            let handle = self.create_mesh(&primitive.vertices, &primitive.indices)?;
+            primitives.push((handle, primitive.material.clone()));
+        }
+        Ok(crate::mesh::GltfLoaded { model, primitives })
     }
 
     /// The OBJ file `handle` was loaded from, or `None` for a generated mesh.
@@ -1044,6 +1072,61 @@ impl RenderContext3D {
         program.set_color(self.gl.glow(), "u_color", colour.clamped());
 
         mesh.draw(self.gl.glow(), &program);
+
+        #[cfg(feature = "profiling")]
+        self.counters.record_mesh(
+            u64::from(mesh.vertex_count()),
+            u64::from(mesh.vertex_count()) * std::mem::size_of::<Vertex>() as u64,
+        );
+
+        Ok(true)
+    }
+
+    /// Draws `mesh` with a full surface description (colour, emissive, metalness, roughness).
+    ///
+    /// This is the call a scene or a glTF import wants: it is
+    /// [`Self::draw_mesh_colored`] plus the two uniforms that make a metal look like metal and
+    /// an emissive surface look lit. Shaders that do not declare the extra uniforms skip them
+    /// (a missing uniform is cached as `None`), so passing a `Flat` shader here is harmless and
+    /// draws the plain colour.
+    pub fn draw_mesh_material(
+        &mut self,
+        mesh: MeshHandle,
+        shader: ShaderHandle,
+        model: &Transform3D,
+        camera: &Camera3D,
+        material: &Material,
+    ) -> Result3D<bool> {
+        let Some(mesh) = self.meshes.get(mesh) else {
+            return Ok(false);
+        };
+        let Some(program) = self.shaders.get(shader) else {
+            return Ok(false);
+        };
+
+        self.bind_and_upload(&program, model, camera)?;
+
+        let gl = self.gl.glow();
+        program.set_color(gl, "u_color", material.base_color.clamped());
+        program.set_color(gl, "u_tint", Color3D::WHITE);
+        // `u_emissive` is a `vec3`: uploading it with `glUniform4f` is legal GLSL but some
+        // drivers answer `GL_INVALID_OPERATION`, which shows up as a frame that fails to
+        // draw with no clue why (measured on radeonsi with the GLES 3.2 path).
+        let emissive = material.emissive.clamped();
+        program.set_vec3(
+            gl,
+            "u_emissive",
+            Vec3::new(emissive.r, emissive.g, emissive.b),
+        );
+        program.set_f32(gl, "u_metallic", material.metallic.clamp(0.0, 1.0));
+        // The material's roughness wins over the light's global exponent when it set one;
+        // the light stays the fallback so a scene that never mentions materials keeps the
+        // look it had.
+        if (material.roughness - Material::ROUGHNESS_FROM_SHININESS).abs() > f32::EPSILON {
+            program.set_f32(gl, "u_shininess", material.resolved_shininess());
+        }
+
+        mesh.draw(gl, &program);
 
         #[cfg(feature = "profiling")]
         self.counters.record_mesh(
