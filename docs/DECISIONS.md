@@ -2112,3 +2112,58 @@ phase 37 gets its undo unit for free. The cost is one `NodeTransform` copy per d
 Verified by the `giochi-editor` unit tests (axis parameter recovery, parent space with a
 rotated parent, wrapping near ±π, a release ending the drag) and by the pixel test
 `the_gizmo_reaches_the_framebuffer`, which asserts the handles actually reach the canvas.
+
+---
+
+## ADR-067 — The scale gizmo follows the node's own axes and measures from the grab, not from the centre
+
+**Context.** Phase 35b adds scale. Two questions had to be answered that translate and
+rotate do not ask.
+
+1. **Which axes?** Translation is meaningful in world axes (moving something north is moving
+   it north) and rotation in world axes is the familiar convention. Scale is not: it is a
+   property of the node's own frame. A node rotated 45° has `scale.x` along an axis that is
+   nowhere near the world X, and a handle drawn along world X would stretch a different
+   dimension from the one it points at.
+2. **Ratio of what?** Scale is a factor, and a factor needs a reference. Dividing the
+   pointer's current distance by the distance at the grab is the obvious choice, and it
+   explodes when the pointer is grabbed near the centre — a grab two points from the pivot
+   turns a one-pixel move into a factor of three.
+
+**Decision.**
+
+- `GizmoGeometry` gained a `rotation`, identity by default. The translate and rotate gizmos
+  build it with `for_camera` and stay in world axes; the scale gizmo uses
+  `with_rotation(node.world_rotation)` and every handle points along a node axis. Handle
+  directions are read through `axis_dir`, never through `GizmoHandle::axis`.
+- The axis factor is **additive from the grab**: `1 + (current − start) / handle_length`.
+  Grabbing anywhere on the handle and dragging one handle-length outward doubles the scale;
+  it does not matter where along the handle the grab was. No division by the grab distance,
+  so no singularity at the pivot.
+- The uniform (centre cube) factor measures the pointer's offset from the centre in the
+  **camera's screen plane**, rebuilt from the ray itself (`screen_offset`), so the function
+  stays pure and testable with a hand-built ray. It is measured along the direction the drag
+  *started* in, so dragging back through the centre shrinks past 1× instead of growing again.
+- The centre cube is grabbed *at* the centre, where that direction is float noise. Below
+  `CENTER_POINTS` of offset the direction falls back to screen-right, which is the only
+  choice a user can predict.
+- **No mirroring by drag**: the factor is clamped to `MIN_FACTOR = 0.01`. A negative scale
+  component written in the inspector is preserved by a uniform drag (it multiplies), but a
+  drag cannot create one — an object flipping inside out with no warning is a trap, and
+  nothing in the plan asks for mirroring.
+- The tool change (`Q`/`W`/`E`/`R` or the toolbar) **cancels any drag in progress**: a drag
+  is only meaningful for the tool that started it, and a translate grab finished as a scale
+  would apply a factor computed from a parameter along the wrong handle.
+- The selected object also gets a **dashed AABB** while a tool is armed
+  (`gizmos/outline.rs`), because the solid box every object carries stops answering "which
+  one will change" once the scene has more than one object. Dashes are drawn as alternate
+  segments of a fixed fourteen per edge: the renderer has no line style, and a fixed count
+  per edge keeps a 1 cm box from reading as a solid line.
+
+**Consequences.** Scale now behaves like every other 3D package for the two things users
+notice — the handle points at the dimension it changes, and the drag does not care where it
+grabbed. The cost is one `Quat` per geometry and a `Vec2` in `DragKind::ScaleUniform`.
+Verified by `gizmos::scale` unit tests (linear factor, the clamp, one component at a time,
+negative components preserved, rotated geometry pointing at node axes, centre-first picking),
+the drag tests in `lib.rs` (per-axis and uniform, position untouched) and the pixel test
+`the_scale_gizmo_and_the_selection_box_reach_the_framebuffer`.

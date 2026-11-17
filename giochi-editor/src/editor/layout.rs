@@ -152,7 +152,7 @@ pub fn draw(
                                             EditorMode::Select => "Click to select",
                                             EditorMode::Translate => "Drag an arrow to move",
                                             EditorMode::Rotate => "Drag a ring to rotate",
-                                            EditorMode::Scale => "Not implemented yet (phase 35b)",
+                                            EditorMode::Scale => "Drag a cube to stretch",
                                         })
                                         .clicked()
                                     {

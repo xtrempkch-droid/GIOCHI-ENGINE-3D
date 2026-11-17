@@ -24,9 +24,11 @@
 //! rotated parent needs the world delta converted back — [`ParentSpace`] does that, and it
 //! is the reason a rotated parent does not make its children slide sideways.
 
+pub mod outline;
 pub mod paint;
 pub mod picker;
 pub mod rotate;
+pub mod scale;
 pub mod translate;
 
 use egui::Rect;
@@ -80,6 +82,10 @@ pub struct GizmoGeometry {
     pub center: Vec3,
     /// Arrow length in world units, chosen so it is [`ARROW_POINTS`] long on screen.
     pub length: f32,
+    /// The node's world rotation, so the scale handles can lie along the axes the scale
+    /// actually changes. Identity for the translate and rotate gizmos, which work in world
+    /// axes.
+    pub rotation: glam::Quat,
 }
 
 /// How long the arrows should look, in points.
@@ -104,7 +110,17 @@ impl GizmoGeometry {
         Self {
             center: world_position,
             length: units_per_point(distance, camera.fov_y, rect.height()) * ARROW_POINTS,
+            rotation: glam::Quat::IDENTITY,
         }
+    }
+
+    /// The same geometry, with the handles turned by `rotation`.
+    ///
+    /// Scale is a property of the node's own axes, so its handles have to point along them:
+    /// dragging the "X" of a node rotated 45° must change `scale.x`, and an arrow along the
+    /// world X would point at a different edge from the one it changes.
+    pub const fn with_rotation(self, rotation: glam::Quat) -> Self {
+        Self { rotation, ..self }
     }
 
     /// The same geometry, but with the length a drag was started with.
@@ -112,12 +128,22 @@ impl GizmoGeometry {
     /// A drag must not change scale when the camera moves: the handle the user grabbed has
     /// to stay where it was, so the world length is frozen at `begin`.
     pub const fn frozen(center: Vec3, length: f32) -> Self {
-        Self { center, length }
+        Self {
+            center,
+            length,
+            rotation: glam::Quat::IDENTITY,
+        }
     }
 
     /// The world-space tip of `axis`.
     pub fn tip(&self, axis: Vec3) -> Vec3 {
         self.center + axis * self.length
+    }
+
+    /// The direction a handle points after this geometry's rotation, or `None` for the
+    /// centre handle.
+    pub fn axis_dir(&self, handle: GizmoHandle) -> Option<Vec3> {
+        handle.axis().map(|axis| self.rotation * axis)
     }
 
     /// World units per point for this geometry, derived from the arrow length.
@@ -187,6 +213,20 @@ pub enum DragKind {
         /// The world point where the pointer met the plane when the drag began.
         start_point: Vec3,
     },
+    /// Stretch along one of the node's own axes.
+    ScaleAxis {
+        /// Distance along the handle at the moment the drag began.
+        start_parameter: f32,
+    },
+    /// Stretch on all three axes at once, by moving away from the centre cube.
+    ScaleUniform {
+        /// The pointer's offset from the centre, in the camera's screen plane, at the
+        /// moment the drag began.
+        start_offset: glam::Vec2,
+        /// The direction the pointer started in, so dragging back through the centre
+        /// shrinks instead of growing again.
+        direction: glam::Vec2,
+    },
     /// Turn around an axis.
     Rotate {
         /// Angle, in radians, at the moment the drag began.
@@ -243,6 +283,23 @@ impl Drag {
                 let world = Vec3::new(offset.x, 0.0, offset.z);
                 translate::apply_offset(self.start, self.parent, world)
             }
+            DragKind::ScaleAxis { start_parameter } => {
+                let Some(dir) = self.geometry.axis_dir(self.handle) else {
+                    return self.start;
+                };
+                let Some(factor) = scale::axis_factor(start_parameter, self.geometry, ray, dir)
+                else {
+                    return self.start;
+                };
+                scale::apply_scale(self.start, self.handle, factor)
+            }
+            DragKind::ScaleUniform {
+                start_offset,
+                direction,
+            } => {
+                let factor = scale::uniform_factor(start_offset, direction, self.geometry, ray);
+                scale::apply_scale(self.start, self.handle, factor)
+            }
             DragKind::Rotate {
                 start_angle,
                 accumulated,
@@ -264,6 +321,14 @@ impl Drag {
         matches!(self.kind, DragKind::Rotate { .. })
     }
 
+    /// Whether this drag scales, for a caller that wants to show the factor.
+    pub const fn is_scale(&self) -> bool {
+        matches!(
+            self.kind,
+            DragKind::ScaleAxis { .. } | DragKind::ScaleUniform { .. }
+        )
+    }
+
     /// A one-line description, for the status bar and phase 37's undo label.
     pub fn description(&self) -> String {
         match self.kind {
@@ -271,6 +336,9 @@ impl Drag {
                 format!("Move {}", self.handle_name())
             }
             DragKind::Rotate { .. } => format!("Rotate {}", self.handle_name()),
+            DragKind::ScaleAxis { .. } | DragKind::ScaleUniform { .. } => {
+                format!("Scale {}", self.handle_name())
+            }
         }
     }
 
@@ -279,7 +347,7 @@ impl Drag {
             GizmoHandle::X => "X",
             GizmoHandle::Y => "Y",
             GizmoHandle::Z => "Z",
-            GizmoHandle::Center => "plane",
+            GizmoHandle::Center => "uniform",
         }
     }
 
@@ -344,10 +412,7 @@ mod tests {
 
     #[test]
     fn the_tip_is_one_length_along_the_axis() {
-        let geometry = GizmoGeometry {
-            center: Vec3::new(1.0, 2.0, 3.0),
-            length: 2.0,
-        };
+        let geometry = GizmoGeometry::frozen(Vec3::new(1.0, 2.0, 3.0), 2.0);
         assert_eq!(geometry.tip(Vec3::Y), Vec3::new(1.0, 4.0, 3.0));
     }
 

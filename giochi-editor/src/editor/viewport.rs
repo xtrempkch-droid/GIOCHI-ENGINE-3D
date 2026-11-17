@@ -221,7 +221,20 @@ pub fn draw_with_gizmo(
         if let Some(node) = scene.node(selected[0]) {
             let world = world_transform(scene, node);
             let center = Vec3::new(world.position[0], world.position[1], world.position[2]);
-            let geometry = crate::gizmos::GizmoGeometry::for_camera(center, camera, rect);
+            let geometry = gizmo_geometry(scene, node, center, camera, rect);
+
+            let (min, max) = node_world_bounds(scene, node);
+            if crate::gizmos::outline::is_visible(min, max) {
+                crate::gizmos::outline::draw_dashed_aabb(
+                    render,
+                    rect,
+                    camera,
+                    min,
+                    max,
+                    crate::gizmos::outline::default_color(),
+                );
+            }
+
             crate::gizmos::paint::draw_for_mode(
                 render,
                 rect,
@@ -368,6 +381,20 @@ pub fn world_transform(scene: &Scene, node: &SceneNode) -> giochi_engine_3d::sce
         }
     }
     node.transform
+}
+
+/// The gizmo geometry for a node: screen-constant size, and — for the scale tool — turned by
+/// the node's world rotation, so its handles point along the axes it changes.
+pub fn gizmo_geometry(
+    scene: &Scene,
+    node: &SceneNode,
+    center: Vec3,
+    camera: &OrbitCamera,
+    rect: Rect,
+) -> crate::gizmos::GizmoGeometry {
+    let geometry = crate::gizmos::GizmoGeometry::for_camera(center, camera, rect);
+    let world = world_transform(scene, node);
+    geometry.with_rotation(glam::Quat::from_array(world.rotation))
 }
 
 /// The node's world-space AABB as `(min, max)`.

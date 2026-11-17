@@ -176,10 +176,7 @@ mod tests {
     }
 
     fn geometry(center: Vec3) -> GizmoGeometry {
-        GizmoGeometry {
-            center,
-            length: 1.0,
-        }
+        GizmoGeometry::frozen(center, 1.0)
     }
 
     #[test]

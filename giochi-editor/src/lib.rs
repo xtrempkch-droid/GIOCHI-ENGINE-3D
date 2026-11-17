@@ -325,7 +325,16 @@ fn apply_viewport_interaction(
                         // One drag, one modification: the dirty flag is set here, not per
                         // frame, and phase 37 will push exactly this before/after pair.
                         state.mark_dirty();
-                        state.status = editor::Status::info(drag.description());
+                        let description = if drag.is_scale() {
+                            format!(
+                                "{} ×{:.2}",
+                                drag.description(),
+                                gizmos::scale::factor_from(drag.start, node.transform, drag.handle)
+                            )
+                        } else {
+                            drag.description()
+                        };
+                        state.status = editor::Status::info(description);
                     }
                 }
             }
@@ -376,7 +385,7 @@ fn begin_gizmo_drag(
 
     let world = editor::viewport::world_transform(scene, &node);
     let center = glam::Vec3::new(world.position[0], world.position[1], world.position[2]);
-    let geometry = gizmos::GizmoGeometry::for_camera(center, camera, rect);
+    let geometry = editor::viewport::gizmo_geometry(scene, &node, center, camera, rect);
 
     let parent = parent_space(scene, &node);
     let id: SceneNodeId = node.id;
@@ -396,7 +405,11 @@ fn begin_gizmo_drag(
             )?;
             gizmos::rotate::begin(id, node.transform, handle, ray, geometry, parent)
         }
-        editor::EditorMode::Select | editor::EditorMode::Scale => None,
+        editor::EditorMode::Scale => {
+            let handle = gizmos::scale::pick(ray, geometry, gizmos::AXIS_TOLERANCE_POINTS)?;
+            gizmos::scale::begin(id, node.transform, handle, ray, geometry, parent)
+        }
+        editor::EditorMode::Select => None,
     }
 }
 
@@ -673,6 +686,158 @@ mod tests {
         assert!(state.drag.is_none(), "release ends the drag");
         assert!(state.dirty, "and that commits it");
         assert!(state.status.text.contains("X"), "{}", state.status.text);
+    }
+
+    fn press_key(state: &mut editor::EditorState, key: egui::Key) {
+        let ctx = egui::Context::default();
+        let mut raw = egui::RawInput::default();
+        raw.events.push(egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let _ = ctx.run(raw, |ctx| handle_shortcuts(ctx, state, false));
+    }
+
+    #[test]
+    fn the_tool_keys_arm_and_disarm_the_gizmos() {
+        let mut state = state_with_default_scene();
+        press_key(&mut state, egui::Key::W);
+        assert_eq!(state.mode, editor::EditorMode::Translate);
+        press_key(&mut state, egui::Key::E);
+        assert_eq!(state.mode, editor::EditorMode::Rotate);
+        press_key(&mut state, egui::Key::R);
+        assert_eq!(state.mode, editor::EditorMode::Scale);
+        press_key(&mut state, egui::Key::Q);
+        assert_eq!(state.mode, editor::EditorMode::Select);
+    }
+
+    #[test]
+    fn a_tool_key_does_not_fire_while_a_text_field_has_the_keyboard() {
+        // The console and the file dialog take text; `w` there must be a `w`.
+        let ctx = egui::Context::default();
+        let mut state = state_with_default_scene();
+        let mut raw = egui::RawInput::default();
+        raw.events.push(egui::Event::Key {
+            key: egui::Key::W,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let _ = ctx.run(raw, |ctx| handle_shortcuts(ctx, &mut state, true));
+        assert_eq!(state.mode, editor::EditorMode::Select);
+    }
+
+    #[test]
+    fn switching_tools_cancels_a_drag_that_belonged_to_the_old_one() {
+        // A drag is only meaningful for the tool that started it: half a translate finished
+        // with the rotate gizmo would apply a rotation computed from a translation grab.
+        let mut state = state_with_default_scene();
+        state.set_mode(editor::EditorMode::Translate);
+        let rect = test_rect();
+        let camera = state.viewport_camera;
+        let grab = arrow_tip(&state, gizmos::GizmoHandle::X);
+        apply_viewport_interaction(&mut state, &press(grab), rect, &camera);
+        assert!(state.drag.is_some());
+        state.set_mode(editor::EditorMode::Rotate);
+        assert!(state.drag.is_none());
+    }
+
+    #[test]
+    fn dragging_a_scale_cube_changes_only_that_axis() {
+        let mut state = state_with_default_scene();
+        state.set_mode(editor::EditorMode::Scale);
+        let rect = test_rect();
+        let camera = state.viewport_camera;
+        let start = state
+            .scene
+            .as_ref()
+            .expect("scene")
+            .node(editor::EntityId(1))
+            .expect("cube")
+            .transform;
+
+        let grab = arrow_tip(&state, gizmos::GizmoHandle::X);
+        apply_viewport_interaction(&mut state, &press(grab), rect, &camera);
+        assert!(state.drag.is_some(), "the press grabbed the X cube");
+
+        let out = grab + egui::vec2(80.0, 0.0);
+        let input = editor::ViewportInput {
+            hovered: true,
+            pointer: Some(out),
+            ..editor::ViewportInput::default()
+        };
+        apply_viewport_interaction(&mut state, &input, rect, &camera);
+        let release = editor::ViewportInput {
+            hovered: true,
+            pointer: Some(out),
+            released: true,
+            ..editor::ViewportInput::default()
+        };
+        apply_viewport_interaction(&mut state, &release, rect, &camera);
+
+        let after = state
+            .scene
+            .as_ref()
+            .expect("scene")
+            .node(editor::EntityId(1))
+            .expect("cube")
+            .transform;
+        assert!(after.scale[0] > start.scale[0] + 0.2, "{:?}", after.scale);
+        assert_eq!(after.scale[1], start.scale[1]);
+        assert_eq!(after.scale[2], start.scale[2]);
+        assert_eq!(after.position, start.position, "scaling moves nothing");
+        assert!(state.dirty);
+        assert!(state.status.text.contains('×'), "{}", state.status.text);
+    }
+
+    #[test]
+    fn the_uniform_cube_scales_every_axis() {
+        let mut state = state_with_default_scene();
+        state.set_mode(editor::EditorMode::Scale);
+        let rect = test_rect();
+        let camera = state.viewport_camera;
+        let start = state
+            .scene
+            .as_ref()
+            .expect("scene")
+            .node(editor::EntityId(1))
+            .expect("cube")
+            .transform
+            .scale;
+
+        let center = rect.center();
+        apply_viewport_interaction(&mut state, &press(center), rect, &camera);
+        assert!(
+            matches!(
+                state.drag.as_ref().map(|drag| drag.handle),
+                Some(gizmos::GizmoHandle::Center)
+            ),
+            "the press grabbed the uniform cube"
+        );
+
+        let out = center + egui::vec2(120.0, 0.0);
+        let input = editor::ViewportInput {
+            hovered: true,
+            pointer: Some(out),
+            ..editor::ViewportInput::default()
+        };
+        apply_viewport_interaction(&mut state, &input, rect, &camera);
+
+        let after = state
+            .scene
+            .as_ref()
+            .expect("scene")
+            .node(editor::EntityId(1))
+            .expect("cube")
+            .transform
+            .scale;
+        assert!(after[0] > start[0] + 0.2, "{after:?}");
+        assert!((after[1] / after[0] - start[1] / start[0]).abs() < 1e-4);
+        assert!((after[2] / after[0] - start[2] / start[0]).abs() < 1e-4);
     }
 
     #[test]

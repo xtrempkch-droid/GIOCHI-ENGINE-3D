@@ -73,7 +73,87 @@ pub fn rotate(
     }
 }
 
-/// Draws the gizmo for `mode`: arrows for translate, rings for rotate, nothing for select.
+/// Draws the scale gizmo: three lines with a cube at the tip, plus the uniform cube.
+///
+/// The lines are the same length as the translate arrows so switching tools does not make
+/// the handles jump, but the tips are cubes rather than arrowheads: an arrowhead says "this
+/// way", which is the one thing a scale handle must not say.
+pub fn scale(
+    render: &mut RenderContext,
+    rect: Rect,
+    camera: &OrbitCamera,
+    geometry: GizmoGeometry,
+    active: Option<GizmoHandle>,
+) {
+    let view_projection = projection(camera, rect);
+    for handle in [GizmoHandle::X, GizmoHandle::Y, GizmoHandle::Z] {
+        let Some(dir) = geometry.axis_dir(handle) else {
+            continue;
+        };
+        let color = color_for(handle, active);
+        let tip = geometry.tip(dir);
+        draw_segment(render, rect, &view_projection, geometry.center, tip, color);
+        cube_at(render, rect, camera, geometry, tip, color);
+    }
+    cube_at(
+        render,
+        rect,
+        camera,
+        geometry,
+        geometry.center,
+        color_for(GizmoHandle::Center, active),
+    );
+}
+
+/// A small screen-facing square: the cube at the end of a scale handle.
+fn cube_at(
+    render: &mut RenderContext,
+    rect: Rect,
+    camera: &OrbitCamera,
+    geometry: GizmoGeometry,
+    center: Vec3,
+    color: Color,
+) {
+    let view_projection = projection(camera, rect);
+    let half = geometry.units_per_point() * CUBE_POINTS;
+    // Built in the camera's own right/up so the square faces the user as they orbit.
+    let eye = camera.eye();
+    let forward = (center - eye).normalize_or_zero();
+    let forward = if forward == Vec3::ZERO {
+        Vec3::Z
+    } else {
+        forward
+    };
+    let helper = if forward.y.abs() > 0.9 {
+        Vec3::Z
+    } else {
+        Vec3::Y
+    };
+    let right = forward.cross(helper).normalize_or_zero();
+    let up = right.cross(forward);
+    let corners = [
+        center - right * half - up * half,
+        center + right * half - up * half,
+        center + right * half + up * half,
+        center - right * half + up * half,
+    ];
+    for index in 0..4 {
+        draw_segment(
+            render,
+            rect,
+            &view_projection,
+            corners[index],
+            corners[(index + 1) % 4],
+            color,
+        );
+    }
+}
+
+/// Half the side of a scale handle's cube, in points.
+pub const CUBE_POINTS: f32 = 5.0;
+
+/// Draws the gizmo for `mode`: arrows for translate, rings for rotate, cubes for scale,
+/// nothing for select.
 pub fn draw_for_mode(
     render: &mut RenderContext,
     rect: Rect,
@@ -89,9 +169,11 @@ pub fn draw_for_mode(
         crate::editor::EditorMode::Rotate => {
             rotate(render, rect, camera, geometry, active);
         }
-        // Select and scale: select has no handles; scale arrives in phase 35b and shows
-        // nothing until then rather than showing handles that do not drag.
-        crate::editor::EditorMode::Select | crate::editor::EditorMode::Scale => {}
+        crate::editor::EditorMode::Scale => {
+            scale(render, rect, camera, geometry, active);
+        }
+        // Select draws no handles: a handle you cannot drag is a lie about the tool.
+        crate::editor::EditorMode::Select => {}
     }
 }
 

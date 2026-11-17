@@ -49,6 +49,7 @@ fn the_viewport_paints_a_frame() {
     an_empty_viewport_is_only_the_clear_colour();
     the_layout_and_the_viewport_together_paint_a_frame();
     the_gizmo_reaches_the_framebuffer();
+    the_scale_gizmo_and_the_selection_box_reach_the_framebuffer();
 }
 
 fn grid_axes_and_boxes() {
@@ -305,6 +306,62 @@ fn the_gizmo_reaches_the_framebuffer() {
         }
     }
     assert!(coloured > 100, "{coloured} coloured gizmo pixels");
+}
+
+fn the_scale_gizmo_and_the_selection_box_reach_the_framebuffer() {
+    // Phase 35b: the scale handles (cubes, not arrows) and the dashed bounding box of the
+    // selection. Frames without them are the reference, so only what the tool added counts.
+    let mut engine = engine(640, 480);
+    let theme = EditorTheme::dark();
+    let rect = Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(640.0, 480.0));
+    let camera = OrbitCamera::default();
+    let scene = scene();
+    let selected = [giochi_engine_3d::scene::SceneNodeId(1)];
+
+    let draw = |engine: &mut giochi_engine::Engine, mode| {
+        engine.render_mut().clear(theme.viewport_color());
+        viewport::draw_with_gizmo(
+            engine.render_mut(),
+            rect,
+            Some(&scene),
+            &camera,
+            &selected,
+            &theme,
+            viewport::GizmoView {
+                mode,
+                active: Some(giochi_editor::gizmos::GizmoHandle::Y),
+            },
+        );
+        engine.render().read_pixels_rgba().expect("read").2
+    };
+
+    let plain = draw(&mut engine, giochi_editor::editor::EditorMode::Select);
+    let scaled = draw(&mut engine, giochi_editor::editor::EditorMode::Scale);
+
+    let changed = plain
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(scaled.as_chunks::<4>().0.iter())
+        .filter(|(a, b)| a != b)
+        .count();
+    assert!(
+        changed > 100,
+        "the scale handles and the box changed {changed} pixels"
+    );
+
+    // The active handle is yellow; that colour exists in the scale frame and not the plain
+    // one, which is what proves the cube was drawn where a drag can grab it.
+    let mut yellow = 0;
+    for y in 0..480u32 {
+        for x in 0..640u32 {
+            let (r, g, b) = pixel_at(640, &scaled, x, y);
+            if r > 200 && g > 170 && b < 120 {
+                yellow += 1;
+            }
+        }
+    }
+    assert!(yellow > 10, "{yellow} yellow pixels for the active handle");
 }
 
 fn the_layout_and_the_viewport_together_paint_a_frame() {

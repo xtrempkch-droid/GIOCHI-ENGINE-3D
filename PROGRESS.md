@@ -14,7 +14,7 @@ ADR-061). O Salto B começou em **2026-11-17**.
 | 33 — Inspector (**MVP do editor**) | **concluída** (2026-11-17) | 94 testes de unidade no editor (Euler↔quatérnio, editores sem input não alteram nada, multi-seleção, MVP gravar/reabrir) + smoke + pixels; execução real com o inspector desenhado a 90 frames |
 | 34 — Asset browser | **concluída** (2026-11-17) | 127 testes de unidade no editor + 5 de integração do fluxo de projeto; `editor_project_demo` imprime `project=ok`; editor aberto com `--project … --scene …` a 90 frames |
 | 35a — Gizmos (translate + rotate) | **concluída** (2026-11-17) | 167 testes de unidade no editor + teste de **pixels** `the_gizmo_reaches_the_framebuffer`; arrasto medido em teste (`dragging_a_move_arrow_moves_the_node_by_the_dragged_distance`) |
-| 35b — Gizmos (scale + AABB) | pendente | — |
+| 35b — Gizmos (scale + AABB) | **concluída** (2026-11-17) | 183 testes de unidade no editor + teste de **pixels** `the_scale_gizmo_and_the_selection_box_reach_the_framebuffer`; arrasto por eixo e uniforme medidos em teste |
 | 36 — Hierarquia (create/delete/duplicate) | pendente | — |
 | 37 — Undo/redo | pendente | — |
 | 38 — Save/load + project | pendente | — |
@@ -320,10 +320,45 @@ de expansão para manter — e a Fase 40 pode trocá-la sem tocar no `Project`.
   (ADR-066): um arrasto é uma alteração, não N alterações — é o que a Fase 37 vai precisar.
 - Nada de undo ainda (R6, Fase 37). O `*` no título aparece **ao largar** o botão.
 
+### Gates da Fase 35b
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — exit 0
+- [x] `cargo test --workspace` — **1116 testes**, 0 falhas; o `giochi-editor` passou a
+      **183** testes de unidade (+16 de escala, teclas e cancelamento de arrasto)
+- [x] teste de **pixels** novo `the_scale_gizmo_and_the_selection_box_reach_the_framebuffer`
+- [x] `cargo doc --workspace --no-deps --document-private-items`
+- [x] `scripts/gates.sh` completo — "All gates passed"
+- [x] `cargo run -p giochi-editor -- --scene giochi-editor/assets/scenes/default.scene --frames 90` (x11)
+- [x] `cargo check -p giochi-editor --target aarch64-unknown-linux-gnu`
+
+### Entregue na Fase 35b
+
+| Ficheiro | O que faz |
+|---|---|
+| `gizmos/scale.rs` | fator por eixo medido a partir do agarre, fator uniforme no plano do ecrã, `MIN_FACTOR`, `apply_scale`, `factor_from` |
+| `gizmos/outline.rs` | AABB tracejada da seleção (14 segmentos por aresta, alternados) |
+| `gizmos/mod.rs` | `DragKind::ScaleAxis`/`ScaleUniform`, `GizmoGeometry::rotation`/`axis_dir`/`with_rotation`, `Drag::is_scale` |
+| `gizmos/paint.rs` | cubos de escala virados para a câmara, cubo central |
+| `editor/viewport.rs` | `draw_with_gizmo` desenha a AABB tracejada; `gizmo_geometry` roda os handles pela rotação do nó |
+| `lib.rs` | arranque do arrasto de escala; o estado relata `Scale X ×1.75` (ADR-067) |
+| `editor/layout.rs` | dica do `R` já não diz "não implementado"; trocar de ferramenta cancela o arrasto |
+
+### Desvios e notas da Fase 35b
+
+- Os handles de escala apontam para os **eixos do nó**, não do mundo (ADR-067): `scale` é uma
+  propriedade do referencial do próprio objeto. A translação e a rotação continuam em eixos do
+  mundo, que é a convenção de todos os pacotes.
+- O plano pedia "AABB visual". A caixa é desenhada **tracejada e só com ferramenta armada**:
+  o viewport já desenha uma caixa sólida em cada objeto desde a Fase 31, e repetir a mesma
+  linha não diria qual objeto vai mudar.
+- Não há espelhamento por arrasto (fator mínimo 0.01). Um `scale` negativo escrito no
+  inspector mantém-se e é multiplicado por um arrasto uniforme.
+
 ### Próxima fase
 
-**Fase 35b — Gizmos (scale + AABB visual)**: caixa de escala por eixo e central, `R` a
-funcionar, AABB do objeto selecionado desenhada como caixa tracejada.
+**Fase 36 — Hierarquia (create/delete/duplicate/reparent)**: criar mesh/luz/câmara/grupo,
+`Delete`, `Ctrl+D` e arrastar na árvore para mudar o pai.
 
 ## Growth Pack (Fases 19–24)
 

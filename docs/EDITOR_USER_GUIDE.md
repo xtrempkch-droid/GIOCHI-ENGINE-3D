@@ -144,7 +144,7 @@ que o jogo verá. O canto inferior esquerdo mostra a distância atual.
 
 Ao abrir ou criar uma cena, a câmara enquadra automaticamente as malhas existentes.
 
-### Ferramentas e gizmos (Fase 35a)
+### Ferramentas e gizmos (Fases 35a e 35b)
 
 Uma barra flutua no canto superior esquerdo do viewport com as ferramentas. As teclas são as
 mesmas de qualquer pacote 3D:
@@ -154,7 +154,7 @@ mesmas de qualquer pacote 3D:
 | `Q` | Select | clicar escolhe objetos; nenhum gizmo é desenhado |
 | `W` | Move | três setas (X vermelho, Y verde, Z azul) transladam o objeto |
 | `E` | Rotate | três anéis rodam o objeto em torno de X, Y ou Z |
-| `R` | Scale | ainda não implementado — chega na Fase 35b |
+| `R` | Scale | três cubos (um por eixo) e um cubo central que escala os três ao mesmo tempo |
 
 O gizmo aparece **só** quando há exatamente um objeto selecionado. Com zero ou com vários não
 há handles: um gizmo que significasse "a média destes objetos" seria uma funcionalidade que
@@ -170,8 +170,24 @@ Como arrastar:
 - **anéis do Rotate**: agarre o anel e arraste; o ângulo é o que o pointer varreu no plano do
   anel. Passar dos ±180° continua a rodar em vez de saltar;
 - **clique fora dos handles** volta a selecionar (é o comportamento do `Q`);
+- **cubos do Scale**: agarre um cubo e arraste ao longo do eixo. Arrastar uma vez o
+  comprimento do handle **duplica** a escala, arrastar meia volta reduz para metade; o fator
+  é medido a partir do ponto onde agarrou, não do centro, para que o mesmo gesto dê o mesmo
+  resultado em qualquer ponto do handle;
+- **cubo central**: escala os três eixos ao mesmo tempo, na direção em que começou a
+  arrastar. Se agarrou exatamente no centro (onde a direção é indefinida), arrastar para a
+  direita aumenta;
+- **os handles de escala seguem os eixos do objeto**, não os do mundo: num objeto rodado 45°,
+  arrastar a seta "X" muda `scale.x` e a seta aponta para a aresta que muda;
+- **não há espelhamento por arrasto**: o fator nunca chega a zero (mínimo 0.01) nem fica
+  negativo. Um `scale` negativo escrito à mão no inspector continua válido e continua
+  negativo;
 - **filho de um objeto rodado** anda ao longo da seta que vê, porque o deslocamento é aplicado
   no espaço do pai.
+
+Quando uma ferramenta está armada, o objeto selecionado ganha uma **caixa tracejada** em
+volta da sua AABB — a mesma caixa sólida que o viewport desenha em todos os objetos deixaria
+de dizer qual é o que vai mudar.
 
 Enquanto arrasta, o viewport não seleciona nada: o mesmo clique que agarrou a seta iria também
 apanhar o objeto que está atrás dela. Um arrasto conta como **uma** alteração — o `*` do título
