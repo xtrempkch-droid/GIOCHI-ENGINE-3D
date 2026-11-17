@@ -15,6 +15,8 @@ Fases 0–18 concluídas. O Growth Pack começou em 2026-11-14.
 | 25 — Release 0.5.0 | **concluída** (2026-11-14) | `check-version.sh` consistente em 0.5.0 (7 referências), `cargo build --release --workspace --examples`, artefacto empacotado e `verify-release-artifact.sh` verde: binários, `giochi.h` e `libgiochi` concordam em 0.5.0, `c_smoke` reporta `abi 6, engine 0.5.0`, demo + `mini_game.lua` correm com e sem PNGs |
 | 26 — Issue #8 (wire v2) | **concluída** (2026-11-15) | 43 testes do `giochi-net` (53 com `--all-features`), protocolo v2, gates completos verdes, release 0.5.1; custo medido em `docs/PERF_LOG.md` (163 ns a codificar 13 inimigos, 191 B por snapshot, `libgiochi.so` −176 B por A/B contra `f12c09b`) |
 | 27 — CI de release (deps do cargo) | **concluída** (2026-11-17) | Falha reproduzida localmente com cargo 1.100.0 e corrigida por medição; build frio de release e `check-aarch64` verdes com 1.100; `gates.sh` e `ffi-smoke.sh` verdes; 11 jobs de build cobertos |
+| 28 — PR #10 (`mdns-sd` 0.21) | **concluída** (2026-11-17) | API adaptada (`ResolvedService`/`ScopedIp`); 49 testes com `mdns`, 53 com `--all-features`, e o `#[ignore]` de multicast real em 0,80 s; cross-check aarch64 verde |
+| 29 — PR #9 (`egui` 0.33.3) | **concluída** parcial (2026-11-17) | 0.37 recusada: MSRV 1.95 contra o piso 1.88 (ADR-061). 0.33.3 é a mais nova compatível e não precisou de código; 332 + 212 testes, demos 20/21 inalterados |
 
 ### Release 0.5.0/0.5.1 nunca publicou — `sdl2-sys` no CI (2026-11-17)
 
