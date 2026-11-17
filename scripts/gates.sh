@@ -92,6 +92,19 @@ else
     echo "    sudo apt install shellcheck"
 fi
 
+# The workflows are code too. A step inserted after `uses:` instead of after the whole
+# step, or a `run:` left holding a `with:`, is a syntax error that only shows up when
+# GitHub tries to run it -- which is after the push, on a tag, and five minutes later.
+# `actionlint` catches it in a second. CONTRIBUTING.md lists it as a gate; this makes it
+# one that runs.
+if command -v actionlint >/dev/null 2>&1; then
+    run actionlint
+else
+    echo
+    echo "==> actionlint SKIPPED (not installed)"
+    echo "    bash <(curl -sSf https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)"
+fi
+
 if [[ "${SKIP_ARM64:-0}" == "1" ]]; then
     echo
     echo "==> aarch64 cross-check SKIPPED (SKIP_ARM64=1)"
