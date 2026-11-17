@@ -62,10 +62,18 @@ tobj = "4"
 # `hot_reload` does not raise the engine's measured 1.86 floor (ADR-046). The API used
 # here (`recommended_watcher`, `Watcher::watch`) has not changed since 5.
 notify = "8"
-# Phase 20/21. 0.32 is the newest egui whose MSRV (1.85) is *below* this workspace's
-# 1.86 engine floor, so turning the feature on cannot raise it (ADR-046, ADR-052).
-# 0.33+ declares 1.88 and 0.35+ declares 1.92.
-egui = "0.32.3"
+# Phase 20/21. The pin is set by MSRV, not by novelty: turning `devtools` on must not
+# raise the workspace floor (ADR-046, ADR-052, ADR-061). Measured from the crates.io
+# index on 2026-11-17:
+#
+#   0.32.3 -> 1.85   0.33.3 -> 1.88  <- this one, exactly the floor in `rust-version`
+#   0.34.x/0.35.0 -> 1.92   0.36.0+ -> 1.95
+#
+# 0.37.0 (what dependabot asks for in PR #9) declares 1.95 and would raise the floor for
+# every user, including the ones that never enable the feature. 0.33.3 needed no source
+# change at all; 0.37 removes `Context::run`, `Context::style` and moves
+# `TopBottomPanel`, so it is not a free bump either.
+egui = "0.33.3"
 
 # Phase 24. Rapier 0.36 is the newest release whose declared MSRV (1.86) is exactly the
 # engine's floor, so turning `physics-2d`/`physics-3d` on cannot raise it (ADR-046).

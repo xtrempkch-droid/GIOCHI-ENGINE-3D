@@ -1873,3 +1873,35 @@ the single source of truth for the channel and the components.
 died on all four attempts. The cost is one small step and one shell script. The removal
 criterion is stated in the script: when `cargo +stable build` succeeds in an empty target
 directory, delete the script, its eight callers and the note in CONTRIBUTING.md.
+
+## ADR-061 — Optional features keep egui at 0.33.3, and dependabot cannot move it
+
+**Context.** Dependabot PR #9 asks for `egui` 0.32.3 → 0.37.0. The pin is not habit: ADR-046
+says an optional feature must not raise the workspace's `rust-version`, and `devtools` is
+optional. Measured from the crates.io index on 2026-11-17, per declared MSRV:
+
+| egui | `rust_version` | Against the workspace floor of 1.88 |
+|---|---|---|
+| 0.32.3 (was) | 1.85 | below |
+| **0.33.3 (now)** | **1.88** | exactly the floor |
+| 0.34.0–0.34.3, 0.35.0 | 1.92 | **raises it** |
+| 0.36.0–0.36.2, 0.37.0 | 1.95 | **raises it by 7 releases** |
+
+So #9 as written cannot be merged without raising the minimum compiler for every consumer,
+including those that never enable `devtools`. It is also not a free bump: 0.37 removes
+`Context::run` and `Context::style`, moves `TopBottomPanel` and adds `phase`/`source` to
+`egui::Event`, which is the six-error wall CI reported on that PR.
+
+**Decision.** Take the newest version the floor allows and stop there: **0.33.3**. It is
+source-compatible with 0.32.3 for everything this crate uses — the bump needed no code
+change at all — and the MSRV is exactly 1.88, which is what `rust-version` says.
+
+**Consequences.** The upgrade intent of #9 is served as far as the invariant permits, and the
+remaining gap is a deliberate, documented refusal until the floor rises for some other
+reason. When that happens, the move to 0.37 is a real migration (the six sites above) and
+must be done as its own change with the MSRV bump in the same commit, not as a dependency
+bot edit.
+
+Verified on the bump: 332 `devtools` tests, 212 `giochi-engine-3d` tests plus the HUD render
+tests, and the pixel-level acceptance tests for the three UI themes; `ui_demo` and
+`devtools_demo` both run 120 frames with unchanged output lines.
