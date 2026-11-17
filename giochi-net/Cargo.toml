@@ -44,7 +44,7 @@ mdns-sd = { version = "0.13", optional = true }
 # com ENETUNREACH quando nao ha -- que e o caso de um console ligado por USB-Ethernet
 # ao PC, sem gateway. O `mdns-sd` ja puxa este crate, entao nao e dependencia nova no
 # grafo; declarar aqui e o que permite chama-lo direto.
-if-addrs = { version = "0.13", optional = true }
+if-addrs = { version = "0.15", optional = true }
 
 [dev-dependencies]
 

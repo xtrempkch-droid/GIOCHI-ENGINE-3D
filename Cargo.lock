@@ -653,7 +653,7 @@ dependencies = [
 name = "giochi-net"
 version = "0.5.1"
 dependencies = [
- "if-addrs",
+ "if-addrs 0.15.0",
  "laminar",
  "mdns-sd",
 ]
@@ -775,6 +775,16 @@ checksum = "69b2eeee38fef3aa9b4cc5f1beea8a2444fc00e7377cafae396de3f5c2065e24"
 dependencies = [
  "libc",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "if-addrs"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0a05c691e1fae256cf7013d99dad472dc52d5543322761f83ec8d47eab40d2b"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -971,7 +981,7 @@ checksum = "328f4e1041f7cfeb3affccb814ddbe2f004856a2ce769c8bf22080d74c5204c6"
 dependencies = [
  "fastrand",
  "flume",
- "if-addrs",
+ "if-addrs 0.13.4",
  "log",
  "mio",
  "socket2",
