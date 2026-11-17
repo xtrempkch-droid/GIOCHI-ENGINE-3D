@@ -131,10 +131,90 @@ slots, câmaras de jogo (follow/shake/cutscene), A*, buses de áudio e i18n. Nad
 depende delas; a Fase 41 (carro e pista) depende de glTF, e a 44 de buses. Ficam registadas
 como pendências reais, não como ideias.
 
+### Gates da Fase 31
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo test --workspace` — 22 testes do formato de cena e 55 do editor
+- [x] `cargo doc --workspace --no-deps`
+- [x] `scripts/gates.sh` completo — "All gates passed"
+- [x] `cargo run -p giochi-editor --example editor_default_scene` — `roundtrip=ok`
+- [x] `cargo run -p giochi-editor -- --scene giochi-editor/assets/scenes/default.scene --frames 60` (x11)
+- [x] `SDL_VIDEODRIVER=dummy … --frames 10` e o smoke com cena
+- [x] `cargo check -p giochi-editor --target aarch64-unknown-linux-gnu`
+
+### Entregue na Fase 31
+
+| Ficheiro | O que faz |
+|---|---|
+| `giochi-engine-3d/src/scene/` | formato de cena versionado, JSON, ids estáveis, validação, gravação atómica (ADR-063) |
+| `giochi-editor/src/editor/orbit_camera.rs` | câmara do viewport: yaw/pitch/distância, pan, zoom multiplicativo, `frame_aabb`, matrizes do motor |
+| `giochi-editor/src/editor/viewport.rs` | projeção wireframe, grid, eixos, AABB por nó, contorno de seleção, clipping Liang–Barsky, leitura de input |
+| `giochi-editor/src/editor/dialog.rs` | diálogo abrir/gravar em egui (sem `rfd`), listagem de `.scene`, `Up`/`Refresh` |
+| `giochi-editor/src/editor/editor_state.rs` | cena, `new_scene`/`open_scene`/`save_scene_as`, enquadramento, status, diálogo |
+| `giochi-editor/src/editor/layout.rs` | menus ligados, atalhos, status, interação do viewport, overlay de ajuda |
+| `giochi-engine/src/render/renderer.rs` | `RenderContext::read_pixels_rgba` (para o teste de pixels) |
+| `giochi-editor/tests/viewport_render.rs` | aceitação por **pixels**: grid, 3 cores de eixo, seleção, clipping |
+| `giochi-editor/assets/scenes/default.scene` | a cena de `New Scene`, commitada |
+| `giochi-editor/examples/editor_default_scene.rs` | grava, relê e confirma o round-trip |
+| `docs/EDITOR_USER_GUIDE.md` | viewport, diálogo, atalhos, pendências |
+| `docs/3D.md` §6 | o formato de cena e os seus invariantes |
+
+### Desvio consciente ao plano: viewport em wireframe, sem FBO/GLES (ADR-064)
+
+A Fase 31 pedia render-to-texture e avisava dos quirks em GLES 2.0. O editor pinta com
+`sdl2::render`; o crate 3D abre o seu próprio contexto GL na mesma janela, e o renderer SDL
+não expõe o contexto que usa. Partilhar contexto é não suportado; um segundo contexto com
+`glReadPixels` por frame é exactamente o caminho que falha nos drivers Mali. Por isso o
+viewport **projeta geometria e desenha linhas** no mesmo renderer dos painéis — a técnica do
+`DebugDraw` da Fase 20, que o próprio plano sugeria para o grid. O que se perde:
+pré-visualizar materiais e luz no editor (o jogo mostra-os). Fica registado como o único item
+da fase trocado deliberadamente, e `viewport::draw` é a assinatura que uma FBO substituiria
+na Fase 40 sem tocar no resto.
+
+`rfd` também não entrou: no GIOCHI-OS não há portal, D-Bus de sessão nem GTK. O diálogo é
+egui, funciona em KMSDRM e não acrescenta uma dependência nativa.
+
+### Achado ao escrever o teste de pixels
+
+`canvas.read_pixels(None, PixelFormatEnum::RGBA8888)` devolveu os bytes **rodados** neste
+SDL/software renderer: limpar para `rgb(8,9,13)` e pedir RGBA8888 deu `[255,13,9,8]`; `RGB24`
+deu `[8,9,13]`, o valor certo. `read_pixels_rgba` lê `RGB24` e expande, e o comentário
+documenta a medição. Sem isto o teste do viewport falharia a olhar para a cor errada.
+
+### Gates da Fase 32
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo test --workspace` — 83 testes de unidade no editor
+- [x] `cargo doc --workspace --no-deps`
+- [x] `scripts/gates.sh` completo — "All gates passed"
+- [x] `cargo run -p giochi-editor -- --scene …default.scene --frames 90` (x11)
+- [x] `cargo check -p giochi-editor --target aarch64-unknown-linux-gnu`
+
+### Entregue na Fase 32
+
+| Ficheiro | O que faz |
+|---|---|
+| `editor/icons.rs` | carrega os PNG de `assets/icons` com SDL_image (APIs seguras), `ctx.load_texture`, fallback para letra colorida |
+| `panels/hierarchy.rs` | `TreeSnapshot` (lista plana e possuída), `CollapsingHeader` por ramo, ícone por tipo, click/Ctrl+click/duplo-click |
+| `gizmos/picker.rs` | `Ray`, `ray_through` (unproject via a **mesma** matriz que desenha), `ray_aabb` (slab) e `pick` (mais próximo) |
+| `editor_state.rs` | `selected: Vec<EntityId>` (multi-seleção), `primary`, `is_selected`, `toggle_selection` |
+| `viewport.rs` | `node_world_bounds` público (a caixa que se desenha é a que se clica), destaque de todos os selecionados |
+| `lib.rs` | `apply_viewport_pick` (testável sem eventos SDL), ícones carregados uma vez, init do SDL_image |
+
+### Achado ao correr o editor: UV fora de 0..1 nos ícones
+
+O caminho `egui::Image` + `SizedTexture` produzia `uv = -0.035714` e o SDL recusava a
+geometria ("Values of 'uv' out of bounds"), uma vez por ícone e por frame. Passou a usar
+`painter.image` com UV explícito `0..1`: zero avisos e um quad menor. Isto só apareceu
+porque o editor foi aberto — os testes de unidade não desenham ícones.
+
 ### Próxima fase
-: render da cena 3D no centro, `OrbitCamera` (botão direito orbita,
-meio faz pan, scroll zoom), grid e eixos via `debug_draw`, `File > New Scene` /
-`File > Open Scene` (com `rfd`), cena de exemplo com cubo + luz + câmara.
+
+**Fase 33 — Inspector (MVP do editor)**: Transform (posição/rotação/escala com
+`DragValue`), Mesh, Material (cor + textura), Light e Camera do selecionado, a aplicar em
+tempo real; com isso o editor passa a montar uma cena simples de ponta a ponta.
 
 ## Growth Pack (Fases 19–24)
 

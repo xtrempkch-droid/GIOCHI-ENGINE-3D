@@ -38,6 +38,8 @@ use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 
 pub mod editor;
+pub mod gizmos;
+pub mod panels;
 
 /// Version of the editor, as declared in `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -112,7 +114,17 @@ pub fn run(options: EditorOptions) -> Result<EditorRunStats, GiochiError> {
     }
 
     let theme = editor::EditorTheme::dark();
+    // The icons are PNGs; SDL_image has to be up before the first `Surface::from_file`.
+    // The engine initialises it when it loads a texture, but an editor that starts on an
+    // empty scene never loads one, and the icons would fall back to letters for no reason.
+    init_image_support();
     let mut backend = EguiBackend::new();
+    // Loaded once: an `egui::TextureHandle` per icon lives for the session, and the
+    // backend uploads each one on the first paint.
+    let icons = editor::IconSet::load(backend.context(), editor::IconSet::default_directory());
+    if !icons.is_complete() {
+        log::warn!("some editor icons failed to load; falling back to letters");
+    }
     let mut egui_events: Vec<egui::Event> = Vec::new();
     let mut egui_wants_keyboard = false;
     let mut last_frame = Instant::now();
@@ -163,7 +175,7 @@ pub fn run(options: EditorOptions) -> Result<EditorRunStats, GiochiError> {
                 previous_rect,
                 state.scene.as_ref(),
                 &state.viewport_camera,
-                state.selected,
+                &state.selected,
                 &theme,
             );
         }
@@ -172,7 +184,7 @@ pub fn run(options: EditorOptions) -> Result<EditorRunStats, GiochiError> {
         let mut metrics = editor::LayoutMetrics::default();
         let output = backend.run(screen, dt, &egui_events, &mut |ctx| {
             theme.apply(ctx);
-            metrics = editor::layout::draw(ctx, &mut state, &theme);
+            metrics = editor::layout::draw(ctx, &mut state, &theme, Some(&icons));
             engine.devtools_mut().draw_console_panel(ctx, screen);
         });
         egui_wants_keyboard = backend.context().wants_keyboard_input();
@@ -189,6 +201,8 @@ pub fn run(options: EditorOptions) -> Result<EditorRunStats, GiochiError> {
                     .input
                     .apply_to_camera(&mut state.viewport_camera, rect.height());
             }
+
+            apply_viewport_pick(&mut state, &metrics.input, rect);
         }
         engine.render_mut().present();
 
@@ -211,6 +225,48 @@ pub fn run(options: EditorOptions) -> Result<EditorRunStats, GiochiError> {
     log::info!("giochi-editor: {frames} frame(s) rendered");
 
     Ok(EditorRunStats { frames })
+}
+
+/// Applies a click or double-click in the viewport to the selection.
+///
+/// Split out of the loop so the wiring is testable without SDL events: the picker and the
+/// camera are pure, and this is the only place where "clicked here" becomes "selected
+/// that".
+fn apply_viewport_pick(
+    state: &mut editor::EditorState,
+    input: &editor::ViewportInput,
+    rect: egui::Rect,
+) {
+    let Some(scene) = state.scene.clone() else {
+        return;
+    };
+
+    if let Some(position) = input.double_click {
+        if let Some(id) = gizmos::picker::pick(&scene, position, rect, &state.viewport_camera) {
+            if let Some(node) = scene.node(id) {
+                let (min, max) = editor::viewport::node_world_bounds(&scene, node);
+                state.viewport_camera.frame_aabb(min, max);
+            }
+            state.select(Some(id));
+        }
+        return;
+    }
+
+    if let Some(position) = input.click {
+        match gizmos::picker::pick(&scene, position, rect, &state.viewport_camera) {
+            Some(id) if input.toggle_modifier => state.toggle_selection(id),
+            Some(id) => state.select(Some(id)),
+            None => state.clear_selection(),
+        }
+    }
+}
+
+/// Initialises SDL_image's PNG decoder, keeping the context alive for the process.
+fn init_image_support() {
+    match sdl2::image::init(sdl2::image::InitFlag::PNG) {
+        Ok(context) => std::mem::forget(context),
+        Err(error) => log::warn!("SDL_image PNG support unavailable: {error}"),
+    }
 }
 
 /// Applies the editor's keyboard shortcuts, unless egui wants the keyboard.
@@ -247,6 +303,82 @@ fn handle_shortcuts(ctx: &egui::Context, state: &mut editor::EditorState, wants_
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_rect() -> egui::Rect {
+        egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0))
+    }
+
+    fn state_with_default_scene() -> editor::EditorState {
+        let mut state = editor::EditorState::new();
+        state.new_scene();
+        // `new_scene` frames the scene; aim at the cube so the centre of the viewport is
+        // over it.
+        state.viewport_camera =
+            editor::OrbitCamera::looking_at(glam::Vec3::new(0.0, 0.5, 0.0), 9.0);
+        state
+    }
+
+    fn click(position: egui::Pos2) -> editor::ViewportInput {
+        editor::ViewportInput {
+            hovered: true,
+            click: Some(position),
+            ..editor::ViewportInput::default()
+        }
+    }
+
+    #[test]
+    fn clicking_the_cube_in_the_viewport_selects_it() {
+        let mut state = state_with_default_scene();
+        apply_viewport_pick(&mut state, &click(test_rect().center()), test_rect());
+        assert_eq!(state.primary(), Some(editor::EntityId(1)));
+    }
+
+    #[test]
+    fn clicking_empty_space_clears_the_selection() {
+        let mut state = state_with_default_scene();
+        state.select(Some(editor::EntityId(2)));
+        apply_viewport_pick(&mut state, &click(egui::pos2(4.0, 4.0)), test_rect());
+        assert!(state.selected.is_empty());
+    }
+
+    #[test]
+    fn ctrl_click_in_the_viewport_toggles() {
+        let mut state = state_with_default_scene();
+        state.select(Some(editor::EntityId(2)));
+        let mut input = click(test_rect().center());
+        input.toggle_modifier = true;
+        apply_viewport_pick(&mut state, &input, test_rect());
+        assert_eq!(
+            state.selected,
+            vec![editor::EntityId(2), editor::EntityId(1)]
+        );
+    }
+
+    #[test]
+    fn a_double_click_frames_and_selects() {
+        let mut state = state_with_default_scene();
+        state.viewport_camera =
+            editor::OrbitCamera::looking_at(glam::Vec3::new(0.0, 0.5, 0.0), 40.0);
+        let input = editor::ViewportInput {
+            hovered: true,
+            double_click: Some(test_rect().center()),
+            ..editor::ViewportInput::default()
+        };
+        apply_viewport_pick(&mut state, &input, test_rect());
+        assert_eq!(state.primary(), Some(editor::EntityId(1)));
+        assert!(
+            state.viewport_camera.distance < 10.0,
+            "framing pulls the camera in, got {}",
+            state.viewport_camera.distance
+        );
+    }
+
+    #[test]
+    fn a_click_with_no_scene_is_ignored() {
+        let mut state = editor::EditorState::new();
+        apply_viewport_pick(&mut state, &click(test_rect().center()), test_rect());
+        assert!(state.selected.is_empty());
+    }
 
     #[test]
     fn the_default_window_matches_the_plan() {

@@ -57,6 +57,8 @@ pub struct ViewportInput {
     pub click: Option<egui::Pos2>,
     /// Primary button double-clicked this frame, with the pointer position.
     pub double_click: Option<egui::Pos2>,
+    /// Whether Ctrl (or Cmd) was held when the click happened.
+    pub toggle_modifier: bool,
 }
 
 impl ViewportInput {
@@ -113,6 +115,7 @@ pub fn read_input(ctx: &egui::Context, rect: Option<Rect>) -> ViewportInput {
         input.pan = pointer.delta();
     }
     input.scroll = ctx.input(|i| i.smooth_scroll_delta.y);
+    input.toggle_modifier = ctx.input(|i| i.modifiers.command);
     if pointer.button_clicked(egui::PointerButton::Primary) {
         input.click = pointer.interact_pos();
     }
@@ -133,7 +136,7 @@ pub fn draw(
     rect: Rect,
     scene: Option<&Scene>,
     camera: &OrbitCamera,
-    selected: Option<SceneNodeId>,
+    selected: &[SceneNodeId],
     theme: &EditorTheme,
 ) {
     if rect.width() < 2.0 || rect.height() < 2.0 {
@@ -231,11 +234,11 @@ fn draw_node(
     view_projection: &Mat4,
     node: &SceneNode,
     scene: &Scene,
-    selected: Option<SceneNodeId>,
+    selected: &[SceneNodeId],
     theme: &EditorTheme,
 ) {
-    let (min, max) = bounds_of(node, scene);
-    let is_selected = selected == Some(node.id);
+    let (min, max) = node_world_bounds(scene, node);
+    let is_selected = selected.contains(&node.id);
 
     let color = if is_selected {
         to_engine_color(egui::Color32::from_rgb(0xff, 0xd0, 0x4a))
@@ -280,7 +283,11 @@ fn draw_node(
 
 /// A node's world box. Meshes use their transform; lights, cameras and groups get a
 /// small fixed box at their position so they are visible at all.
-fn bounds_of(node: &SceneNode, scene: &Scene) -> ([f32; 3], [f32; 3]) {
+///
+/// Public because the picker (phase 32) and the hierarchy's "frame this" both need the
+/// same box the viewport draws — two definitions would drift and a click would select a
+/// box the user cannot see.
+pub fn node_world_bounds(scene: &Scene, node: &SceneNode) -> ([f32; 3], [f32; 3]) {
     let mut node = node.clone();
     // The node's transform is local; the viewport shows world space. Walking to the root
     // is cheap (a scene has tens of nodes) and keeps `Scene` free of a cached hierarchy
@@ -624,7 +631,7 @@ mod tests {
         child.transform.position = [1.0, 0.0, 0.0];
         let child = scene.add_node(child);
 
-        let (min, max) = bounds_of(&child, &scene);
+        let (min, max) = node_world_bounds(&scene, &child);
         assert!((min[0] - 10.5).abs() < 1e-4, "{min:?}");
         assert!((max[0] - 11.5).abs() < 1e-4, "{max:?}");
     }
@@ -640,7 +647,7 @@ mod tests {
         child.mesh = Some(MeshSource::Primitive(Primitive::Cube { size: 1.0 }));
         let child = scene.add_node(child);
 
-        let (min, max) = bounds_of(&child, &scene);
+        let (min, max) = node_world_bounds(&scene, &child);
         assert!((max[0] - min[0] - 2.0).abs() < 1e-4, "{min:?} {max:?}");
     }
 
@@ -652,7 +659,7 @@ mod tests {
         light.transform.position = [0.0, 5.0, 0.0];
         let light = scene.add_node(light);
 
-        let (min, max) = bounds_of(&light, &scene);
+        let (min, max) = node_world_bounds(&scene, &light);
         assert!(min[1] < 5.0 && max[1] > 5.0);
     }
 

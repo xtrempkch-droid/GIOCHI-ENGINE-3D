@@ -1,8 +1,9 @@
 # giochi-editor — guia do utilizador
 
-Editor visual de cenas da GIOCHI-ENGINE. Este documento cobre as **Fases 30 e 31**: como
-abrir o editor, o que já está na janela, como navegar no viewport e como criar, abrir e
-gravar cenas. Cresce uma secção por fase até ao guia completo da Fase 40.
+Editor visual de cenas da GIOCHI-ENGINE. Este documento cobre as **Fases 30 a 32**: como
+abrir o editor, o que já está na janela, como navegar no viewport, como criar/abrir/gravar
+cenas e como selecionar objetos. Cresce uma secção por fase até ao guia completo da
+Fase 40.
 
 ---
 
@@ -58,7 +59,7 @@ depois**: cada painel diz qual é a fase que o preenche.
 
 | Painel | Conteúdo | Fase |
 |---|---|---|
-| Hierarchy | árvore da cena, seleção, destaque no viewport | 32 (lista simples desde a 31) |
+| Hierarchy | árvore com hierarquia, ícones por tipo, seleção | **32, feito** |
 | Inspector | Transform, Mesh, Material, Light, Camera | 33 |
 | Asset Browser | árvore de assets do projeto, import, drag-to-viewport | 34 |
 | Viewport | cena em wireframe, grid, eixos, câmara orbit | **31, feito** |
@@ -105,7 +106,27 @@ Substituir uma cena com alterações por gravar é recusado: grave primeiro.
 
 ---
 
-## 3.1 Viewport
+## 3.1 Hierarchy e seleção
+
+A árvore mostra a hierarquia da cena (nós filhos dentro do pai, com `CollapsingHeader`),
+com um ícone por tipo (`mesh`, `light`, `camera`, `group`). Um objeto selecionado fica
+destacado na árvore e com contorno amarelo no viewport.
+
+| Gesto | Onde | Efeito |
+|---|---|---|
+| click | árvore ou viewport | seleciona **só** esse objeto |
+| `Ctrl`+click | árvore ou viewport | adiciona/remove da seleção (multi-seleção) |
+| duplo-click | árvore ou viewport | seleciona **e** enquadra o objeto no viewport |
+| click no vazio | viewport | limpa a seleção |
+
+A escolha no viewport é por **raycast** contra a caixa (AABB) de cada nó — o mesmo
+`viewport::node_world_bounds` que desenha as caixas, por isso o objeto que se clica é o que
+se vê. O mais próximo ao longo do raio ganha. A seleção é guardada por id estável
+(`SceneNodeId`), o mesmo id que o ficheiro da cena usa.
+
+`View > Frame Scene` enquadra a cena inteira; o duplo-click enquadra um objeto.
+
+## 3.2 Viewport
 
 | Gesto | Efeito |
 |---|---|
@@ -119,7 +140,7 @@ que o jogo verá. O canto inferior esquerdo mostra a distância atual.
 
 Ao abrir ou criar uma cena, a câmara enquadra automaticamente as malhas existentes.
 
-## 3.2 O diálogo de ficheiros
+## 3.3 O diálogo de ficheiros
 
 `File > Open Scene…` e `File > Save As…` abrem um diálogo desenhado pelo próprio editor
 (egui), não o `rfd`: no GIOCHI-OS não há `xdg-desktop-portal` nem D-Bus de sessão, e um
@@ -177,11 +198,10 @@ de um painel.
 
 ---
 
-## 6. Pendências conhecidas (fim da Fase 31)
+## 6. Pendências conhecidas (fim da Fase 32)
 
 | Pendência | Fase |
 |---|---|
-| Árvore clicável, seleção por click no viewport (raycast) | 32 |
 | Inspector editável | 33 |
 | Asset browser, drag-to-viewport | 34 |
 | Gizmos translate/rotate/scale | 35a/35b |

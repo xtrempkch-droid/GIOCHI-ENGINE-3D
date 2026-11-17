@@ -6,6 +6,7 @@
 
 pub mod dialog;
 pub mod editor_state;
+pub mod icons;
 pub mod layout;
 pub mod orbit_camera;
 pub mod theme;
@@ -13,6 +14,7 @@ pub mod viewport;
 
 pub use dialog::{DialogKind, DialogOutcome, FileDialog};
 pub use editor_state::{EditorMode, EditorState, EntityId, PanelVisibility, Status, StatusKind};
+pub use icons::IconSet;
 pub use layout::{draw, LayoutMetrics};
 pub use orbit_camera::OrbitCamera;
 pub use theme::EditorTheme;

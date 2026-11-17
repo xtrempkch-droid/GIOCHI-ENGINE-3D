@@ -191,10 +191,11 @@ They need a GL driver; `SDL_VIDEODRIVER=offscreen` runs them headless.
 
 ### Editor
 
-The visual editor (`giochi-editor`, Salto B phases 30–40) is its own crate. Phases 30–31
+The visual editor (`giochi-editor`, Salto B phases 30–40) is its own crate. Phases 30–32
 give a resizable 1600×900 window with the menu bar, the Hierarchy/Inspector/Asset Browser
-panels and a viewport that draws the scene as a projected wireframe (grid, axes, node
-boxes, selection outline), with an orbit camera and New/Open/Save through the scene format:
+panels, a viewport that draws the scene as a projected wireframe (grid, axes, node boxes,
+selection outline) with an orbit camera, New/Open/Save through the scene format, and
+hierarchy + viewport selection (click, Ctrl+click, double-click to frame):
 
 ```bash
 cargo run -p giochi-editor                      # opens the editor

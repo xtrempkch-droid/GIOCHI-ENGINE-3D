@@ -25,8 +25,10 @@ use egui::{Align, Layout, Rect, RichText};
 
 use crate::editor::dialog::DialogOutcome;
 use crate::editor::editor_state::{Status, StatusKind};
+use crate::editor::icons::IconSet;
 use crate::editor::viewport::{self, ViewportInput};
 use crate::editor::{EditorState, EditorTheme};
+use crate::panels::hierarchy;
 
 /// Identifier of the menu bar panel, stable across frames.
 pub const MENU_BAR_PANEL: &str = "giochi_editor_menu_bar";
@@ -50,7 +52,12 @@ pub struct LayoutMetrics {
 }
 
 /// Draws the whole editor chrome and returns the rectangles the rest of the editor needs.
-pub fn draw(ctx: &egui::Context, state: &mut EditorState, theme: &EditorTheme) -> LayoutMetrics {
+pub fn draw(
+    ctx: &egui::Context,
+    state: &mut EditorState,
+    theme: &EditorTheme,
+    icons: Option<&IconSet>,
+) -> LayoutMetrics {
     menu_bar(ctx, state, theme);
 
     if state.panels.hierarchy {
@@ -60,33 +67,15 @@ pub fn draw(ctx: &egui::Context, state: &mut EditorState, theme: &EditorTheme) -
             .width_range(180.0..=440.0)
             .show(ctx, |ui| {
                 panel_header(ui, "HIERARCHY", theme);
-                match &state.scene {
-                    Some(scene) => {
-                        ui.label(
-                            RichText::new(format!(
-                                "{} object(s) — tree arrives in phase 32",
-                                scene.nodes.len()
-                            ))
-                            .color(theme.muted)
-                            .small(),
-                        );
-                        for node in scene.nodes.iter().take(12) {
-                            ui.label(
-                                RichText::new(format!("{}  {}", node.kind(), node.name))
-                                    .color(theme.muted)
-                                    .small(),
-                            );
-                        }
-                        if scene.nodes.len() > 12 {
-                            ui.label(RichText::new("…").color(theme.muted).small());
-                        }
-                    }
-                    None => hint(
+                if state.scene.is_some() {
+                    hierarchy::draw(ui, state, icons, theme);
+                } else {
+                    hint(
                         ui,
-                        "No scene open. The object tree appears here.",
+                        "No scene open. File > New Scene (Ctrl+N).",
                         "Phase 32 — Hierarchy + selection",
                         theme,
-                    ),
+                    );
                 }
             });
     }
@@ -361,12 +350,12 @@ mod tests {
         // Two passes: egui settles the panels' default sizes on the first.
         let _ = ctx.run(input(), |ctx| {
             theme.apply(ctx);
-            draw(ctx, state, &theme);
+            draw(ctx, state, &theme, None);
         });
         let mut metrics = LayoutMetrics::default();
         let _ = ctx.run(input(), |ctx| {
             theme.apply(ctx);
-            metrics = draw(ctx, state, &theme);
+            metrics = draw(ctx, state, &theme, None);
         });
         metrics
     }

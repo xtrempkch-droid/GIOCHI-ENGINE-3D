@@ -44,6 +44,7 @@ fn pixel_at(width: u32, pixels: &[u8], x: u32, y: u32) -> (u8, u8, u8) {
 #[test]
 fn the_viewport_paints_a_frame() {
     grid_axes_and_boxes();
+    the_icons_load();
     the_selection_changes_pixels();
     an_empty_viewport_is_only_the_clear_colour();
     the_layout_and_the_viewport_together_paint_a_frame();
@@ -65,7 +66,7 @@ fn grid_axes_and_boxes() {
         rect,
         Some(&scene),
         &camera,
-        None,
+        &[],
         &theme,
     );
 
@@ -142,6 +143,23 @@ fn grid_axes_and_boxes() {
     }
 }
 
+fn the_icons_load() {
+    // `run()` calls this before loading icons; the test exercises the loader itself.
+    match sdl2::image::init(sdl2::image::InitFlag::PNG) {
+        Ok(context) => std::mem::forget(context),
+        Err(error) => panic!("SDL_image PNG: {error}"),
+    }
+    let ctx = egui::Context::default();
+    let icons = giochi_editor::editor::IconSet::load(
+        &ctx,
+        giochi_editor::editor::IconSet::default_directory(),
+    );
+    assert!(
+        icons.is_complete(),
+        "every shipped icon must decode: {icons:?}"
+    );
+}
+
 fn the_selection_changes_pixels() {
     let mut engine = engine(640, 480);
     let theme = EditorTheme::dark();
@@ -155,7 +173,7 @@ fn the_selection_changes_pixels() {
         rect,
         Some(&scene),
         &camera,
-        None,
+        &[],
         &theme,
     );
     let (width, _, unselected) = engine.render().read_pixels_rgba().expect("read");
@@ -166,7 +184,7 @@ fn the_selection_changes_pixels() {
         rect,
         Some(&scene),
         &camera,
-        Some(giochi_engine_3d::scene::SceneNodeId(1)),
+        &[giochi_engine_3d::scene::SceneNodeId(1)],
         &theme,
     );
     let (_, _, selected) = engine.render().read_pixels_rgba().expect("read");
@@ -206,7 +224,7 @@ fn an_empty_viewport_is_only_the_clear_colour() {
         rect,
         None,
         &OrbitCamera::default(),
-        None,
+        &[],
         &theme,
     );
 
@@ -234,7 +252,7 @@ fn the_layout_and_the_viewport_together_paint_a_frame() {
     let mut metrics = giochi_editor::editor::LayoutMetrics::default();
     let output = backend.run((800, 600), 1.0 / 60.0, &[], &mut |ctx| {
         theme.apply(ctx);
-        metrics = giochi_editor::editor::layout::draw(ctx, &mut state, &theme);
+        metrics = giochi_editor::editor::layout::draw(ctx, &mut state, &theme, None);
     });
     // Second pass: the viewport rectangle from the first is what the viewport draws into.
     viewport::draw(
@@ -242,12 +260,12 @@ fn the_layout_and_the_viewport_together_paint_a_frame() {
         metrics.viewport_rect.expect("viewport"),
         state.scene.as_ref(),
         &state.viewport_camera,
-        None,
+        &[],
         &theme,
     );
     let output_after = backend.run((800, 600), 1.0 / 60.0, &[], &mut |ctx| {
         theme.apply(ctx);
-        metrics = giochi_editor::editor::layout::draw(ctx, &mut state, &theme);
+        metrics = giochi_editor::editor::layout::draw(ctx, &mut state, &theme, None);
     });
     drop(output);
     backend.paint(engine.render_mut(), output_after);

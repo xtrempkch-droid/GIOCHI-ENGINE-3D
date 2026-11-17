@@ -128,8 +128,12 @@ pub struct EditorState {
     pub scene_path: Option<PathBuf>,
     /// The scene being edited, or `None` before `File > New Scene` / `File > Open`.
     pub scene: Option<Scene>,
-    /// The selected object, if any. Phase 32 turns this into a multi-selection.
-    pub selected: Option<EntityId>,
+    /// Every selected object, in click order. Empty when nothing is selected.
+    ///
+    /// A `Vec` rather than an `Option`: Ctrl+click is a selection tool, and phase 33's
+    /// inspector has to say "N objects selected". The first entry is the *primary*
+    /// selection, which is the one the inspector shows and the gizmo attaches to.
+    pub selected: Vec<EntityId>,
     /// The armed viewport tool.
     pub mode: EditorMode,
     /// Whether the scene has unsaved changes.
@@ -164,7 +168,7 @@ impl EditorState {
         Self {
             scene_path: None,
             scene: None,
-            selected: None,
+            selected: Vec::new(),
             mode: EditorMode::Select,
             dirty: false,
             panels: PanelVisibility::default(),
@@ -176,14 +180,38 @@ impl EditorState {
         }
     }
 
-    /// The current selection, replacing whatever was selected.
+    /// The primary selection: first in click order, the one the inspector shows.
+    pub fn primary(&self) -> Option<EntityId> {
+        self.selected.first().copied()
+    }
+
+    /// Whether `id` is selected.
+    pub fn is_selected(&self, id: EntityId) -> bool {
+        self.selected.contains(&id)
+    }
+
+    /// Replaces the selection with `entity`, or clears it with `None`.
     pub fn select(&mut self, entity: Option<EntityId>) {
-        self.selected = entity;
+        self.selected.clear();
+        if let Some(entity) = entity {
+            self.selected.push(entity);
+        }
+    }
+
+    /// Adds `id` to the selection, or removes it when it was already there.
+    ///
+    /// This is Ctrl+click in the hierarchy and in the viewport.
+    pub fn toggle_selection(&mut self, id: EntityId) {
+        if let Some(index) = self.selected.iter().position(|selected| *selected == id) {
+            self.selected.remove(index);
+        } else {
+            self.selected.push(id);
+        }
     }
 
     /// Forgets the selection.
     pub fn clear_selection(&mut self) {
-        self.selected = None;
+        self.selected.clear();
     }
 
     /// Records that the scene changed since the last save.
@@ -212,7 +240,7 @@ impl EditorState {
         self.frame_scene(&scene);
         self.scene = Some(scene);
         self.scene_path = None;
-        self.selected = None;
+        self.selected.clear();
         self.mark_saved();
         self.status = Status::info("New scene");
     }
@@ -229,7 +257,7 @@ impl EditorState {
         self.frame_scene(&scene);
         self.scene = Some(scene);
         self.scene_path = Some(path.to_path_buf());
-        self.selected = None;
+        self.selected.clear();
         self.mark_saved();
         self.status = Status::info(format!("Opened {}", path.display()));
         Ok(())
@@ -371,7 +399,7 @@ mod tests {
         let state = EditorState::new();
         assert_eq!(state.scene_path, None);
         assert_eq!(state.scene, None);
-        assert_eq!(state.selected, None);
+        assert!(state.selected.is_empty());
         assert_eq!(state.mode, EditorMode::Select);
         assert!(!state.dirty);
         assert!(!state.quit_requested());
@@ -412,12 +440,37 @@ mod tests {
     fn selecting_and_clearing_a_selection() {
         let mut state = EditorState::new();
         state.select(Some(EntityId::new(7)));
-        assert_eq!(state.selected, Some(EntityId(7)));
+        assert_eq!(state.primary(), Some(EntityId(7)));
+        assert!(state.is_selected(EntityId(7)));
         assert_eq!(EntityId(7).to_string(), "#7");
         assert_eq!(EntityId::new(7).raw(), 7);
 
         state.clear_selection();
-        assert_eq!(state.selected, None);
+        assert!(state.selected.is_empty());
+        assert_eq!(state.primary(), None);
+    }
+
+    #[test]
+    fn ctrl_click_toggles_membership_and_keeps_click_order() {
+        let mut state = EditorState::new();
+        state.select(Some(EntityId(1)));
+        state.toggle_selection(EntityId(2));
+        state.toggle_selection(EntityId(3));
+        assert_eq!(state.selected, vec![EntityId(1), EntityId(2), EntityId(3)]);
+        assert_eq!(state.primary(), Some(EntityId(1)));
+
+        state.toggle_selection(EntityId(2));
+        assert_eq!(state.selected, vec![EntityId(1), EntityId(3)]);
+        assert!(!state.is_selected(EntityId(2)));
+    }
+
+    #[test]
+    fn a_plain_select_replaces_the_whole_selection() {
+        let mut state = EditorState::new();
+        state.select(Some(EntityId(1)));
+        state.toggle_selection(EntityId(2));
+        state.select(Some(EntityId(9)));
+        assert_eq!(state.selected, vec![EntityId(9)]);
     }
 
     #[test]
