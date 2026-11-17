@@ -200,7 +200,8 @@ edits Transform, Mesh, Material, Light and Camera in place, and projects (`proje
 with `assets/` and `scenes/`), asset import and drag-to-viewport instantiation, and move and
 rotate and scale gizmos (`Q`/`W`/`E`/`R`, drag a handle; scale handles follow the node's own
 axes) with the selection's bounding box drawn dashed, and a hierarchy that creates, deletes,
-duplicates and re-parents nodes — enough to build a scene, edit it and reopen it:
+duplicates and re-parents nodes, with undo/redo over every edit (one drag is one step) —
+enough to build a scene, edit it and reopen it:
 
 ```bash
 cargo run -p giochi-editor                      # opens the editor
@@ -216,7 +217,8 @@ is in [docs/3D.md](docs/3D.md) §6. The editor reuses the engine's egui backend 
 forking it (ADR-062), and the viewport draws with the same 2D renderer instead of opening a
 second GL context (ADR-064); a gizmo drag recomputes its node from the transform the drag
 started with, so one drag is one edit (ADR-066), and the scale handles follow the node's axes
-rather than the world's (ADR-067).
+rather than the world's (ADR-067), and every edit is an undoable command pushed through one
+stack (ADR-069).
 
 ### Profiling
 

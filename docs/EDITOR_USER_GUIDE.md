@@ -106,9 +106,10 @@ Substituir uma cena com alterações por gravar é recusado: grave primeiro.
 | `Q` / `W` / `E` / `R` | select / translate / rotate / scale |
 | `Ctrl+D` | duplicar a seleção |
 | `Del` / `Backspace` | apagar a seleção |
+| `Ctrl+Z` | desfazer |
+| `Ctrl+Y` / `Ctrl+Shift+Z` | refazer |
 | `F2` | Abrir/fechar a consola in-game do `giochi-engine` |
 
-`Ctrl+Z`/`Ctrl+Y` chegam na Fase 37.
 
 ---
 
@@ -140,7 +141,7 @@ se vê. O mais próximo ao longo do raio ganha. A seleção é guardada por id e
 | duplicar | `Ctrl+D`, `Edit > Duplicate`, ou o menu de contexto da linha |
 | apagar | `Del`/`Backspace`, `Edit > Delete`, ou o menu de contexto |
 | mudar de pai | arrastar uma linha para cima de outra; largar no espaço vazio move para a raiz |
-| desfazer | ainda não — Fase 37 |
+| desfazer / refazer | `Ctrl+Z` / `Ctrl+Y` (ou `Edit > Undo`), com o nome da ação no menu |
 
 Regras que valem a pena saber:
 
@@ -156,6 +157,21 @@ Regras que valem a pena saber:
   acompanhar o novo pai, que é o que "ser filho" significa;
 - arrastar para dentro de si próprio ou de um descendente é recusado — a linha fica vermelha
   durante o arrasto e a barra de estado diz porquê.
+
+#### Undo e redo (Fase 37)
+
+Tudo o que muda a cena passa por um comando: criar, apagar, duplicar, mudar de pai, os campos
+do inspector e os arrastos dos gizmos. O `Edit` mostra o nome da próxima ação ("Undo Move X"),
+por isso não é preciso adivinhar o que o `Ctrl+Z` vai fazer.
+
+- **um arrasto = um passo**: mexer uma seta durante dois segundos e largar é *um* `Ctrl+Z`, não
+  sessenta. O mesmo para arrastar um `DragValue` no inspector;
+- desfazer **depois de gravar** e voltar a fazer a mesma coisa deixa a cena "limpa" outra vez
+  (o `*` do título desaparece), porque o editor compara a posição na pilha com a do último
+  save, em vez de guardar um "sujou" que nunca volta atrás;
+- abrir ou criar uma cena **esvazia a pilha**: desfazer para dentro do ficheiro anterior seria
+  uma surpresa;
+- a pilha guarda 256 passos; passando disso, o mais antigo cai.
 
 ## 3.2 Viewport
 

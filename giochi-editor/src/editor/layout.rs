@@ -270,8 +270,28 @@ fn menu_bar(ctx: &egui::Context, state: &mut EditorState, theme: &EditorTheme) {
             });
 
             ui.menu_button("Edit", |ui| {
-                planned(ui, "Undo", "Ctrl+Z", 37);
-                planned(ui, "Redo", "Ctrl+Y", 37);
+                let undo_label = state
+                    .undo_label()
+                    .map_or_else(|| "Undo".to_owned(), |label| format!("Undo {label}"));
+                let redo_label = state
+                    .redo_label()
+                    .map_or_else(|| "Redo".to_owned(), |label| format!("Redo {label}"));
+                if ui
+                    .add_enabled(state.commands.can_undo(), egui::Button::new(undo_label))
+                    .on_hover_text("Ctrl+Z")
+                    .clicked()
+                {
+                    state.undo();
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(state.commands.can_redo(), egui::Button::new(redo_label))
+                    .on_hover_text("Ctrl+Y")
+                    .clicked()
+                {
+                    state.redo();
+                    ui.close();
+                }
                 ui.separator();
                 ui.menu_button("Create", |ui| {
                     for kind in crate::editor::node_edit::NEW_NODE_KINDS {

@@ -16,7 +16,7 @@ ADR-061). O Salto B começou em **2026-11-17**.
 | 35a — Gizmos (translate + rotate) | **concluída** (2026-11-17) | 167 testes de unidade no editor + teste de **pixels** `the_gizmo_reaches_the_framebuffer`; arrasto medido em teste (`dragging_a_move_arrow_moves_the_node_by_the_dragged_distance`) |
 | 35b — Gizmos (scale + AABB) | **concluída** (2026-11-17) | 183 testes de unidade no editor + teste de **pixels** `the_scale_gizmo_and_the_selection_box_reach_the_framebuffer`; arrasto por eixo e uniforme medidos em teste |
 | 36 — Hierarquia (create/delete/duplicate/reparent) | **concluída** (2026-11-17) | 209 testes de unidade no editor + 4 de integração (`tests/node_editing.rs`: construir → editar → gravar → reabrir, ids não reutilizados, cópia independente, todos os tipos criados e apagados) |
-| 37 — Undo/redo | pendente | — |
+| 37 — Undo/redo | **concluída** (2026-11-17) | 226 testes de unidade no editor (15 do `CommandStack`, merge de gesto, marcador de save) + `a_whole_drag_is_one_undo_step` e `ctrl_z_and_ctrl_y_walk_the_history` |
 | 38 — Save/load + project | pendente | — |
 | 39 — Play-in-editor | pendente | — |
 | 40 — Build standalone + polimento | pendente | — |
@@ -388,10 +388,45 @@ de expansão para manter — e a Fase 40 pode trocá-la sem tocar no `Project`.
 - Ainda **não há undo** (R6, Fase 37): apagar é definitivo, e é por isso que o `*` do título
   já existia desde a Fase 31.
 
+### Gates da Fase 37
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — exit 0
+- [x] `cargo test --workspace` — **1166 testes**, 0 falhas; o `giochi-editor` passou a
+      **226** de unidade + 10 de integração
+- [x] `cargo doc --workspace --no-deps --document-private-items`
+- [x] `scripts/gates.sh` completo — "All gates passed"
+- [x] `cargo run -p giochi-editor -- --scene giochi-editor/assets/scenes/default.scene --frames 60` (x11)
+- [x] `cargo check -p giochi-editor --target aarch64-unknown-linux-gnu`
+
+### Entregue na Fase 37
+
+| Ficheiro | O que faz |
+|---|---|
+| `editor/command.rs` | `trait Command`, `SetNode`, `AddNode`, `AddNodes`, `RemoveNodes::capture`, `Reparent`, `CommandStack` (undo/redo, limite 256, `push_mergeable`, marcador de save) |
+| `editor/editor_state.rs` | `commands`, `apply_command`/`apply_command_mergeable`, `undo`/`redo`, `undo_label`/`redo_label`; criar/apagar/duplicar/mudar de pai passam por comandos |
+| `panels/inspector.rs` | uma alteração do inspector é um `SetNode` mergeable enquanto o gesto dura |
+| `lib.rs` | o arrasto de gizmo empurra **um** `SetNode` ao largar; `Ctrl+Z`, `Ctrl+Y`, `Ctrl+Shift+Z` |
+| `editor/layout.rs` | `Edit > Undo <ação>` / `Redo <ação>`, desativados quando não há histórico |
+
+### Desvios e notas da Fase 37
+
+- O plano dizia "um arrasto = um comando". Ficou **um arrasto = uma entrada na pilha**, e o
+  inspector usa a mesma ideia: `DragValue` reporta alteração por frame, por isso os comandos
+  do mesmo gesto (mesmo nó, mesmo rótulo, botão ainda premido ou campo com foco) são fundidos
+  num só, guardando o `before` do início. Sem isso, arrastar um slider meia dúzia de frames
+  exigia meia dúzia de `Ctrl+Z` (ADR-069).
+- Os comandos guardam **nós inteiros** (`before`/`after`), não deltas: um delta exigiria um
+  esquema para cada campo do formato e todos os chamadores já têm os dois nós na mão.
+- `EditorState` deixou de ser `Clone`: a pilha tem trait objects e uma história copiada seria
+  uma segunda história da mesma cena. Nada precisava da cópia.
+- O "sujo" passou a ser **profundidade da pilha vs. último save**: desfazer até ao ponto de
+  gravação volta a deixar a cena limpa, coisa que um booleano não sabe exprimir.
+
 ### Próxima fase
 
-**Fase 37 — Undo/redo**: `trait Command` + `CommandStack`, e refatorar o inspector e os
-arrastos dos gizmos para passarem por comandos (um arrasto = um comando, R6).
+**Fase 38 — Save/load, projetos, recentes e autosave**: recentes persistidos, autosave por
+tempo, recuperação de sessão e diálogo de "guardar antes de sair".
 
 ## Growth Pack (Fases 19–24)
 

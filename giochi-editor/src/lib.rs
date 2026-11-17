@@ -319,23 +319,34 @@ fn apply_viewport_interaction(
     // 1. A drag in progress: follow the pointer; on release, end it.
     if let Some(mut drag) = state.drag.take() {
         if input.released {
-            if let Some(scene) = state.scene.as_mut() {
-                if let Some(node) = scene.node(drag.node).cloned() {
-                    if node.transform != drag.start {
-                        // One drag, one modification: the dirty flag is set here, not per
-                        // frame, and phase 37 will push exactly this before/after pair.
-                        state.mark_dirty();
-                        let description = if drag.is_scale() {
-                            format!(
-                                "{} ×{:.2}",
-                                drag.description(),
-                                gizmos::scale::factor_from(drag.start, node.transform, drag.handle)
-                            )
-                        } else {
-                            drag.description()
-                        };
-                        state.status = editor::Status::info(description);
-                    }
+            if let Some(node) = state
+                .scene
+                .as_ref()
+                .and_then(|scene| scene.node(drag.node))
+                .cloned()
+            {
+                if node.transform != drag.start {
+                    // One drag, one command (rule 6): the frames in between changed the
+                    // scene directly, and this is the pair the stack remembers.
+                    let label = if drag.is_scale() {
+                        format!(
+                            "{} ×{:.2}",
+                            drag.description(),
+                            gizmos::scale::factor_from(drag.start, node.transform, drag.handle)
+                        )
+                    } else {
+                        drag.description()
+                    };
+                    let before = giochi_engine_3d::scene::SceneNode {
+                        transform: drag.start,
+                        ..node.clone()
+                    };
+                    // The command's `apply` is what puts the final transform back; the scene
+                    // already holds it, so applying twice is harmless — but the entry has to
+                    // be pushed for undo to have somewhere to come back from.
+                    state.apply_command(Box::new(editor::command::SetNode::new(
+                        before, node, label,
+                    )));
                 }
             }
             return;
@@ -495,6 +506,16 @@ fn handle_shortcuts(ctx: &egui::Context, state: &mut editor::EditorState, wants_
         new = input.consume_key(modifiers, egui::Key::N);
         import = input.consume_key(modifiers, egui::Key::I);
     });
+    // Undo/redo. `Ctrl+Shift+Z` is the other redo every editor accepts, and it has to be
+    // checked before `Ctrl+Z` because `consume_key` ignores extra modifiers.
+    let mut redo_key = false;
+    let mut undo_key = false;
+    ctx.input_mut(|input| {
+        redo_key = input.consume_key(with_shift, egui::Key::Z)
+            || input.consume_key(modifiers, egui::Key::Y);
+        undo_key = input.consume_key(modifiers, egui::Key::Z);
+    });
+
     // Node editing. `Delete` and `Backspace` both delete: the first is what a keyboard
     // says, the second is what a laptop user's fingers do.
     let mut delete = false;
@@ -521,7 +542,11 @@ fn handle_shortcuts(ctx: &egui::Context, state: &mut editor::EditorState, wants_
         }
     });
 
-    if delete {
+    if redo_key {
+        state.redo();
+    } else if undo_key {
+        state.undo();
+    } else if delete {
         state.delete_selected();
     } else if duplicate {
         state.duplicate_selected();
@@ -898,6 +923,120 @@ mod tests {
         assert!(after[0] > start[0] + 0.2, "{after:?}");
         assert!((after[1] / after[0] - start[1] / start[0]).abs() < 1e-4);
         assert!((after[2] / after[0] - start[2] / start[0]).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_whole_drag_is_one_undo_step() {
+        // Rule 6: one drag, one command. The scene is written every frame so the user sees
+        // the object follow the pointer, but the stack must see a single entry.
+        let mut state = state_with_default_scene();
+        state.set_mode(editor::EditorMode::Translate);
+        let rect = test_rect();
+        let camera = state.viewport_camera;
+        let grab = arrow_tip(&state, gizmos::GizmoHandle::X);
+        let start = state
+            .scene
+            .as_ref()
+            .expect("scene")
+            .node(editor::EntityId(1))
+            .expect("cube")
+            .transform
+            .position;
+
+        apply_viewport_interaction(&mut state, &press(grab), rect, &camera);
+        for step in 1..=5 {
+            let input = editor::ViewportInput {
+                hovered: true,
+                pointer: Some(grab + egui::vec2(12.0 * step as f32, 0.0)),
+                ..editor::ViewportInput::default()
+            };
+            apply_viewport_interaction(&mut state, &input, rect, &camera);
+        }
+        let moved = state
+            .scene
+            .as_ref()
+            .expect("scene")
+            .node(editor::EntityId(1))
+            .expect("cube")
+            .transform
+            .position;
+        assert!(moved[0] > start[0], "the cube followed the pointer");
+        assert_eq!(state.commands.depth(), 0, "nothing is committed mid-drag");
+
+        let release = editor::ViewportInput {
+            hovered: true,
+            pointer: None,
+            released: true,
+            ..editor::ViewportInput::default()
+        };
+        apply_viewport_interaction(&mut state, &release, rect, &camera);
+        assert_eq!(state.commands.depth(), 1, "one entry for the whole drag");
+
+        state.undo();
+        let back = state
+            .scene
+            .as_ref()
+            .expect("scene")
+            .node(editor::EntityId(1))
+            .expect("cube")
+            .transform
+            .position;
+        assert_eq!(back, start, "undo returns to where the drag started");
+        assert!(!state.dirty, "and the scene is clean again");
+    }
+
+    #[test]
+    fn ctrl_z_and_ctrl_y_walk_the_history() {
+        let mut state = state_with_default_scene();
+        state.select(Some(editor::EntityId(2)));
+        press_key(&mut state, egui::Key::Delete);
+        assert!(state
+            .scene
+            .as_ref()
+            .expect("scene")
+            .node(editor::EntityId(2))
+            .is_none());
+
+        press_key_with(&mut state, egui::Key::Z, egui::Modifiers::COMMAND);
+        assert!(
+            state
+                .scene
+                .as_ref()
+                .expect("scene")
+                .node(editor::EntityId(2))
+                .is_some(),
+            "undo brought the light back"
+        );
+        press_key_with(&mut state, egui::Key::Y, egui::Modifiers::COMMAND);
+        assert!(state
+            .scene
+            .as_ref()
+            .expect("scene")
+            .node(editor::EntityId(2))
+            .is_none());
+
+        // The other redo, Ctrl+Shift+Z, is checked before Ctrl+Z so it does not undo instead.
+        press_key_with(&mut state, egui::Key::Z, egui::Modifiers::COMMAND);
+        assert!(state
+            .scene
+            .as_ref()
+            .expect("scene")
+            .node(editor::EntityId(2))
+            .is_some());
+        press_key_with(
+            &mut state,
+            egui::Key::Z,
+            egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+        );
+        assert!(
+            state
+                .scene
+                .as_ref()
+                .expect("scene")
+                .node(editor::EntityId(2))
+                .is_none(),
+            "Ctrl+Shift+Z redid the delete"
+        );
     }
 
     #[test]

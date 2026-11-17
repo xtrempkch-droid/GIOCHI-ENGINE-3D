@@ -2215,3 +2215,51 @@ rules, and the reparent/duplicate paths already have their failure modes spelled
 Verified by 14 unit tests in `node_edit`, 8 in `EditorState`/`hierarchy` and 4 integration
 tests in `tests/node_editing.rs` (save/reload round trip, ids not reused, duplicate
 independence, every kind created and deleted).
+
+---
+
+## ADR-069 — Commands carry before and after, and a continuous gesture merges into one entry
+
+**Context.** Rule 6 of the plan: undo/redo is universal from phase 37, and one whole drag is
+one command, not one per frame. Two things make that harder than it sounds. The inspector
+applies its edits immediately, and a `DragValue` reports a change on *every frame* of a drag.
+The gizmo code, by contrast, already recomputes from the state a drag started in (ADR-066),
+so it naturally has one pair of nodes at the end.
+
+**Decision.**
+
+- `trait Command { label, apply, undo, as_any, as_any_mut }`, and a `CommandStack` holding
+  two `Vec<Box<dyn Command>>`. `push` applies the command, appends it to the undo side and
+  **clears the redo side**: after an undo, the first new edit is a new future, which is what
+  every editor does and what a two-list stack can express.
+- Commands carry **whole nodes**, not deltas: `SetNode` holds `before` and `after`,
+  `RemoveNodes` holds the removed subtrees, `AddNodes` holds the copies. A delta would need a
+  schema for every field of the scene format, and every caller already has the two nodes in
+  hand.
+- `push_mergeable(scene, command, merge)` merges a `SetNode` into the entry already on top
+  when the node and the label are the same and the caller says the gesture is continuing.
+  Merging keeps the **original `before`** and replaces `after`, so undo goes back to the value
+  from before the gesture began — not to the value one frame before the last one.
+- The *caller* decides continuity, because only the UI knows: the inspector passes
+  "pointer is down or the egui context wants keyboard input", and the gizmo passes `false`
+  because its drag has already ended. Nothing in the stack looks at a clock, which is what
+  keeps the tests free of sleeps.
+- A finished gizmo drag pushes exactly one `SetNode`, built from the node as it now is and the
+  same node with `transform` set back to `drag.start`. The scene was written every frame for
+  the user to see, and the command's `apply` writes the same values again — idempotent, and
+  the price of not threading a "don't apply" flag through the stack.
+- Dirty tracking is a **depth marker**, not a flag: `mark_saved` records the stack depth, and
+  `is_dirty` compares. Undoing back to the save point is therefore clean again, which a
+  boolean cannot express. Opening or creating a scene clears the history.
+- `EditorState` is no longer `Clone`: the stack owns trait objects, and a copied history would
+  be a second history of the same scene. Nothing needed the copy.
+- `node_edit`'s functions still perform the edit; the command wraps the result and records the
+  before. `Reparent` reads the old parent first, then moves, then pushes.
+
+**Consequences.** Phase 38 will save through the same dirty marker, and any future command
+(renaming, material presets) is one struct. The cost is that a caller who edits the scene
+without a command cannot be undone, which `mark_dirty`'s doc comment now says out loud.
+Verified by 15 unit tests on the stack (apply/undo/redo, redo cleared by a new push, the
+depth cap, merge rules, save marker), the per-command round trips, `EditorState` tests for
+create/duplicate/delete/reparent undo and for undo-all being clean, and the loop tests
+`a_whole_drag_is_one_undo_step` and `ctrl_z_and_ctrl_y_walk_the_history`.

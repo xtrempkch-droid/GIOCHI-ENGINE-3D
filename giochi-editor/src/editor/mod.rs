@@ -4,6 +4,7 @@
 //! everything it needs (a camera, a projection and a file dialog). Keeping them separate
 //! is what lets phases 32–40 add panels and commands without rewriting the loop.
 
+pub mod command;
 pub mod dialog;
 pub mod editor_state;
 pub mod icons;
@@ -13,6 +14,7 @@ pub mod orbit_camera;
 pub mod theme;
 pub mod viewport;
 
+pub use command::{AddNode, AddNodes, Command, CommandStack, RemoveNodes, Reparent, SetNode};
 pub use dialog::{DialogKind, DialogOutcome, FileDialog};
 pub use editor_state::{EditorMode, EditorState, EntityId, PanelVisibility, Status, StatusKind};
 pub use icons::IconSet;

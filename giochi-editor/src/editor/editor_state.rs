@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use giochi_engine_3d::scene::{Scene, SceneError};
 
+use crate::editor::command::{Command, CommandStack};
 use crate::editor::dialog::FileDialog;
 use crate::editor::orbit_camera::OrbitCamera;
 use crate::panels::asset_browser::AssetBrowserState;
@@ -141,10 +142,11 @@ impl Default for PanelVisibility {
 
 /// The editor's session state.
 ///
-/// Cloned but not compared: the asset browser holds egui texture handles, and "two editor
-/// states are equal" is not a question anything in the editor asks. Tests compare the
-/// fields they mean (`scene`, `selected`, `dirty`).
-#[derive(Debug, Clone)]
+/// Not `Clone`: the undo stack owns trait objects, and a cloned history would be a second
+/// history of the same scene. Nothing in the editor needs to copy the session, and tests
+/// compare the fields they mean (`scene`, `selected`, `dirty`). Not `PartialEq` either: the
+/// asset browser holds egui texture handles.
+#[derive(Debug)]
 pub struct EditorState {
     /// The scene file currently open, if any.
     pub scene_path: Option<PathBuf>,
@@ -180,6 +182,8 @@ pub struct EditorState {
     pub project: Option<Project>,
     /// The asset browser's filter, listing and preview.
     pub assets: AssetBrowserState,
+    /// The undo/redo history. Every edit goes through it (rule 6 of the plan).
+    pub commands: CommandStack,
     /// Set by the window close button, `Esc`, or `File > Exit`.
     quit_requested: bool,
 }
@@ -207,6 +211,7 @@ impl EditorState {
             dialog: None,
             project: None,
             assets: AssetBrowserState::new(),
+            commands: CommandStack::default(),
             quit_requested: false,
         }
     }
@@ -246,6 +251,10 @@ impl EditorState {
     }
 
     /// Records that the scene changed since the last save.
+    ///
+    /// Prefer [`EditorState::apply_command`]: an edit applied behind the stack's back cannot
+    /// be undone, and this method cannot tell. It is kept for the handful of changes that are
+    /// not edits (the scene's name, a project's settings) and for tests.
     pub fn mark_dirty(&mut self) {
         self.dirty = true;
     }
@@ -253,6 +262,62 @@ impl EditorState {
     /// Records that the scene on disk matches the editor.
     pub fn mark_saved(&mut self) {
         self.dirty = false;
+        self.commands.mark_saved();
+    }
+
+    /// Applies `command` through the undo stack and reports it in the status bar.
+    pub fn apply_command(&mut self, command: Box<dyn Command>) {
+        self.apply_command_mergeable(command, false);
+    }
+
+    /// Applies `command`, merging it into the previous one when `merge` says the gesture is
+    /// still going.
+    pub fn apply_command_mergeable(&mut self, command: Box<dyn Command>, merge: bool) {
+        let label = command.label();
+        let Some(scene) = self.scene.as_mut() else {
+            return;
+        };
+        self.commands.push_mergeable(scene, command, merge);
+        self.dirty = self.commands.is_dirty();
+        self.status = Status::info(label);
+    }
+
+    /// Undoes the most recent edit. Returns whether anything was undone.
+    pub fn undo(&mut self) -> bool {
+        let Some(scene) = self.scene.as_mut() else {
+            return false;
+        };
+        let Some(label) = self.commands.undo(scene) else {
+            self.status = Status::info("Nothing to undo");
+            return false;
+        };
+        self.dirty = self.commands.is_dirty();
+        self.status = Status::info(format!("Undo {label}"));
+        true
+    }
+
+    /// Redoes the most recently undone edit. Returns whether anything was redone.
+    pub fn redo(&mut self) -> bool {
+        let Some(scene) = self.scene.as_mut() else {
+            return false;
+        };
+        let Some(label) = self.commands.redo(scene) else {
+            self.status = Status::info("Nothing to redo");
+            return false;
+        };
+        self.dirty = self.commands.is_dirty();
+        self.status = Status::info(format!("Redo {label}"));
+        true
+    }
+
+    /// The label the Edit menu should show for Undo.
+    pub fn undo_label(&self) -> Option<String> {
+        self.commands.undo_label()
+    }
+
+    /// The label the Edit menu should show for Redo.
+    pub fn redo_label(&self) -> Option<String> {
+        self.commands.redo_label()
     }
 
     /// Asks the loop to stop after the current frame.
@@ -273,6 +338,7 @@ impl EditorState {
         self.scene = Some(scene);
         self.scene_path = None;
         self.select(first);
+        self.commands.clear();
         self.mark_saved();
         self.status = Status::info("New scene");
     }
@@ -291,6 +357,8 @@ impl EditorState {
         self.scene = Some(scene);
         self.scene_path = Some(path.to_path_buf());
         self.select(first);
+        // A new file is a new history: undoing into the previous scene would be a surprise.
+        self.commands.clear();
         self.mark_saved();
         self.status = Status::info(format!("Opened {}", path.display()));
         Ok(())
@@ -459,10 +527,8 @@ impl EditorState {
         match crate::editor::node_edit::create(scene, kind, parent, position) {
             Ok(node) => {
                 let id = node.id;
-                let name = node.name;
                 self.select(Some(id));
-                self.mark_dirty();
-                self.status = Status::info(format!("Added {name}"));
+                self.apply_command(Box::new(crate::editor::command::AddNode::new(node)));
             }
             Err(error) => self.report(Status::warning(format!(
                 "Could not add {}: {error}",
@@ -476,17 +542,20 @@ impl EditorState {
         if self.selected.is_empty() {
             return;
         }
-        let Some(scene) = self.scene.as_mut() else {
+        let selected = self.selected.clone();
+        let Some(scene) = self.scene.as_ref() else {
             return;
         };
-        let removed = crate::editor::node_edit::delete(scene, &self.selected);
-        if removed == 0 {
+        let command =
+            crate::editor::command::RemoveNodes::capture(scene, &selected, "Delete node(s)");
+        if command.nodes.is_empty() {
             self.report(Status::warning("Nothing to delete"));
             return;
         }
+        let count = command.nodes.len();
         self.clear_selection();
-        self.mark_dirty();
-        self.status = Status::info(format!("Deleted {removed} node(s)"));
+        self.apply_command(Box::new(command));
+        self.status = Status::info(format!("Deleted {count} node(s)"));
     }
 
     /// Duplicates every selected node, selecting the copies.
@@ -522,20 +591,43 @@ impl EditorState {
         }
         let created = copies.len();
         if created > 0 {
+            // `duplicate` already added the nodes; the command must not add them twice, so
+            // the stack is given an entry that knows how to take them away and put them back.
+            let nodes: Vec<_> = copies
+                .iter()
+                .filter_map(|id| scene.node(*id).cloned())
+                .collect();
             self.selected = copies;
-            self.mark_dirty();
+            self.apply_command(Box::new(crate::editor::command::AddNodes::new(
+                nodes,
+                "Duplicate node(s)",
+            )));
             self.status = Status::info(format!("Duplicated {created} node(s)"));
         }
     }
 
     /// Moves `id` under `new_parent`, reporting a refusal instead of panicking.
     pub fn reparent(&mut self, id: EntityId, new_parent: Option<EntityId>) {
-        let Some(scene) = self.scene.as_mut() else {
+        let Some(scene) = self.scene.as_ref() else {
             return;
         };
-        match crate::editor::node_edit::reparent(scene, id, new_parent) {
+        let before = scene.node(id).and_then(|node| node.parent);
+        match crate::editor::node_edit::reparent(
+            self.scene.as_mut().expect("scene"),
+            id,
+            new_parent,
+        ) {
             Ok(()) => {
-                self.mark_dirty();
+                if before == new_parent {
+                    return;
+                }
+                // `reparent` already moved the node; the command records the pair so undo can
+                // put it back where it was.
+                self.apply_command(Box::new(crate::editor::command::Reparent {
+                    id,
+                    before,
+                    after: new_parent,
+                }));
                 self.status = Status::info(match new_parent {
                     Some(parent) => format!("Moved {id} under {parent}"),
                     None => format!("Moved {id} to the root"),
@@ -926,6 +1018,88 @@ mod tests {
         );
         assert_eq!(scene.node(EntityId(2)).expect("camera").parent, None);
         assert_eq!(state.status.kind, StatusKind::Warning);
+    }
+
+    #[test]
+    fn every_node_edit_is_undoable() {
+        let mut state = state_with_scene();
+        let before = state.scene.as_ref().expect("scene").nodes.len();
+
+        state.clear_selection();
+        state.create_node(crate::editor::node_edit::NewNodeKind::Cube);
+        let created = state.primary().expect("created");
+        assert_eq!(state.scene.as_ref().expect("scene").nodes.len(), before + 1);
+        assert!(state.undo());
+        assert!(state.scene.as_ref().expect("scene").node(created).is_none());
+        assert!(state.redo());
+        assert!(state.scene.as_ref().expect("scene").node(created).is_some());
+
+        state.select(Some(created));
+        state.duplicate_selected();
+        let copies = state.selected.clone();
+        assert_eq!(copies.len(), 1);
+        assert!(state.undo());
+        assert!(state
+            .scene
+            .as_ref()
+            .expect("scene")
+            .node(copies[0])
+            .is_none());
+
+        state.select(Some(created));
+        state.delete_selected();
+        assert!(state.scene.as_ref().expect("scene").node(created).is_none());
+        assert!(state.undo());
+        assert!(state.scene.as_ref().expect("scene").node(created).is_some());
+
+        let parent_before = state
+            .scene
+            .as_ref()
+            .expect("scene")
+            .node(EntityId(2))
+            .expect("camera")
+            .parent;
+        state.reparent(EntityId(2), Some(EntityId(1)));
+        assert!(state.undo());
+        assert_eq!(
+            state
+                .scene
+                .as_ref()
+                .expect("scene")
+                .node(EntityId(2))
+                .expect("camera")
+                .parent,
+            parent_before
+        );
+    }
+
+    #[test]
+    fn undoing_everything_leaves_the_scene_clean() {
+        let mut state = state_with_scene();
+        let before = state.scene.as_ref().expect("scene").nodes.len();
+        state.clear_selection();
+        state.create_node(crate::editor::node_edit::NewNodeKind::Light);
+        state.create_node(crate::editor::node_edit::NewNodeKind::Sphere);
+        assert!(state.dirty);
+        while state.undo() {}
+        assert_eq!(state.scene.as_ref().expect("scene").nodes.len(), before);
+        assert!(!state.dirty, "back at the state the scene was created in");
+        assert!(state.undo_label().is_none());
+    }
+
+    #[test]
+    fn opening_a_scene_forgets_the_history_of_the_old_one() {
+        let path = temp_path("history");
+        let mut state = state_with_scene();
+        state.save_scene_as(&path).expect("saved");
+        state.clear_selection();
+        state.create_node(crate::editor::node_edit::NewNodeKind::Cube);
+        assert!(state.commands.can_undo());
+
+        state.open_scene(&path).expect("opened");
+        assert!(!state.commands.can_undo(), "a new file is a new history");
+        assert!(!state.dirty);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

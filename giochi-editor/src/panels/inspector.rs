@@ -26,6 +26,7 @@ use giochi_engine_3d::scene::{
     CameraDesc, LightDesc, MaterialDesc, MeshSource, NodeTransform, Primitive, SceneNode,
 };
 
+use crate::editor::command::SetNode;
 use crate::editor::{EditorState, EditorTheme};
 
 /// What the inspector changed this frame.
@@ -120,10 +121,16 @@ pub fn draw(ui: &mut egui::Ui, state: &mut EditorState, theme: &EditorTheme) -> 
 
     let changed = changed && edited != node;
     if changed {
-        if let Some(scene) = state.scene.as_mut() {
-            scene.replace_node(edited);
-        }
-        state.mark_dirty();
+        // A `DragValue` reports a change on every frame of a drag. The command is pushed
+        // mergeable while the pointer is down or a field has focus, so the whole nudge is one
+        // undo step instead of sixty (ADR-069).
+        let continuing = state.scene.is_some()
+            && (ui.ctx().input(|input| input.pointer.any_down())
+                || ui.ctx().wants_keyboard_input());
+        state.apply_command_mergeable(
+            Box::new(SetNode::new(node, edited, "Change node")),
+            continuing,
+        );
     }
 
     InspectorOutcome {
