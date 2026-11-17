@@ -38,7 +38,7 @@
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
-use mdns_sd::{Receiver, ServiceDaemon, ServiceEvent, ServiceInfo};
+use mdns_sd::{Receiver, ResolvedService, ServiceDaemon, ServiceEvent, ServiceInfo};
 
 /// Tipo de serviço anunciado. O sufixo `.local.` é obrigatório no DNS de
 /// serviço; sem ele o browse não encontra nada.
@@ -284,14 +284,20 @@ impl Descoberta {
 }
 
 /// Converte o resultado da biblioteca no nosso tipo, descartando endereço inútil.
-fn converter(info: &ServiceInfo) -> Option<Encontrado> {
-    let porta = info.get_port();
+///
+/// `mdns-sd` 0.21 mudou o que o evento `ServiceResolved` carrega: passou a ser um
+/// [`ResolvedService`] já desembrulhado, com os campos públicos, em vez de um
+/// `ServiceInfo` acessível só por getters. Os endereços vêm como `ScopedIp`, que
+/// guarda o escopo da interface além do `IpAddr` — `to_ip_addr()` descarta o
+/// escopo, que é o que já se fazia antes com um `IpAddr` puro.
+fn converter(info: &ResolvedService) -> Option<Encontrado> {
+    let porta = info.port;
     // Preferência por IPv4: um endereço IPv6 link-local (`fe80::`) resolve mas
     // não conecta sem `%interface`, então tentá-lo primeiro só gastaria tempo.
     let ip = info
-        .get_addresses()
+        .addresses
         .iter()
-        .copied()
+        .map(|a| a.to_ip_addr())
         .find(|a| match a {
             IpAddr::V4(v4) => !v4.is_loopback() && !v4.is_unspecified(),
             IpAddr::V6(_) => false,
@@ -299,16 +305,19 @@ fn converter(info: &ServiceInfo) -> Option<Encontrado> {
         .or_else(|| {
             // IPv6 só se não houver IPv4 útil. Link-local (`fe80::`) não conecta
             // sem `%interface`, então também não serve.
-            info.get_addresses().iter().copied().find(|a| match a {
-                IpAddr::V6(v6) => {
-                    !v6.is_loopback() && !v6.is_unspecified() && !v6.is_unicast_link_local()
-                }
-                IpAddr::V4(_) => false,
-            })
+            info.addresses
+                .iter()
+                .map(|a| a.to_ip_addr())
+                .find(|a| match a {
+                    IpAddr::V6(v6) => {
+                        !v6.is_loopback() && !v6.is_unspecified() && !v6.is_unicast_link_local()
+                    }
+                    IpAddr::V4(_) => false,
+                })
         })?;
 
     Some(Encontrado {
-        nome: info.get_fullname().to_string(),
+        nome: info.fullname.clone(),
         endereco: SocketAddr::new(ip, porta),
     })
 }
@@ -340,7 +349,7 @@ mod testes {
         )
         .expect("ServiceInfo de teste");
         assert!(
-            converter(&info).is_none(),
+            converter(&info.as_resolved_service()).is_none(),
             "127.0.0.1 não é alcançável de outro aparelho"
         );
     }

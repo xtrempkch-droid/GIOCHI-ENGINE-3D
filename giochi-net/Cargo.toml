@@ -38,7 +38,7 @@ laminar = { version = "0.5", optional = true }
 # um send_to em 224.0.0.251 sem IP_MULTICAST_IF sai pela rota padrao e ninguem
 # na LAN ve. A biblioteca resolve isso; escrever a mao custaria centenas de
 # linhas de socket option e ficaria pior.
-mdns-sd = { version = "0.13", optional = true }
+mdns-sd = { version = "0.21", optional = true }
 # Enumerar interfaces, para o caso em que nao existe rota default. Ver `descobrir.rs`:
 # o truque do `connect` UDP escolhe a interface certa quando ha rota default, e falha
 # com ENETUNREACH quando nao ha -- que e o caso de um console ligado por USB-Ethernet
