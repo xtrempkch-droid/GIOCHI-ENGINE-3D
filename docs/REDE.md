@@ -106,7 +106,7 @@ o sintoma é "a rede não funciona" sem erro nenhum.
 
 ### 2.4 mDNS: entrou, com uma armadilha medida
 O relatório pede descoberta automática em LAN. **Entrou**, atrás da feature
-`mdns`, com `mdns-sd` 0.13 (ver `src/descobrir.rs`).
+`mdns`, com `mdns-sd` 0.21 (ver `src/descobrir.rs`).
 
 Custa a única dependência com peso do crate: `mdns-sd` puxa `if-addrs`,
 `socket2`, `flume` e `mio`. Por isso fica **desligada por padrão** — o alvo
@@ -258,9 +258,14 @@ não existia no enum. Compilar teria falhado na primeira linha útil.
    documentado em §7.
 4. **Decidir se a descoberta vai para a ABI C.** Hoje é só Rust, e o launcher é
    Rust — mas se um app C precisar descobrir sozinho, são três funções e ABI v5.
-5. **Reavaliar `mdns-sd` 0.21.** A 0.13 foi a que se verificou; a 0.21 existe e é
-   mais nova. Trocar exige repetir esta bateria (<code>--features mdns</code> e o
-   cross-check aarch64).
+5. ~~Reavaliar `mdns-sd` 0.21.~~ **Feito em 2026-11-17.** A 0.21 mudou a API em dois
+   pontos: `ServiceEvent::ServiceResolved` passa a carregar `Box<ResolvedService>`
+   (campos públicos) em vez de `ServiceInfo` (getters), e os endereços vêm como
+   `ScopedIp`, que guarda o escopo da interface — `to_ip_addr()` descarta-o, que é o
+   que o `converter` já fazia implicitamente. `ServiceInfo` continua a ser o tipo de
+   *anúncio*. Bateria repetida: 49 testes com `--features mdns`, 53 com
+   `--all-features`, e o `encontra_o_proprio_anuncio` (o `#[ignore]`, que faz
+   multicast a sério) passa em 0,80 s. Cross-check aarch64 verde.
 
 ## 7. O que o GIOCHI-OS precisa, e ainda não tem
 
