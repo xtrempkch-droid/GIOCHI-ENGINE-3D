@@ -9,11 +9,13 @@ use std::path::{Path, PathBuf};
 
 use giochi_engine_3d::scene::{Scene, SceneError};
 
+use crate::editor::autosave::Autosave;
 use crate::editor::command::{Command, CommandStack};
 use crate::editor::dialog::FileDialog;
 use crate::editor::orbit_camera::OrbitCamera;
 use crate::panels::asset_browser::AssetBrowserState;
 use crate::project::Project;
+use crate::settings::EditorSettings;
 
 /// Identifies one object in the edited scene.
 ///
@@ -140,6 +142,26 @@ impl Default for PanelVisibility {
     }
 }
 
+/// The answer to "save before quitting?".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuitChoice {
+    /// Save, then quit.
+    Save,
+    /// Quit without saving.
+    Discard,
+    /// Keep editing.
+    Cancel,
+}
+
+/// The state of the quit prompt while it is up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct QuitPrompt {
+    /// Whether the "discard" button has been pressed once. The second press is what actually
+    /// discards: throwing away unsaved work is the only destructive action in the editor, and
+    /// a single misclick should not do it.
+    pub discard_armed: bool,
+}
+
 /// The editor's session state.
 ///
 /// Not `Clone`: the undo stack owns trait objects, and a cloned history would be a second
@@ -184,6 +206,26 @@ pub struct EditorState {
     pub assets: AssetBrowserState,
     /// The undo/redo history. Every edit goes through it (rule 6 of the plan).
     pub commands: CommandStack,
+    /// The recent list and the autosave interval, as last loaded from disk.
+    pub settings: EditorSettings,
+    /// Where `settings` lives, so the editor can write it back.
+    pub settings_path: PathBuf,
+    /// Whether a settings file has been read yet.
+    ///
+    /// Until it has, [`EditorState::save_settings`] writes nothing: an editor that has not
+    /// looked at the disk should not create a config file, and a test that never loads
+    /// settings must not touch the real home directory.
+    settings_known: bool,
+    /// The autosave timer.
+    pub autosave: Autosave,
+    /// The folder autosaves are written to. Normally the settings folder; a field so tests
+    /// never write into the real home directory.
+    pub autosave_dir: PathBuf,
+    /// The "save before quitting?" prompt, while it is up.
+    pub quit_prompt: Option<QuitPrompt>,
+    /// Set when the user answered "save" on the quit prompt for a scene that had never been
+    /// saved: once the save dialog produces a path, the editor quits.
+    quit_after_save: bool,
     /// Set by the window close button, `Esc`, or `File > Exit`.
     quit_requested: bool,
 }
@@ -212,6 +254,13 @@ impl EditorState {
             project: None,
             assets: AssetBrowserState::new(),
             commands: CommandStack::default(),
+            settings: EditorSettings::default(),
+            settings_path: EditorSettings::default_path(),
+            settings_known: false,
+            autosave: Autosave::default(),
+            autosave_dir: EditorSettings::config_dir(),
+            quit_prompt: None,
+            quit_after_save: false,
             quit_requested: false,
         }
     }
@@ -321,8 +370,141 @@ impl EditorState {
     }
 
     /// Asks the loop to stop after the current frame.
+    ///
+    /// With unsaved changes this opens the "save before quitting?" prompt instead, because a
+    /// close button that silently discards an hour of work is the one bug an editor cannot
+    /// ship.
     pub fn request_quit(&mut self) {
+        if self.dirty && self.scene.is_some() {
+            self.quit_prompt = Some(QuitPrompt::default());
+        } else {
+            self.quit_requested = true;
+        }
+    }
+
+    /// Forces the loop to stop, whatever the answer to the prompt was.
+    pub fn quit_now(&mut self) {
+        self.quit_prompt = None;
         self.quit_requested = true;
+        let _ = self.save_settings();
+    }
+
+    /// Answers the quit prompt.
+    pub fn answer_quit(&mut self, choice: QuitChoice) {
+        self.quit_prompt = None;
+        match choice {
+            QuitChoice::Save => match self.save_scene() {
+                Ok(()) => self.quit_now(),
+                Err(_) => {
+                    // No path yet: ask for one, and quit once it is written.
+                    self.quit_after_save = true;
+                    self.save_dialog();
+                }
+            },
+            QuitChoice::Discard => self.quit_now(),
+            QuitChoice::Cancel => {
+                self.quit_after_save = false;
+                self.status = Status::info("Quit cancelled");
+            }
+        }
+    }
+
+    /// Loads the settings file (or the defaults, if it is not there yet).
+    pub fn load_settings(&mut self) {
+        self.settings = EditorSettings::load(&self.settings_path);
+        self.settings_known = true;
+        self.autosave.reset(self.settings.autosave_interval());
+    }
+
+    /// Writes the settings file.
+    ///
+    /// # Errors
+    ///
+    /// The filesystem's. A failure is logged rather than shown: not remembering a recent
+    /// list is not a reason to interrupt anyone.
+    pub fn save_settings(&self) -> std::io::Result<()> {
+        if !self.settings_known {
+            return Ok(());
+        }
+        self.settings.save(&self.settings_path)
+    }
+
+    /// Records `path` in the recent list and writes the settings file.
+    pub fn remember(&mut self, kind: crate::settings::RecentKind, path: impl AsRef<Path>) {
+        self.settings.remember(kind, path);
+        if let Err(error) = self.save_settings() {
+            log::warn!("could not write {}: {error}", self.settings_path.display());
+        }
+    }
+
+    /// The entries `File > Open Recent` should list for `kind`.
+    pub fn recent(&self, kind: crate::settings::RecentKind) -> Vec<crate::settings::RecentEntry> {
+        self.settings.recent_of(kind).cloned().collect()
+    }
+
+    /// Drops the recent list, on disk too.
+    pub fn clear_recent(&mut self) {
+        let count = self.settings.clear_recent();
+        if let Err(error) = self.save_settings() {
+            log::warn!("could not write {}: {error}", self.settings_path.display());
+        }
+        self.status = Status::info(format!("Cleared {count} recent entries"));
+    }
+
+    /// Offers the autosave of the current scene, if it is newer than the file.
+    pub fn find_autosave(&self) -> Option<PathBuf> {
+        let name = self.scene_name().unwrap_or_else(|| "untitled".to_owned());
+        crate::editor::autosave::find(self.scene_path.as_deref(), &name, &self.autosave_dir)
+    }
+
+    /// Loads the scene's autosave over the open scene.
+    pub fn recover_autosave(&mut self) {
+        let Some(path) = self.find_autosave() else {
+            self.report(Status::info("No autosave to recover"));
+            return;
+        };
+        match crate::editor::autosave::recover(&path) {
+            Ok(scene) => {
+                let first = scene.nodes.first().map(|node| node.id);
+                self.frame_scene(&scene);
+                self.scene = Some(scene);
+                self.select(first);
+                self.commands.clear();
+                // Recovered work is by definition unsaved: the file on disk is older.
+                self.dirty = true;
+                self.status = Status::info(format!("Recovered {}", path.display()));
+            }
+            Err(error) => self.report(Status::error(format!("Could not recover: {error}"))),
+        }
+    }
+
+    /// Runs the autosave timer. Returns whether a file was written.
+    ///
+    /// Called once per frame with the frame's `now`; the timer decides. Only a dirty scene
+    /// with a real scene open is written, and the interval comes from the settings.
+    pub fn tick_autosave(&mut self, now: std::time::Instant) -> bool {
+        if !self.autosave.due(now) {
+            return false;
+        }
+        if !self.dirty || self.scene.is_none() {
+            return false;
+        }
+        let name = self.scene_name().unwrap_or_else(|| "untitled".to_owned());
+        let scene_path = self.scene_path.clone();
+        let Some(scene) = self.scene.as_ref() else {
+            return false;
+        };
+        match crate::editor::autosave::write(scene, scene_path.as_deref(), &self.autosave_dir) {
+            Ok(path) => {
+                self.autosave.note(path.clone());
+                log::info!("autosaved to {}", path.display());
+                true
+            }
+            Err(error) => {
+                log::warn!("autosave for {name} failed: {error}");
+                false
+            }
+        }
     }
 
     /// Whether the loop should stop.
@@ -360,6 +542,7 @@ impl EditorState {
         // A new file is a new history: undoing into the previous scene would be a surprise.
         self.commands.clear();
         self.mark_saved();
+        self.remember(crate::settings::RecentKind::Scene, path);
         self.status = Status::info(format!("Opened {}", path.display()));
         Ok(())
     }
@@ -401,7 +584,14 @@ impl EditorState {
             }
         }
         self.mark_saved();
+        self.remember(crate::settings::RecentKind::Scene, path);
         self.status = Status::info(format!("Saved {}", path.display()));
+        if self.quit_after_save {
+            // The user asked to save and quit from a scene that had never been saved; the
+            // dialog has now produced the path.
+            self.quit_after_save = false;
+            self.quit_now();
+        }
         Ok(())
     }
 
@@ -448,7 +638,10 @@ impl EditorState {
     /// scene is still usable, and refusing to open it would be worse than saying so.
     pub fn set_project(&mut self, project: Project) {
         let warnings = project.validate().unwrap_or_default();
+        let root = project.root.clone();
         self.project = Some(project);
+        // A project and a scene at the same path are two entries, so both menus can list it.
+        self.remember(crate::settings::RecentKind::Project, root);
         self.assets.clear();
         self.assets.refresh(self.project.as_ref());
         self.status = match warnings.first() {
@@ -1100,6 +1293,126 @@ mod tests {
         assert!(!state.commands.can_undo(), "a new file is a new history");
         assert!(!state.dirty);
         let _ = std::fs::remove_file(&path);
+    }
+
+    fn state_with_settings(dir: &std::path::Path) -> EditorState {
+        let mut state = EditorState::new();
+        state.settings_path = dir.join(crate::settings::SETTINGS_FILE);
+        state.autosave_dir = dir.join("config");
+        state.load_settings();
+        state.new_scene();
+        state
+    }
+
+    #[test]
+    fn quitting_with_unsaved_changes_asks_instead_of_quitting() {
+        let dir = std::env::temp_dir().join(format!("giochi-quit-{}", std::process::id()));
+        let mut state = state_with_settings(&dir);
+        state.mark_dirty();
+        state.request_quit();
+        assert!(!state.quit_requested(), "the prompt comes first");
+        assert!(state.quit_prompt.is_some());
+
+        state.answer_quit(crate::editor::editor_state::QuitChoice::Cancel);
+        assert!(!state.quit_requested());
+        assert!(state.quit_prompt.is_none());
+        assert!(state.dirty, "cancelling must not touch the scene");
+    }
+
+    #[test]
+    fn discarding_quits_without_saving() {
+        let dir = std::env::temp_dir().join(format!("giochi-discard-{}", std::process::id()));
+        let mut state = state_with_settings(&dir);
+        state.mark_dirty();
+        state.request_quit();
+        state.answer_quit(crate::editor::editor_state::QuitChoice::Discard);
+        assert!(state.quit_requested());
+        assert!(state.quit_prompt.is_none());
+    }
+
+    #[test]
+    fn a_clean_scene_quits_without_asking() {
+        let dir = std::env::temp_dir().join(format!("giochi-clean-{}", std::process::id()));
+        let mut state = state_with_settings(&dir);
+        assert!(!state.dirty);
+        state.request_quit();
+        assert!(state.quit_requested());
+        assert!(state.quit_prompt.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn quitting_from_an_unsaved_scene_asks_for_a_path_then_quits() {
+        let dir = std::env::temp_dir().join(format!("giochi-unsaved-{}", std::process::id()));
+        let mut state = state_with_settings(&dir);
+        state.mark_dirty();
+        state.request_quit();
+        state.answer_quit(crate::editor::editor_state::QuitChoice::Save);
+        assert!(!state.quit_requested(), "it needs a path first");
+        assert!(state.dialog.is_some(), "the save dialog is open");
+
+        let path = dir.join("saved.scene");
+        state.save_scene_as(&path).expect("saved");
+        assert!(state.quit_requested(), "and now it quits");
+        assert!(!state.dirty);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn saving_from_a_scene_with_a_path_quits_straight_away() {
+        let dir = std::env::temp_dir().join(format!("giochi-saved-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let mut state = state_with_settings(&dir);
+        let path = dir.join("scene.scene");
+        state.save_scene_as(&path).expect("saved");
+        state.mark_dirty();
+        state.request_quit();
+        state.answer_quit(crate::editor::editor_state::QuitChoice::Save);
+        assert!(state.quit_requested());
+        assert!(!state.dirty);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn opening_and_saving_remember_the_path() {
+        let dir = std::env::temp_dir().join(format!("giochi-recent-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let mut state = state_with_settings(&dir);
+        let path = dir.join("remembered.scene");
+        state.save_scene_as(&path).expect("saved");
+        assert!(state
+            .recent(crate::settings::RecentKind::Scene)
+            .iter()
+            .any(|entry| entry.path == path));
+        // The list was written to disk, not only kept in memory.
+        let reloaded = crate::settings::EditorSettings::load(&state.settings_path);
+        assert!(reloaded.recent.iter().any(|entry| entry.path == path));
+
+        state.clear_recent();
+        assert!(state.recent(crate::settings::RecentKind::Scene).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_autosave_timer_only_writes_a_dirty_scene() {
+        let dir = std::env::temp_dir().join(format!("giochi-autotick-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let mut state = state_with_settings(&dir);
+        state.settings.autosave_seconds = 1;
+        state.autosave.reset(state.settings.autosave_interval());
+        let start = std::time::Instant::now();
+        assert!(
+            !state.tick_autosave(start),
+            "the timer starts on the first tick"
+        );
+        assert!(
+            !state.tick_autosave(start + std::time::Duration::from_secs(2)),
+            "a clean scene is not written"
+        );
+        state.mark_dirty();
+        assert!(state.tick_autosave(start + std::time::Duration::from_secs(4)));
+        assert!(state.autosave.last_path().is_some());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -4,6 +4,7 @@
 //! everything it needs (a camera, a projection and a file dialog). Keeping them separate
 //! is what lets phases 32–40 add panels and commands without rewriting the loop.
 
+pub mod autosave;
 pub mod command;
 pub mod dialog;
 pub mod editor_state;

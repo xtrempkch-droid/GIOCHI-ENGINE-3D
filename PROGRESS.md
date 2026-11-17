@@ -17,7 +17,7 @@ ADR-061). O Salto B começou em **2026-11-17**.
 | 35b — Gizmos (scale + AABB) | **concluída** (2026-11-17) | 183 testes de unidade no editor + teste de **pixels** `the_scale_gizmo_and_the_selection_box_reach_the_framebuffer`; arrasto por eixo e uniforme medidos em teste |
 | 36 — Hierarquia (create/delete/duplicate/reparent) | **concluída** (2026-11-17) | 209 testes de unidade no editor + 4 de integração (`tests/node_editing.rs`: construir → editar → gravar → reabrir, ids não reutilizados, cópia independente, todos os tipos criados e apagados) |
 | 37 — Undo/redo | **concluída** (2026-11-17) | 226 testes de unidade no editor (15 do `CommandStack`, merge de gesto, marcador de save) + `a_whole_drag_is_one_undo_step` e `ctrl_z_and_ctrl_y_walk_the_history` |
-| 38 — Save/load + project | pendente | — |
+| 38 — Save/load, recentes, autosave | **concluída** (2026-11-17) | 256 testes de unidade no editor (12 de `settings`, 8 de autosave, 6 do quit prompt) + 6 de integração (`tests/session_flow.rs`: recentes através de reinício, crash → autosave → recuperação, autosave obsoleto, autosave desligado) |
 | 39 — Play-in-editor | pendente | — |
 | 40 — Build standalone + polimento | pendente | — |
 
@@ -423,10 +423,45 @@ de expansão para manter — e a Fase 40 pode trocá-la sem tocar no `Project`.
 - O "sujo" passou a ser **profundidade da pilha vs. último save**: desfazer até ao ponto de
   gravação volta a deixar a cena limpa, coisa que um booleano não sabe exprimir.
 
+### Gates da Fase 38
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — exit 0
+- [x] `cargo test --workspace` — **1199 testes**, 0 falhas; o `giochi-editor` passou a
+      **256** de unidade + 16 de integração
+- [x] `cargo doc --workspace --no-deps --document-private-items`
+- [x] `scripts/gates.sh` completo — "All gates passed"
+- [x] `cargo run -p giochi-editor -- --config /tmp/giochi-p38 --scene …/default.scene --frames 60` (x11)
+- [x] `cargo check -p giochi-editor --target aarch64-unknown-linux-gnu`
+- [x] `ci.yml` valida (parse YAML) e o passo `Editor boot` passou a usar `--config /tmp/…`
+
+### Entregue na Fase 38
+
+| Ficheiro | O que faz |
+|---|---|
+| `settings.rs` | `EditorSettings` (`recent`, `autosave_seconds`), `RecentKind`/`RecentEntry`, `config_dir`/`default_path`, carregar/gravar atómico, `remember` com dedupe e limite 10, `autosave_path` |
+| `editor/autosave.rs` | `Autosave` (timer com `now` injetado), `write`, `find` (só se mais recente que a cena), `recover`, pasta `autosave/` |
+| `editor/editor_state.rs` | `settings`, `settings_path`, `autosave`, `autosave_dir`, `quit_prompt`, `QuitChoice`, `answer_quit`, `tick_autosave`, `recover_autosave`, `remember`/`recent`/`clear_recent`, `load_settings`/`save_settings` |
+| `editor/layout.rs` | `File > Open Recent` (cenas e projetos), `Clear Recent`, `Recover autosave`, e o modal `draw_quit_prompt` |
+| `lib.rs` / `main.rs` | `--config DIR`, carga das settings no arranque, `tick_autosave` por frame, prompt desenhado sobre os painéis |
+| `tests/session_flow.rs` | recentes através de reinício, crash → autosave → recuperação, autosave obsoleto não oferecido, autosave desligado, projeto na lista |
+
+### Desvios e notas da Fase 38
+
+- O autosave escreve um ficheiro **separado** (`.autosave`), nunca a cena: é a diferença entre
+  uma rede de segurança e uma forma nova de perder trabalho (ADR-070).
+- A recuperação é **oferecida, nunca automática**, e só quando o autosave é mais recente do que
+  a cena.
+- O `Discard` do diálogo de saída precisa de **dois cliques**: é a única ação destrutiva do
+  editor.
+- Os testes e o CI usam `--config` para uma pasta temporária: sem isso, um `cargo test`
+  escrevia no `$XDG_CONFIG_HOME` do utilizador. `EditorState` também deixou de gravar settings
+  que nunca leu.
+
 ### Próxima fase
 
-**Fase 38 — Save/load, projetos, recentes e autosave**: recentes persistidos, autosave por
-tempo, recuperação de sessão e diálogo de "guardar antes de sair".
+**Fase 39 — Play-in-editor**: um botão Play que corre a cena dentro do editor (janela do
+viewport ou janela separada), com Stop e o estado do editor intacto.
 
 ## Growth Pack (Fases 19–24)
 

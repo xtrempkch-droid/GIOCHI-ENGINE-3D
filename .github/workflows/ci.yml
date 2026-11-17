@@ -317,7 +317,9 @@ jobs:
           SDL_VIDEODRIVER: dummy
           SDL_RENDER_DRIVER: software
         run: |
-          cargo run -q -p giochi-editor -- --frames 30
+          # Phase 38: settings and autosaves go to a scratch folder, so a CI run cannot
+          # leave a recent list behind for the next job (or for a developer's `act` run).
+          cargo run -q -p giochi-editor -- --frames 30 --config /tmp/giochi-ci-config
           # The default scene is written, reloaded and compared by the example; the
           # editor then opens it, so the loader, the viewport projection and the window
           # title all run in CI.

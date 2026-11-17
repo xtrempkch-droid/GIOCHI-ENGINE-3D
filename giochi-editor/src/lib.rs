@@ -41,6 +41,7 @@ pub mod editor;
 pub mod gizmos;
 pub mod panels;
 pub mod project;
+pub mod settings;
 
 /// Version of the editor, as declared in `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -68,6 +69,12 @@ pub struct EditorOptions {
     pub scene: Option<std::path::PathBuf>,
     /// A project directory to open before the first frame, as `--project`.
     pub project: Option<std::path::PathBuf>,
+    /// Where the settings file and autosaves live, as `--config`.
+    ///
+    /// `None` means the platform default (`$XDG_CONFIG_HOME/giochi-editor`). A field rather
+    /// than only an environment variable so a portable install, and the tests, can point it
+    /// somewhere harmless.
+    pub config_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for EditorOptions {
@@ -79,6 +86,7 @@ impl Default for EditorOptions {
             title: format!("giochi-editor v{VERSION}"),
             scene: None,
             project: None,
+            config_dir: None,
         }
     }
 }
@@ -107,6 +115,13 @@ pub fn run(options: EditorOptions) -> Result<EditorRunStats, GiochiError> {
     log::info!("video driver: {}", engine.platform().video_driver_name());
 
     let mut state = editor::EditorState::new();
+    if let Some(dir) = &options.config_dir {
+        state.settings_path = dir.join(settings::SETTINGS_FILE);
+        state.autosave_dir = dir.to_path_buf();
+    }
+    // The recent list and the autosave interval. A missing or broken settings file is not an
+    // error worth stopping for (see `EditorSettings::load`).
+    state.load_settings();
     if let Some(path) = &options.project {
         if let Err(error) = state.open_project(path) {
             state.report(editor::Status::error(error));
@@ -198,6 +213,9 @@ pub fn run(options: EditorOptions) -> Result<EditorRunStats, GiochiError> {
         let output = backend.run(screen, dt, &egui_events, &mut |ctx| {
             theme.apply(ctx);
             metrics = editor::layout::draw(ctx, &mut state, &theme, Some(&icons));
+            // The prompt is drawn after the panels so it is on top of them, and inside the
+            // same closure so the answer is applied on the next frame.
+            editor::layout::draw_quit_prompt(ctx, &mut state, &theme);
             engine.devtools_mut().draw_console_panel(ctx, screen);
         });
         egui_wants_keyboard = backend.context().wants_keyboard_input();
@@ -225,6 +243,16 @@ pub fn run(options: EditorOptions) -> Result<EditorRunStats, GiochiError> {
 
             let camera = state.viewport_camera;
             apply_viewport_interaction(&mut state, &metrics.input, rect, &camera);
+        }
+        // Autosave, once per frame: the timer decides. Only a dirty scene is written, and
+        // the file is a separate `.autosave`, never the scene itself.
+        if state.tick_autosave(std::time::Instant::now()) {
+            if let Some(path) = state.autosave.last_path() {
+                state.report(editor::Status::info(format!(
+                    "Autosaved to {}",
+                    path.display()
+                )));
+            }
         }
         engine.render_mut().present();
 

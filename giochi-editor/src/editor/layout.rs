@@ -248,6 +248,57 @@ fn menu_bar(ctx: &egui::Context, state: &mut EditorState, theme: &EditorTheme) {
                     ui.close();
                 }
                 ui.separator();
+                // Recent entries: scenes and projects in one list, because the user thinks
+                // "the thing I was working on", not "a file of type scene".
+                let recent = state.settings.recent.clone();
+                if ui
+                    .add_enabled(!recent.is_empty(), egui::Button::new("Open Recent"))
+                    .clicked()
+                {
+                    ui.close();
+                }
+                for entry in &recent {
+                    let label = format!("{} ({})", entry.label(), kind_name(entry.kind));
+                    if ui
+                        .button(label)
+                        .on_hover_text(entry.path.display().to_string())
+                        .clicked()
+                    {
+                        match entry.kind {
+                            crate::settings::RecentKind::Scene => {
+                                if let Err(error) = state.open_scene(&entry.path) {
+                                    state.report(Status::error(error));
+                                }
+                            }
+                            crate::settings::RecentKind::Project => {
+                                if let Err(error) = state.open_project(&entry.path) {
+                                    state.report(Status::error(error));
+                                }
+                            }
+                        }
+                        ui.close();
+                    }
+                }
+                if !recent.is_empty() && ui.button("Clear Recent").clicked() {
+                    state.clear_recent();
+                    ui.close();
+                }
+                ui.separator();
+                let autosave = state.find_autosave();
+                if ui
+                    .add_enabled(autosave.is_some(), egui::Button::new("Recover autosave"))
+                    .on_hover_text(
+                        autosave
+                            .as_ref()
+                            .map(|path| path.display().to_string())
+                            .unwrap_or_else(|| "no autosave newer than the scene".to_owned()),
+                    )
+                    .clicked()
+                {
+                    state.recover_autosave();
+                    ui.close();
+                }
+                ui.separator();
                 if ui
                     .add(egui::Button::new("Save").shortcut_text("Ctrl+S"))
                     .clicked()
@@ -418,6 +469,57 @@ fn file_dialog(ctx: &egui::Context, state: &mut EditorState) {
 ///
 /// Disabled rather than hidden: an editor whose menus change shape between phases is
 /// harder to review than one that says which phase each action lands in.
+/// The word the recent menu uses for a kind.
+fn kind_name(kind: crate::settings::RecentKind) -> &'static str {
+    match kind {
+        crate::settings::RecentKind::Scene => "scene",
+        crate::settings::RecentKind::Project => "project",
+    }
+}
+
+/// The "save before quitting?" prompt.
+///
+/// A modal window, not a status message: quitting is the one action that can destroy work,
+/// and it has to be answered before anything else happens. "Discard" is armed on the first
+/// press, so a misplaced click on the wrong button does not throw the scene away.
+pub fn draw_quit_prompt(ctx: &egui::Context, state: &mut EditorState, theme: &EditorTheme) {
+    let Some(mut prompt) = state.quit_prompt else {
+        return;
+    };
+    let name = state.scene_name().unwrap_or_else(|| "scene".to_owned());
+    egui::Modal::new(egui::Id::new("giochi-quit-prompt")).show(ctx, |ui| {
+        ui.set_min_width(320.0);
+        ui.heading("Save before quitting?");
+        ui.label(format!("“{name}” has unsaved changes."));
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if ui.button("Save and quit").clicked() {
+                state.answer_quit(crate::editor::editor_state::QuitChoice::Save);
+                return;
+            }
+            let discard = if prompt.discard_armed {
+                "Click again to discard"
+            } else {
+                "Discard"
+            };
+            if ui.button(discard).clicked() {
+                if prompt.discard_armed {
+                    state.answer_quit(crate::editor::editor_state::QuitChoice::Discard);
+                    return;
+                }
+                prompt.discard_armed = true;
+                state.quit_prompt = Some(prompt);
+            }
+            if ui
+                .button(egui::RichText::new("Cancel").color(theme.accent))
+                .clicked()
+            {
+                state.answer_quit(crate::editor::editor_state::QuitChoice::Cancel);
+            }
+        });
+    });
+}
+
 fn planned(ui: &mut egui::Ui, label: &str, shortcut: &str, phase: u8) {
     let button = egui::Button::new(label).shortcut_text(shortcut);
     ui.add_enabled(false, button)

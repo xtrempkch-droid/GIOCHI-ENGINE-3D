@@ -2263,3 +2263,50 @@ Verified by 15 unit tests on the stack (apply/undo/redo, redo cleared by a new p
 depth cap, merge rules, save marker), the per-command round trips, `EditorState` tests for
 create/duplicate/delete/reparent undo and for undo-all being clean, and the loop tests
 `a_whole_drag_is_one_undo_step` and `ctrl_z_and_ctrl_y_walk_the_history`.
+
+---
+
+## ADR-070 — Autosave writes a separate `.autosave` file, and quitting asks
+
+**Context.** Phase 38: recent files, autosave, session recovery, and a "save before quitting"
+prompt. Autosave is the feature most capable of destroying work while trying to protect it —
+overwrite the scene every minute and a bad state gets written over a good file, silently, with
+the user's own hand on the keyboard.
+
+**Decision.**
+
+- Autosave writes **`<scene>.scene.autosave` next to the scene**, never over it. A scene that
+  has never been saved writes to `<config>/autosave/<name>.autosave`. The user's deliberate
+  save is the only thing that touches the scene file.
+- It fires only when the scene is **dirty** and only on the interval (60 s by default, `0`
+  disables). An unchanged scene written every minute is SD-card wear for nothing, and on
+  GIOCHI-OS the project lives on an SD card.
+- The timer takes `now` as an argument (`tick_autosave(Instant)`) rather than reading the
+  clock, so the tests advance time instead of sleeping. The first check starts the clock
+  instead of firing immediately: opening a scene must not produce an autosave before the user
+  has done anything.
+- **Recovery is offered, never automatic.** `File > Recover autosave` is enabled only when the
+  autosave is **newer than the scene file**; an older autosave describes work that has already
+  been saved, and offering it invites throwing away newer data. Recovered work is marked
+  dirty: the file on disk is not it.
+- **Quitting with unsaved changes asks** (`Save and quit` / `Discard` / `Cancel`). The prompt
+  is a modal, and `Discard` is armed on the first press and acts on the second: it is the only
+  destructive action in the editor, and one misplaced click must not do it. Saving from a
+  scene with no path opens the save dialog and quits once the file is written.
+- **Quitting writes the settings file.** The close button, `Esc` and `File > Exit` all go
+  through `request_quit`, so the prompt is not bypassable by the window manager's ✕.
+- Settings live in `$XDG_CONFIG_HOME/giochi-editor/settings.toml` (or `~/.config/…`), are
+  written whole (temporary file + rename), and are read as **defaults on any error**: losing
+  the recent list is a nuisance, refusing to start because of it is a bug report. The recent
+  list caps at ten, deduplicates by absolute path **and kind** (a scene and a project can
+  share a path), and is filtered by kind in the menu.
+- `--config DIR` (and `GIOCHI_EDITOR_CONFIG_DIR`) relocates all of it. The tests and CI use it
+  so a test run never writes into the developer's home; `EditorState` also refuses to write a
+  settings file it has never read, which is what makes a test that never calls
+  `load_settings` harmless by construction.
+
+**Consequences.** Phase 40's packaging can ship a portable build by pointing `--config` at the
+memory card. Verified by 12 settings tests, 8 autosave tests (timer, newer-than-the-scene rule,
+corrupt file), 6 `EditorState` tests for the quit prompt and the dirty-scene rules, and 6
+integration tests in `tests/session_flow.rs` (recent list across a restart, crash → autosave →
+recover, stale autosave not offered, autosave off, project in the recent list).

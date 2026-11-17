@@ -321,6 +321,28 @@ projeto (`assets/textures/...`) no material.
 Importar duas vezes o mesmo ficheiro cria `name.png` e `name-1.png`: uma cena que já aponta
 para a primeira cópia nunca é sobrescrita.
 
+## 3.4.1 Recentes, autosave e saída (Fase 38)
+
+**Recentes.** `File > Open Recent` lista as últimas dez cenas e projetos, com o caminho
+completo na dica. A lista vive em `$XDG_CONFIG_HOME/giochi-editor/settings.toml` (ou
+`~/.config/giochi-editor/`), por isso sobrevive a reinícios; `--config DIR` muda a pasta (útil
+numa instalação portátil). `File > Clear Recent` limpa a lista no ficheiro também.
+
+**Autosave.** De minuto a minuto (configurável em `autosave_seconds`; `0` desliga), e **só com
+alterações por gravar**, o editor escreve `<cena>.scene.autosave` **ao lado** da cena. Nunca
+toca no ficheiro da cena: o único `Save` é o seu. Uma cena nunca gravada escreve em
+`<config>/autosave/`.
+
+**Recuperação.** `File > Recover autosave` só está ativo quando o autosave é **mais recente**
+do que a cena — um autosave mais antigo descreve trabalho que já foi gravado, e oferecê-lo
+seria convidar a perder o que é novo. O que é recuperado fica marcado como alterado, porque o
+ficheiro em disco não é ele.
+
+**Sair.** Fechar a janela, `Esc` ou `File > Exit` com alterações por gravar abre um diálogo:
+`Save and quit`, `Discard` (precisa de dois cliques, porque é a única ação destrutiva do
+editor) ou `Cancel`. Numa cena nunca gravada, `Save and quit` abre o diálogo de gravação e sai
+quando o ficheiro estiver escrito.
+
 ## 3.5 O diálogo de ficheiros
 
 Todos os diálogos são desenhados pelo próprio editor (egui), não o `rfd`: no GIOCHI-OS não

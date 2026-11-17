@@ -13,12 +13,13 @@ const USAGE: &str = "\
 giochi-editor — visual scene editor for GIOCHI-ENGINE
 
 Usage:
-  giochi-editor [--project DIR] [--scene FILE] [--frames N]
+  giochi-editor [--project DIR] [--scene FILE] [--config DIR] [--frames N]
   giochi-editor --help
 
 Options:
   --project DIR  open a project (a folder containing project.toml)
   --scene FILE   open a .scene file before the first frame
+  --config DIR   where settings and autosaves live (default: $XDG_CONFIG_HOME/giochi-editor)
   --frames N     render N frames and exit (used by the headless check)
   -h, --help     show this help
 
@@ -53,6 +54,13 @@ fn main() -> ExitCode {
                 Some(path) if !path.is_empty() => options.scene = Some(path.into()),
                 _ => {
                     eprintln!("--scene needs a path\n\n{USAGE}");
+                    return ExitCode::from(2);
+                }
+            },
+            "--config" => match args.next() {
+                Some(path) if !path.is_empty() => options.config_dir = Some(path.into()),
+                _ => {
+                    eprintln!("--config needs a directory\n\n{USAGE}");
                     return ExitCode::from(2);
                 }
             },

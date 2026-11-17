@@ -19,10 +19,16 @@ use giochi_engine_3d::scene::Scene;
 fn the_editor_boots_and_renders_frames_without_a_display() {
     std::env::set_var("SDL_VIDEODRIVER", "dummy");
 
+    // Settings and autosaves go to a temporary folder: a test that writes into the real
+    // `$XDG_CONFIG_HOME` leaves the user's recent list describing a `cargo test` run.
+    let config =
+        std::env::temp_dir().join(format!("giochi-editor-smoke-config-{}", std::process::id()));
+
     let stats = run(EditorOptions {
         width: 1280,
         height: 720,
         frames: Some(3),
+        config_dir: Some(config.clone()),
         ..EditorOptions::default()
     })
     .expect("the editor must open a window, lay out and paint");
@@ -42,10 +48,16 @@ fn the_editor_boots_and_renders_frames_without_a_display() {
         height: 768,
         frames: Some(3),
         scene: Some(path.clone()),
+        config_dir: Some(config.clone()),
         ..EditorOptions::default()
     })
     .expect("the editor must open a scene and paint it");
 
     assert_eq!(stats.frames, 3);
+    assert!(
+        config.join("settings.toml").exists(),
+        "the run wrote its settings where --config said"
+    );
     let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir_all(&config);
 }
