@@ -89,6 +89,11 @@ em `abi 6`, e o artefacto de release re-medido em **2 604 688 B / 130 símbolos*
 
 ### Gates da Fase 25 — release 0.5.0
 
+> **Nota posterior.** O aviso de `render3d/texture.rs` registado abaixo foi corrigido na
+> auditoria de 2026-11-14, e a partir daí `cargo doc --workspace --no-deps
+> --document-private-items` corre a **zero avisos**. O registo abaixo fica como estava,
+> porque descreve o que se mediu em 0.5.0, não o que se mede hoje.
+
 - [x] `scripts/check-version.sh` — 0.5.0 consistente em `Cargo.toml`, nos seis membros,
       em `docs/C_ABI_CONTRACT.md`, `docs/LUA_BINDING.md`, `README.md`, `giochi.h`,
       `CHANGELOG.md` e `Cargo.lock`
