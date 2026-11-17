@@ -16,6 +16,32 @@ para não serem perdidas nem implementadas por acidente (R6).
 - [ ] Asset streaming / async loading
 - [ ] Suporte a Windows/Mac (fora do escopo atual ARM64 Linux)
 
+## Apareceram durante o Salto B (fases 30–40)
+
+Registadas para não serem implementadas por acidente nem esquecidas. Nenhuma delas é
+necessária para o que o plano pede nas fases 30–40.
+
+- [ ] **Malha de seleção com vários objetos**: mover/rodar/escalar N objetos em conjunto. O
+  gizmo só aparece com exatamente um selecionado; fazê-lo com vários exige decidir o que a
+  rotação significa em torno de que ponto.
+- [ ] **Renomear inline na hierarquia** (`F2` na linha) — hoje o nome vem do tipo e só muda
+  editando o JSON.
+- [ ] **Duplicar com arrasto** (arrastar a linha com `Alt` cria a cópia onde cair).
+- [ ] **Modo local/global** para os gizmos de translação e rotação (`X` alterna em todos os
+  pacotes); a escala já é local por necessidade (ADR-067).
+- [ ] **Snap** (grelha e ângulos) com uma tecla modificadora.
+- [ ] **Play com física e gameplay dentro do editor**: hoje o preview desenha a cena como está
+  (ADR-071). Um runtime de jogo no editor é âmbito da Fase 41+.
+- [ ] **Pause/Stop no preview**: só fazem sentido quando houver simulação para pausar.
+- [ ] **Preview numa janela do próprio editor (FBO)**: recusado em ADR-064/071; revisitável se
+  os drivers Mali melhorarem.
+- [ ] **Histórico de undo persistido entre sessões** — hoje a pilha vive na sessão.
+- [ ] **Autosave por cena em vez de por sessão**: hoje cada cena tem o seu `.autosave`, mas o
+  intervalo é global.
+- [ ] **Verificador de pacote a correr o editor numa sessão X virtual** (xvfb) para provar que
+  a janela abre, e não só que o modo headless funciona.
+- [ ] **Múltiplos viewports** (perspetiva + ortográficas), como nos pacotes grandes.
+
 ## Saíram das fases 19–24 e ficaram de fora
 
 - [x] ~~**Backend egui em GLES para o crate 3D**~~ — entregue em
