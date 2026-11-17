@@ -2361,3 +2361,48 @@ instead of failing silently. Verified by 15 unit tests on `PlayPlan` (world tran
 meshes, camera derivation with and without a node, light rotation, bounds, unsupported files),
 2 on the play options, the offscreen GL test `play_render`, and a real x11 run of
 `--frames 5 --play-frames 3` that reported `Played 3 frame(s)` on the actual GPU.
+
+---
+
+## ADR-072 — The editor ships as a folder, and its assets are found relative to the binary
+
+**Context.** Phase 40 packages the editor, and rule 11 of the plan says the build is part of
+the deliverable. Two problems surface the moment the binary leaves the checkout.
+
+1. `IconSet::default_directory()` returned `CARGO_MANIFEST_DIR/assets/icons` — a path on the
+   **build machine**. In a package it resolves to nothing, `IconSet::load` logs a warning per
+   icon, and the hierarchy silently falls back to text labels. Nothing fails; the editor just
+   looks worse.
+2. A binary run from the repository root finds `assets/` in the current directory, so a
+   packaging bug is invisible until someone copies the folder somewhere else.
+
+**Decision.**
+
+- **A folder, not an archive.** A package is
+  `dist/giochi-editor-<version>-<target>/` containing the binary, `assets/icons/`,
+  `assets/scenes/`, `README.txt`, `USER_GUIDE.md`, `VERSION` and `MANIFEST.txt`. On GIOCHI-OS
+  "installing" is copying a folder to the SD card; an archive would make every bug report
+  start with "did you extract it?".
+- **`MANIFEST.txt` is a `sha256sum` list** of everything in the folder, written from a
+  temporary file *outside* the folder being walked (a manifest that lists itself fails its own
+  check — it did, on the first run).
+- **Assets resolve relative to the executable**: `GIOCHI_EDITOR_ASSETS`, then
+  `<exe dir>/assets/icons`, then `./assets/icons`, then the source checkout. The rule is a
+  free function (`resolve_assets`) taking its candidates, so it is tested without mutating
+  process-global environment variables that `cargo test` shares between threads.
+- **`scripts/verify-editor-package.sh` runs the packaged binary from inside the package** and
+  asserts three things a build cannot: the manifest matches the files, `--version` prints, and
+  **no icon failed to load**. The last one is the only way to catch problem (1) — a missing
+  icon is a warning, not an error, so "it started" proves nothing.
+- `--version` exists so the packaging script names the folder from the crate's own version
+  rather than from a line in a script that a release forgets to touch.
+- `--config DIR` (ADR-070) is what makes a **portable** install: settings and autosaves inside
+  the package, so the editor leaves nothing behind in `$HOME`.
+- CI runs `scripts/package-editor.sh` and then the verifier. Packing is a gate, not a habit.
+
+**Consequences.** The editor can be handed to someone with an SD card. The cost is that the
+binary is useless without its `assets/` folder — stated in `README.txt` and checked by the
+verifier rather than assumed. Verified by `scripts/verify-editor-package.sh` (manifest,
+version, icons, headless run of the packaged binary from inside the package), the unit test
+`the_assets_folder_next_to_the_executable_wins`, and a real `giochi-editor 0.1.0` package built
+and run in this session.

@@ -392,6 +392,38 @@ primeiro e o evento que ela consome não chega ao ciclo do editor.
 
 ---
 
+## 4.1 Instalar a partir de um pacote (Fase 40)
+
+O editor distribui-se como uma **pasta**, não como um arquivo comprimido:
+
+```text
+giochi-editor-<versão>-<target>/
+├── giochi-editor          binário
+├── assets/icons/          os ícones da árvore (obrigatórios)
+├── assets/scenes/         a cena de exemplo
+├── README.txt             como correr, incluindo `--config`
+├── USER_GUIDE.md          este documento
+├── VERSION                a versão
+└── MANIFEST.txt           sha256 de cada ficheiro
+```
+
+Correr a partir da pasta:
+
+```bash
+./giochi-editor
+./giochi-editor --scene assets/scenes/default.scene
+./giochi-editor --config ./config          # instalação portátil: nada no $HOME
+./giochi-editor --frames 30                # verificação sem interação
+./giochi-editor --version
+```
+
+Os `assets/` são procurados, por esta ordem: `GIOCHI_EDITOR_ASSETS`, ao lado do executável, no
+diretório atual, e por fim no checkout do código. Sem eles o editor **abre**, mas a árvore
+mostra rótulos de texto em vez de ícones e escreve um aviso por ícone em falta — é por isso que
+o `scripts/verify-editor-package.sh` procura esses avisos em vez de se contentar com "arrancou".
+
+O `MANIFEST.txt` pode ser verificado: `sha256sum --check MANIFEST.txt` dentro da pasta.
+
 ## 5. Arquitetura em uma página
 
 O editor **consome** a engine. O ciclo é dele, não do `Engine::run_current`, porque um

@@ -214,6 +214,13 @@ cargo run -p giochi-editor --example editor_default_scene   # writes + reloads t
 cargo run -p giochi-editor --example editor_project_demo    # project + import, prints project=ok
 ```
 
+Package it (folder + manifest, verifies itself):
+
+```bash
+scripts/package-editor.sh                        # dist/giochi-editor-<version>-<target>/
+scripts/verify-editor-package.sh                 # manifest, icons, headless run from inside
+```
+
 The user guide is [docs/EDITOR_USER_GUIDE.md](docs/EDITOR_USER_GUIDE.md); the scene format
 is in [docs/3D.md](docs/3D.md) §6. The editor reuses the engine's egui backend instead of
 forking it (ADR-062), and the viewport draws with the same 2D renderer instead of opening a
@@ -224,7 +231,8 @@ stack (ADR-069), plus a persisted recent list, a 60-second autosave to a separat
 `.autosave` file, recovery of a newer autosave, and a "save before quitting" prompt
 (ADR-070). `F5` opens a **play preview** — the scene rendered by the engine's real 3D renderer
 in its own OpenGL window — through the scene→renderer conversion in `giochi-editor/src/play/`,
-which is the piece the racer will consume (ADR-071).
+which is the piece the racer will consume (ADR-071). It ships as a self-contained folder whose
+assets are resolved relative to the binary (ADR-072).
 
 ### Profiling
 

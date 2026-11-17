@@ -19,7 +19,7 @@ ADR-061). O Salto B começou em **2026-11-17**.
 | 37 — Undo/redo | **concluída** (2026-11-17) | 226 testes de unidade no editor (15 do `CommandStack`, merge de gesto, marcador de save) + `a_whole_drag_is_one_undo_step` e `ctrl_z_and_ctrl_y_walk_the_history` |
 | 38 — Save/load, recentes, autosave | **concluída** (2026-11-17) | 256 testes de unidade no editor (12 de `settings`, 8 de autosave, 6 do quit prompt) + 6 de integração (`tests/session_flow.rs`: recentes através de reinício, crash → autosave → recuperação, autosave obsoleto, autosave desligado) |
 | 39 — Play-in-editor | **concluída** (2026-11-17) | 15 testes de unidade no `PlayPlan` + 2 do preview + teste GL offscreen `play_render`; `--frames 5 --play-frames 3` abriu a janela GL e desenhou 3 frames na GPU real (`Played 3 frame(s) ... 1 mesh(es), 1 instance(s)`) |
-| 40 — Build standalone + polimento | pendente | — |
+| 40 — Build standalone + polimento | **concluída** (2026-11-17) | `scripts/package-editor.sh` + `verify-editor-package.sh` (manifest, versão, ícones, execução dentro do pacote); 272 testes de unidade no editor; `Help > Shortcuts/About` e `Edit > Preferences`; `--version` |
 
 ### Gates da Fase 30
 
@@ -498,11 +498,62 @@ de expansão para manter — e a Fase 40 pode trocá-la sem tocar no `Project`.
 - Em KMSDRM a segunda janela não existe; o erro do driver vai para a barra de estado em vez de
   um preview que não faz nada.
 
+### Gates da Fase 40
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — exit 0
+- [x] `cargo test --workspace` — **1216 testes**, 0 falhas; o `giochi-editor` passou a
+      **272** de unidade + 17 de integração
+- [x] `cargo doc --workspace --no-deps --document-private-items`
+- [x] `scripts/gates.sh` completo — "All gates passed" (inclui `shellcheck scripts/*.sh`)
+- [x] `scripts/package-editor.sh` — `dist/giochi-editor-0.1.0-x86_64-unknown-linux-gnu`,
+      binário release construído em 2m16s
+- [x] `scripts/verify-editor-package.sh` — manifest, `--version`, **0 ícones em falta**, execução
+      headless dentro da pasta do pacote
+- [x] `cargo check -p giochi-editor --target aarch64-unknown-linux-gnu`
+- [x] `ci.yml` com o passo `Editor package`, validado com parse YAML
+
+### Entregue na Fase 40
+
+| Ficheiro | O que faz |
+|---|---|
+| `scripts/package-editor.sh` | build release, pasta `dist/giochi-editor-<versão>-<target>/` com binário, assets, guia, `VERSION`, `README.txt` e `MANIFEST.txt` |
+| `scripts/verify-editor-package.sh` | verifica o manifest, corre o binário **dentro** do pacote, exige 0 ícones em falta e 3 frames headless |
+| `editor/icons.rs` | `default_directory` resolvido por `GIOCHI_EDITOR_ASSETS` → ao lado do executável → cwd → checkout; `resolve_assets` testável |
+| `editor/layout.rs` | `Help > Keyboard Shortcuts` (tabela única `SHORTCUTS`), `Help > About` (versão do editor e do motor, pasta de settings), `Edit > Preferences` (intervalo de autosave, gravar) |
+| `editor/editor_state.rs` | `show_about`, `show_shortcuts`, `show_preferences` |
+| `main.rs` | `--version` (é o que dá nome à pasta do pacote), `--help` atualizado |
+| `ci.yml` | passo `Editor package` (pacote + verificação) |
+
+### Desvios e notas da Fase 40
+
+- O pacote é uma **pasta** e não um arquivo: em GIOCHI-OS instalar é copiar para o cartão SD, e
+  um `tar.gz` só acrescentaria um passo onde as coisas correm mal (ADR-072).
+- `IconSet::default_directory` apontava para `CARGO_MANIFEST_DIR` — um caminho **da máquina de
+  build**. Num pacote isso resolvia para nada e a árvore caía para rótulos de texto com um
+  aviso por ícone; nada falhava. Passou a resolver ao lado do executável, e o verificador
+  procura esses avisos, porque "arrancou" não prova nada.
+- Fechadas as pendências de UI do plano: `Help` com atalhos e sobre, `Edit > Preferences` com o
+  intervalo de autosave (0 desliga) e botão de gravar. `Play > Pause/Stop` ficam para o jogo
+  (Fase 45), onde há algo para pausar.
+
+### Salto B — fecho das Fases 30–40
+
+O editor está completo para o que o plano pede: janela, viewport com câmara, hierarquia,
+inspector, projeto e assets, gizmos de translação/rotação/escala, criação/remoção/duplicação/
+reparenting, undo/redo, recentes, autosave e recuperação, preview com o renderer 3D real, e um
+pacote que corre fora do repositório. 1216 testes no workspace, todos os gates verdes.
+
+**O que o plano pedia e continua em falta**, herdado da Production Pack (registado desde a
+Fase 30): glTF/GLB, materiais PBR-lite (`emissive`/`roughness`), save/load em slots, câmaras de
+jogo (follow/shake/cutscene), A*, buses de áudio e i18n. Nada disto bloqueia o editor; o glTF
+bloqueia a Fase 41.
+
 ### Próxima fase
 
-**Fase 40 — Build standalone e polimento**: empacotar o editor (binário + assets + docs),
-escolher o que vai no pacote, `--config` portátil, e fechar as pendências de UI (atalhos no
-`Help`, sobre, preferências).
+**Fase 41 — GIOCHI RACER: fundação**: crate `giochi-racer`, pista a partir de `.scene`, carro
+controlável e câmara de perseguição — a primeira coisa a decidir é o formato dos modelos do
+carro (o `.obj` funciona hoje; o glTF continua sem loader).
 
 ## Growth Pack (Fases 19–24)
 

@@ -344,6 +344,18 @@ jobs:
           SDL_VIDEODRIVER: offscreen
         run: cargo test -q -p giochi-editor --test play_render
 
+      - name: Editor package
+        # Phase 40, and rule 11 of the plan: the build is part of the deliverable. The
+        # script builds release, lays the folder out and hashes it; the verifier then runs
+        # the packaged binary from *inside* the package, which is the only way to catch a
+        # binary that was finding its assets in the checkout.
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_RENDER_DRIVER: software
+        run: |
+          scripts/package-editor.sh
+          scripts/verify-editor-package.sh
+
       - name: Examples
         env:
           SDL_VIDEODRIVER: dummy

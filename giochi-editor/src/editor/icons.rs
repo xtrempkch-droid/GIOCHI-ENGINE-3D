@@ -80,8 +80,29 @@ impl IconSet {
         Self { textures }
     }
 
-    /// The icon directory that ships with this crate.
+    /// The icon directory for this run.
+    ///
+    /// Resolution order, first hit wins:
+    ///
+    /// 1. `GIOCHI_EDITOR_ASSETS` — an explicit assets folder, for a custom install;
+    /// 2. `assets/icons` **next to the executable** — a packaged editor;
+    /// 3. `assets/icons` in the current directory — running from the repository root;
+    /// 4. `CARGO_MANIFEST_DIR/assets/icons` — a source checkout, so `cargo run` works.
+    ///
+    /// The old implementation returned only (4), which is a path on the **build machine**:
+    /// a packaged binary would look for `/home/someone/GIOCHI-ENGINE-3D/giochi-editor/…`
+    /// and quietly fall back to text labels.
     pub fn default_directory() -> PathBuf {
+        if let Some(dir) = std::env::var_os("GIOCHI_EDITOR_ASSETS") {
+            return PathBuf::from(dir).join("icons");
+        }
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf));
+        let cwd = std::env::current_dir().ok();
+        if let Some(found) = resolve_assets(exe_dir.as_deref(), cwd.as_deref()) {
+            return found;
+        }
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("assets")
             .join("icons")
@@ -156,6 +177,27 @@ fn load_rgba(path: &std::path::Path) -> Result<(u32, u32, Vec<u8>), String> {
     Ok((width, height, pixels))
 }
 
+/// The first `assets/icons` folder that actually contains an icon, from the candidates.
+///
+/// A free function taking its candidates rather than reading the environment, so the rule
+/// can be tested without mutating process-global state (which cargo test shares between
+/// threads).
+pub fn resolve_assets(
+    exe_dir: Option<&std::path::Path>,
+    cwd: Option<&std::path::Path>,
+) -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(dir) = exe_dir {
+        candidates.push(dir.join("assets").join("icons"));
+    }
+    if let Some(dir) = cwd {
+        candidates.push(dir.join("assets").join("icons"));
+    }
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.join("mesh_16.png").is_file())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,6 +211,37 @@ mod tests {
             assert_eq!((width, height), (16, 16));
             assert_eq!(pixels.len(), 16 * 16 * 4);
         }
+    }
+
+    #[test]
+    fn the_assets_folder_next_to_the_executable_wins() {
+        // The packaged layout: `<exe dir>/assets/icons`. Resolution has to find it even when
+        // the current directory is somewhere else entirely.
+        let root = std::env::temp_dir().join(format!("giochi-icons-{}", std::process::id()));
+        let installed = root.join("pkg").join("assets").join("icons");
+        std::fs::create_dir_all(&installed).expect("dir");
+        std::fs::write(installed.join("mesh_16.png"), b"png").expect("file");
+        let elsewhere = root.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).expect("dir");
+
+        let found = resolve_assets(Some(&root.join("pkg")), Some(&elsewhere)).expect("found");
+        assert_eq!(found, installed);
+
+        // Without the packaged folder, the current directory's `assets/` is used.
+        let cwd_assets = elsewhere.join("assets").join("icons");
+        std::fs::create_dir_all(&cwd_assets).expect("dir");
+        std::fs::write(cwd_assets.join("mesh_16.png"), b"png").expect("file");
+        let found = resolve_assets(Some(&root.join("nothing")), Some(&elsewhere)).expect("found");
+        assert_eq!(found, cwd_assets);
+
+        // With neither, there is nothing to find — and the caller falls back to the source
+        // checkout instead of guessing.
+        assert!(resolve_assets(
+            Some(&root.join("nothing")),
+            Some(&root.join("also-nothing"))
+        )
+        .is_none());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

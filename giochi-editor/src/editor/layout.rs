@@ -321,6 +321,11 @@ fn menu_bar(ctx: &egui::Context, state: &mut EditorState, theme: &EditorTheme) {
             });
 
             ui.menu_button("Edit", |ui| {
+                if ui.button("Preferences…").clicked() {
+                    state.show_preferences = true;
+                    ui.close();
+                }
+                ui.separator();
                 let undo_label = state
                     .undo_label()
                     .map_or_else(|| "Undo".to_owned(), |label| format!("Undo {label}"));
@@ -367,8 +372,6 @@ fn menu_bar(ctx: &egui::Context, state: &mut EditorState, theme: &EditorTheme) {
                     state.delete_selected();
                     ui.close();
                 }
-                ui.separator();
-                planned(ui, "Preferences…", "", 40);
             });
 
             ui.menu_button("View", |ui| {
@@ -406,8 +409,14 @@ fn menu_bar(ctx: &egui::Context, state: &mut EditorState, theme: &EditorTheme) {
             });
 
             ui.menu_button("Help", |ui| {
-                planned(ui, "Keyboard Shortcuts", "", 40);
-                planned(ui, "About giochi-editor", "", 40);
+                if ui.button("Keyboard Shortcuts").clicked() {
+                    state.show_shortcuts = true;
+                    ui.close();
+                }
+                if ui.button("About giochi-editor").clicked() {
+                    state.show_about = true;
+                    ui.close();
+                }
             });
 
             // The status line is part of the menu bar rather than a second panel: the
@@ -529,6 +538,131 @@ pub fn draw_quit_prompt(ctx: &egui::Context, state: &mut EditorState, theme: &Ed
             }
         });
     });
+}
+
+/// Every shortcut the editor has, in one list so the window and the guide cannot drift.
+pub const SHORTCUTS: &[(&str, &str)] = &[
+    ("Ctrl+N", "new scene"),
+    ("Ctrl+O", "open scene"),
+    ("Ctrl+S", "save"),
+    ("Ctrl+Shift+S", "save as"),
+    ("Ctrl+I", "import an asset"),
+    ("Ctrl+Z", "undo"),
+    ("Ctrl+Y / Ctrl+Shift+Z", "redo"),
+    ("Ctrl+D", "duplicate the selection"),
+    ("Del / Backspace", "delete the selection"),
+    ("Q / W / E / R", "select / move / rotate / scale"),
+    ("F2", "in-game console"),
+    ("F5", "play preview"),
+    ("Esc", "quit (when no text field or dialog owns the key)"),
+];
+
+/// The Help and Preferences windows.
+///
+/// Plain `egui::Window`s rather than modals: none of them blocks the editor, and a keyboard
+/// reference you have to dismiss before you can type is a joke.
+pub fn draw_help_windows(ctx: &egui::Context, state: &mut EditorState, theme: &EditorTheme) {
+    if state.show_shortcuts {
+        let mut open = true;
+        egui::Window::new("Keyboard Shortcuts")
+            .open(&mut open)
+            .resizable(false)
+            .show(ctx, |ui| {
+                egui::Grid::new("giochi-shortcuts")
+                    .num_columns(2)
+                    .spacing([18.0, 4.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for (keys, action) in SHORTCUTS {
+                            ui.label(egui::RichText::new(*keys).monospace().strong());
+                            ui.label(*action);
+                            ui.end_row();
+                        }
+                    });
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(
+                        "Viewport: right drag orbits, middle drag pans, wheel zooms.",
+                    )
+                    .small()
+                    .color(theme.muted),
+                );
+            });
+        state.show_shortcuts = open;
+    }
+
+    if state.show_about {
+        let mut open = true;
+        egui::Window::new("About giochi-editor")
+            .open(&mut open)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.heading("giochi-editor");
+                ui.label(format!("version {}", env!("CARGO_PKG_VERSION")));
+                ui.label(format!("engine {}", giochi_engine::VERSION));
+                ui.separator();
+                ui.label("Salto B — visual editor for GIOCHI-ENGINE");
+                ui.label(
+                    egui::RichText::new("https://github.com/xtrempkch-droid/GIOCHI-ENGINE-3D")
+                        .small()
+                        .color(theme.muted),
+                );
+                ui.separator();
+                ui.label(
+                    egui::RichText::new(format!("settings: {}", state.settings_path.display()))
+                        .small()
+                        .color(theme.muted),
+                );
+            });
+        state.show_about = open;
+    }
+
+    if state.show_preferences {
+        let mut open = true;
+        let mut close = false;
+        egui::Window::new("Preferences")
+            .open(&mut open)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.label("Autosave");
+                let mut seconds = state.settings.autosave_seconds;
+                let response = ui.add(
+                    egui::DragValue::new(&mut seconds)
+                        .speed(1.0)
+                        .range(0..=3600)
+                        .suffix(" s"),
+                );
+                if response.changed() {
+                    state.settings.autosave_seconds = seconds;
+                    // The timer takes the new interval immediately rather than at the next
+                    // session: a setting that only applies after a restart is a bug report.
+                    state.autosave.reset(state.settings.autosave_interval());
+                }
+                ui.label(
+                    egui::RichText::new("0 disables autosave")
+                        .small()
+                        .color(theme.muted),
+                );
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Save settings").clicked() {
+                        match state.save_settings() {
+                            Ok(()) => {
+                                state.report(Status::info("Settings saved"));
+                                close = true;
+                            }
+                            Err(error) => {
+                                state.report(Status::error(format!("Could not save: {error}")));
+                            }
+                        }
+                    }
+                    if ui.button("Close").clicked() {
+                        close = true;
+                    }
+                });
+            });
+        state.show_preferences = open && !close;
+    }
 }
 
 fn planned(ui: &mut egui::Ui, label: &str, shortcut: &str, phase: u8) {

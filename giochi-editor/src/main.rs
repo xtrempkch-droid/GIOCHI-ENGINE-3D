@@ -14,6 +14,7 @@ giochi-editor — visual scene editor for GIOCHI-ENGINE
 
 Usage:
   giochi-editor [--project DIR] [--scene FILE] [--config DIR] [--frames N]
+  giochi-editor --version
   giochi-editor --help
 
 Options:
@@ -23,6 +24,7 @@ Options:
   --play-frames N  render N frames of the preview window and return (headless check)
   --frames N     render N frames and exit (used by the headless check)
   -h, --help     show this help
+  -V, --version  print the version
 
 Keys:
   Ctrl+N        new scene
@@ -87,6 +89,11 @@ fn main() -> ExitCode {
             }
             "-h" | "--help" => {
                 println!("{USAGE}");
+                return ExitCode::SUCCESS;
+            }
+            "-V" | "--version" => {
+                // What the packaging script names the folder after.
+                println!("giochi-editor {}", giochi_editor::VERSION);
                 return ExitCode::SUCCESS;
             }
             other => {

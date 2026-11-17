@@ -224,6 +224,7 @@ pub fn run(options: EditorOptions) -> Result<EditorRunStats, GiochiError> {
             metrics = editor::layout::draw(ctx, &mut state, &theme, Some(&icons));
             // The prompt is drawn after the panels so it is on top of them, and inside the
             // same closure so the answer is applied on the next frame.
+            editor::layout::draw_help_windows(ctx, &mut state, &theme);
             editor::layout::draw_quit_prompt(ctx, &mut state, &theme);
             engine.devtools_mut().draw_console_panel(ctx, screen);
         });

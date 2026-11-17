@@ -225,6 +225,12 @@ pub struct EditorState {
     pub quit_prompt: Option<QuitPrompt>,
     /// Set when the user asked for a play preview; the loop takes it and opens the window.
     play_requested: bool,
+    /// The Help > About window is open.
+    pub show_about: bool,
+    /// The Help > Keyboard Shortcuts window is open.
+    pub show_shortcuts: bool,
+    /// The Edit > Preferences window is open.
+    pub show_preferences: bool,
     /// Set when the user answered "save" on the quit prompt for a scene that had never been
     /// saved: once the save dialog produces a path, the editor quits.
     quit_after_save: bool,
@@ -263,6 +269,9 @@ impl EditorState {
             autosave_dir: EditorSettings::config_dir(),
             quit_prompt: None,
             play_requested: false,
+            show_about: false,
+            show_shortcuts: false,
+            show_preferences: false,
             quit_after_save: false,
             quit_requested: false,
         }
