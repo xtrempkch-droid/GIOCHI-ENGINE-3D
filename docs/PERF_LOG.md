@@ -877,6 +877,36 @@ regression test is a distance: ten frames of 0.05 units must sum to 0.5 with no 
 other axes. A constant-direction test cannot catch this class of bug — the direction is what
 hides it.
 
+## After 0.5.1 — the snapshot on the wire
+
+`giochi-net` stopped quantising position into `u16` centimetres and stopped sending `hp` as
+a `u8`. The question for this file is what that costs.
+
+Method: encode and decode 13 enemies (an area-of-interest radius that yields 13 contacts)
+200 000 times in a release build; encode 200 enemies to find where the encoder stops; and
+build the pre-change tree from `f12c09b` in a worktree sharing this target directory, so
+the size A/B is the same compiler, the same flags and the same cached dependencies.
+
+| Run | Result | Interpretation |
+|---|---|---|
+| `codificar`, 13 enemies | **163 ns / snapshot** | Includes the `Vec` allocation the API returns. At `SNAPSHOT_HZ = 15` that is 2.4 µs per second per client — below the noise floor of any frame budget |
+| `decodificar`, 13 enemies | **147 ns / snapshot** | Same order; the reader is a bounds-checked cursor, no allocation per field |
+| Datagram with 13 enemies | **191 B** | 9 header + 13 × 14 |
+| Datagram with 200 enemies | **1199 B of a 1200 B cap** | The encoder truncates: 85 enemies fit, 115 never leave |
+| `libgiochi.so` release, `--workspace` | **2 604 512 B / 130 symbols** | A/B against `f12c09b` measured in the same target directory: **2 604 688 B → 2 604 512 B, −176 B**, same 130 symbols. The quantiser (multiply, round, range check, saturate, twice per enemy) is more code than two `f32` writes. `giochi-net` is linked into the capi, so the wire change reaches this library |
+| `libgiochi.so` release, `-p giochi-engine-capi` | 2 604 496 B | 16 B below the workspace build of the same commit. `nm --print-size` is identical between the two, so no function changed; `.rodata` is 8 B larger and `.gcc_except_table` 16 B larger in the workspace build, with `.relro_padding` absorbing the rest. Cause not isolated — it is a codegen difference between the two crate graphs, not a source difference. Quote one invocation consistently |
+
+The bandwidth cost is the interesting one, because it did **not** go up. The datagram was
+already at the cap before the change, so per-client bandwidth stays at 1197–1199 B per
+snapshot × 15 Hz ≈ **18 KB/s** in the worst case either way. What fell is capacity:
+**132 → 85 enemies per snapshot**. A client standing in a horde of 150 now receives 65
+fewer of them than it used to, silently, which is why the area-of-interest radius matters
+more than it did.
+
+`Host::ultimos_envios` was measuring the wrong side of the encoder (it reported the
+filtered count, before truncation), so the metric that exists to justify the AOI was
+overstating what the wire carried — 150 instead of 85. It now reports what fit.
+
 ## Conclusions
 
 - On x86_64 the baseline is dominated by per-sprite draw calls: 200 → 1000 sprites
