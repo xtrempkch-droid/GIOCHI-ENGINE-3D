@@ -73,7 +73,7 @@ notify = "8"
 # every user, including the ones that never enable the feature. 0.33.3 needed no source
 # change at all; 0.37 removes `Context::run`, `Context::style` and moves
 # `TopBottomPanel`, so it is not a free bump either.
-egui = "0.33.3"
+egui = "0.37.0"
 
 # Phase 24. Rapier 0.36 is the newest release whose declared MSRV (1.86) is exactly the
 # engine's floor, so turning `physics-2d`/`physics-3d` on cannot raise it (ADR-046).
