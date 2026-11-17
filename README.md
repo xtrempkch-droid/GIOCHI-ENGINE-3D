@@ -191,19 +191,22 @@ They need a GL driver; `SDL_VIDEODRIVER=offscreen` runs them headless.
 
 ### Editor
 
-The visual editor (`giochi-editor`, Salto B phases 30–40) is its own crate. Phases 30–33
+The visual editor (`giochi-editor`, Salto B phases 30–40) is its own crate. Phases 30–34
 give a resizable 1600×900 window with the menu bar, the Hierarchy/Inspector/Asset Browser
 panels, a viewport that draws the scene as a projected wireframe (grid, axes, node boxes,
 selection outline) with an orbit camera, New/Open/Save through the scene format,
-hierarchy + viewport selection (click, Ctrl+click, double-click to frame) and an inspector
-that edits Transform, Mesh, Material, Light and Camera in place — enough to build a scene,
-save it and reopen it:
+hierarchy + viewport selection (click, Ctrl+click, double-click to frame), an inspector that
+edits Transform, Mesh, Material, Light and Camera in place, and projects (`project.toml`
+with `assets/` and `scenes/`), asset import and drag-to-viewport instantiation — enough to
+build a scene, save it and reopen it:
 
 ```bash
 cargo run -p giochi-editor                      # opens the editor
 cargo run -p giochi-editor -- --frames 3        # headless check, then exit
 cargo run -p giochi-editor -- --scene giochi-editor/assets/scenes/default.scene
+cargo run -p giochi-editor -- --project /path/to/project
 cargo run -p giochi-editor --example editor_default_scene   # writes + reloads the default scene
+cargo run -p giochi-editor --example editor_project_demo    # project + import, prints project=ok
 ```
 
 The user guide is [docs/EDITOR_USER_GUIDE.md](docs/EDITOR_USER_GUIDE.md); the scene format

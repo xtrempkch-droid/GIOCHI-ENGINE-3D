@@ -359,6 +359,28 @@ pub fn material_editor(ui: &mut egui::Ui, material: &mut MaterialDesc) -> bool {
             changed = true;
         }
     });
+    // Phase 34: a texture dragged from the asset browser lands here. `dnd_drop_zone`
+    // reports the payload once the pointer is released over the slot, which is the whole
+    // of "drag a texture onto the material".
+    let (_, dropped) = ui.dnd_drop_zone::<crate::panels::asset_browser::AssetDrag, _>(
+        egui::Frame::NONE.fill(ui.visuals().faint_bg_color),
+        |ui| {
+            ui.label(
+                egui::RichText::new(match &material.texture {
+                    Some(texture) => format!("drop a texture here (current: {texture})"),
+                    None => "drop a texture here".to_owned(),
+                })
+                .small()
+                .color(ui.visuals().weak_text_color()),
+            );
+        },
+    );
+    if let Some(drag) = dropped {
+        if drag.kind == crate::project::AssetKind::Texture {
+            material.texture = Some(drag.relative.clone());
+            changed = true;
+        }
+    }
     changed |= ui
         .add(
             egui::Slider::new(&mut material.specular, 0.0..=1.0)

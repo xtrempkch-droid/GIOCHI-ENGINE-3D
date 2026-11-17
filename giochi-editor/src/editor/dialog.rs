@@ -16,42 +16,95 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::project::PROJECT_FILE;
+
 /// What the user did with the dialog.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DialogOutcome {
     /// The dialog is still open.
     Pending,
-    /// Open this path.
+    /// Open this path (a file, or a directory for a project).
     Open(PathBuf),
     /// Save to this path.
     Save(PathBuf),
+    /// Create a project folder `parent/name`.
+    CreateProject {
+        /// The folder the new project goes in.
+        parent: PathBuf,
+        /// The project's folder name.
+        name: String,
+    },
     /// Dismissed.
     Cancel,
 }
 
-/// Which action the dialog is collecting.
+/// What the dialog is for, which decides its title, its listing and what confirming means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogKind {
-    /// Pick an existing file.
-    Open,
-    /// Name a file to write.
-    Save,
+    /// Pick an existing `.scene`.
+    OpenScene,
+    /// Name a `.scene` to write.
+    SaveScene,
+    /// Pick a directory that contains `project.toml`.
+    OpenProject,
+    /// Pick a `.scene`-like file of any type, to copy into the project's assets.
+    ImportAsset,
+    /// Pick the parent folder and type the folder name of a new project.
+    NewProject,
 }
 
 impl DialogKind {
     /// The window title.
     pub const fn title(self) -> &'static str {
         match self {
-            Self::Open => "Open Scene",
-            Self::Save => "Save Scene As",
+            Self::OpenScene => "Open Scene",
+            Self::SaveScene => "Save Scene As",
+            Self::OpenProject => "Open Project",
+            Self::ImportAsset => "Import Asset",
+            Self::NewProject => "New Project",
         }
     }
 
     /// The label of the confirming button.
     pub const fn confirm_label(self) -> &'static str {
         match self {
-            Self::Open => "Open",
-            Self::Save => "Save",
+            Self::OpenScene | Self::OpenProject => "Open",
+            Self::SaveScene => "Save",
+            Self::ImportAsset => "Import",
+            Self::NewProject => "Create",
+        }
+    }
+
+    /// Whether the dialog has a name field.
+    const fn needs_filename(self) -> bool {
+        matches!(self, Self::SaveScene | Self::NewProject)
+    }
+
+    /// Whether a directory row enters the directory or is itself the answer.
+    const fn directories_are_answers(self) -> bool {
+        matches!(self, Self::OpenProject)
+    }
+
+    /// Whether the name field gets the `.scene` extension appended.
+    const fn forces_scene_extension(self) -> bool {
+        matches!(self, Self::SaveScene)
+    }
+
+    /// Which files the listing shows.
+    fn shows(self, path: &Path) -> bool {
+        match self {
+            Self::OpenScene | Self::SaveScene => path
+                .extension()
+                .is_some_and(|extension| extension == "scene"),
+            // A project name is a folder name; the dialog browses for its parent, so no
+            // file is ever an answer.
+            Self::NewProject => false,
+            Self::ImportAsset => path.is_file(),
+            // A project is confirmed by its folder, but showing `project.toml` makes the
+            // folder's identity visible while browsing into it.
+            Self::OpenProject => {
+                path.is_file() && path.file_name().is_some_and(|name| name == PROJECT_FILE)
+            }
         }
     }
 }
@@ -84,25 +137,40 @@ pub struct FileDialog {
 }
 
 impl FileDialog {
-    /// An "open" dialog starting in `directory`.
+    /// An "open scene" dialog starting in `directory`.
     pub fn open(directory: impl AsRef<Path>) -> Self {
-        let mut dialog = Self {
-            kind: DialogKind::Open,
-            directory: directory.as_ref().to_path_buf(),
-            filename: String::new(),
-            entries: Vec::new(),
-            error: None,
-        };
-        dialog.refresh();
-        dialog
+        Self::new(DialogKind::OpenScene, directory, "")
     }
 
-    /// A "save as" dialog starting in `directory` with `filename` pre-filled.
+    /// A "save scene as" dialog starting in `directory` with `filename` pre-filled.
     pub fn save(directory: impl AsRef<Path>, filename: impl Into<String>) -> Self {
+        Self::new(
+            DialogKind::SaveScene,
+            directory,
+            with_scene_extension(filename.into()),
+        )
+    }
+
+    /// An "open project" dialog starting in `directory`.
+    pub fn open_project(directory: impl AsRef<Path>) -> Self {
+        Self::new(DialogKind::OpenProject, directory, "")
+    }
+
+    /// An "import asset" dialog starting in `directory`.
+    pub fn import(directory: impl AsRef<Path>) -> Self {
+        Self::new(DialogKind::ImportAsset, directory, "")
+    }
+
+    /// A "new project" dialog: the parent folder is `directory`, the name is pre-filled.
+    pub fn new_project(directory: impl AsRef<Path>) -> Self {
+        Self::new(DialogKind::NewProject, directory, "my-project")
+    }
+
+    fn new(kind: DialogKind, directory: impl AsRef<Path>, filename: impl Into<String>) -> Self {
         let mut dialog = Self {
-            kind: DialogKind::Save,
+            kind,
             directory: directory.as_ref().to_path_buf(),
-            filename: with_scene_extension(filename.into()),
+            filename: filename.into(),
             entries: Vec::new(),
             error: None,
         };
@@ -143,10 +211,7 @@ impl FileDialog {
                     label: format!("{name}/"),
                     is_dir: true,
                 });
-            } else if path
-                .extension()
-                .is_some_and(|extension| extension == "scene")
-            {
+            } else if self.kind.shows(&path) {
                 files.push(Entry {
                     path,
                     label: name,
@@ -161,27 +226,47 @@ impl FileDialog {
     }
 
     /// The path the dialog would act on right now, if the filename is usable.
+    ///
+    /// `None` for a project dialog: what it produces is a folder name, not a file path
+    /// (see [`DialogOutcome::CreateProject`]).
     pub fn selected_path(&self) -> Option<PathBuf> {
+        if !self.kind.needs_filename() || self.kind == DialogKind::NewProject {
+            return None;
+        }
         let name = self.filename.trim();
         if name.is_empty() {
             return None;
         }
-        Some(self.directory.join(with_scene_extension(name.to_owned())))
+        let name = if self.kind.forces_scene_extension() {
+            with_scene_extension(name.to_owned())
+        } else {
+            name.to_owned()
+        };
+        Some(self.directory.join(name))
     }
 
-    /// Enters `entry`: a directory is listed, a file is chosen by an "open" dialog.
+    /// Enters `entry`: a directory is listed (or chosen, for a project), a file is picked.
     pub fn activate(&mut self, entry: &Entry) -> DialogOutcome {
         if entry.is_dir {
+            if self.kind.directories_are_answers() {
+                return match crate::project::Project::open(&entry.path) {
+                    Ok(_) => DialogOutcome::Open(entry.path.clone()),
+                    Err(error) => {
+                        self.error = Some(error);
+                        DialogOutcome::Pending
+                    }
+                };
+            }
             self.directory = entry.path.clone();
             self.refresh();
             DialogOutcome::Pending
         } else {
             self.filename = entry.label.clone();
-            match self.kind {
-                DialogKind::Open => DialogOutcome::Open(entry.path.clone()),
-                DialogKind::Save => self
-                    .selected_path()
-                    .map_or(DialogOutcome::Pending, DialogOutcome::Save),
+            if self.kind.needs_filename() {
+                self.selected_path()
+                    .map_or(DialogOutcome::Pending, DialogOutcome::Save)
+            } else {
+                DialogOutcome::Open(entry.path.clone())
             }
         }
     }
@@ -239,31 +324,78 @@ impl FileDialog {
                             }
                         }
                         if self.entries.is_empty() && self.error.is_none() {
-                            ui.label("no .scene files here");
+                            ui.label(match self.kind {
+                                DialogKind::OpenProject => "no project.toml here",
+                                DialogKind::ImportAsset => "empty folder",
+                                DialogKind::NewProject => "pick the folder the project goes in",
+                                _ => "no .scene files here",
+                            });
                         }
                     });
 
                 ui.separator();
                 ui.horizontal(|ui| {
-                    ui.label("file");
-                    ui.text_edit_singleline(&mut self.filename);
+                    if self.kind.needs_filename() {
+                        ui.label(if self.kind == DialogKind::NewProject {
+                            "project folder name"
+                        } else {
+                            "file"
+                        });
+                        ui.text_edit_singleline(&mut self.filename);
+                    } else if self.kind == DialogKind::OpenProject {
+                        ui.label("choose the folder that contains project.toml");
+                    }
                     if ui.button(confirm).clicked() {
-                        if let Some(path) = self.selected_path() {
-                            outcome = match self.kind {
-                                DialogKind::Open => {
-                                    if path.exists() {
-                                        DialogOutcome::Open(path)
-                                    } else {
+                        outcome = match self.kind {
+                            DialogKind::SaveScene => match self.selected_path() {
+                                Some(path) => DialogOutcome::Save(path),
+                                None => {
+                                    self.error = Some("type a file name".to_owned());
+                                    DialogOutcome::Pending
+                                }
+                            },
+                            DialogKind::OpenScene | DialogKind::ImportAsset => {
+                                match self.selected_path() {
+                                    Some(path) if path.exists() => DialogOutcome::Open(path),
+                                    Some(path) => {
                                         self.error =
                                             Some(format!("{} does not exist", path.display()));
                                         DialogOutcome::Pending
                                     }
+                                    None => {
+                                        self.error = Some("choose a file".to_owned());
+                                        DialogOutcome::Pending
+                                    }
                                 }
-                                DialogKind::Save => DialogOutcome::Save(path),
-                            };
-                        } else {
-                            self.error = Some("type a file name".to_owned());
-                        }
+                            }
+                            DialogKind::OpenProject => {
+                                match crate::project::Project::open(&self.directory) {
+                                    Ok(_) => DialogOutcome::Open(self.directory.clone()),
+                                    Err(error) => {
+                                        self.error = Some(error);
+                                        DialogOutcome::Pending
+                                    }
+                                }
+                            }
+                            DialogKind::NewProject => {
+                                let name = self.filename.trim().to_owned();
+                                if name.is_empty() {
+                                    self.error = Some("type a project name".to_owned());
+                                    DialogOutcome::Pending
+                                } else if self.directory.join(&name).exists() {
+                                    self.error = Some(format!(
+                                        "{} already exists",
+                                        self.directory.join(&name).display()
+                                    ));
+                                    DialogOutcome::Pending
+                                } else {
+                                    DialogOutcome::CreateProject {
+                                        parent: self.directory.clone(),
+                                        name,
+                                    }
+                                }
+                            }
+                        };
                     }
                     if ui.button("Cancel").clicked() {
                         outcome = DialogOutcome::Cancel;

@@ -52,6 +52,10 @@ serde = { version = "1", features = ["derive"] }
 # Phase 26.5/27: the scene format is JSON. `serde_json` is the only consumer of the
 # `serde` derive above and has no optional native part.
 serde_json = "1"
+# Phase 34. `project.toml` is the one file a project owns. `toml` 0.8 declares MSRV
+# 1.65 (measured from the crates.io manifest), well below the workspace floor, and it
+# reuses the `serde` derive already in the tree.
+toml = "0.8"
 mlua = { version = "0.12", features = ["lua54", "vendored"] }
 cbindgen = "0.27"
 # Phase 16: statistical benchmarks. The `html_reports` feature is what phase 18's

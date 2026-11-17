@@ -11,6 +11,8 @@ use giochi_engine_3d::scene::{Scene, SceneError};
 
 use crate::editor::dialog::FileDialog;
 use crate::editor::orbit_camera::OrbitCamera;
+use crate::panels::asset_browser::AssetBrowserState;
+use crate::project::Project;
 
 /// Identifies one object in the edited scene.
 ///
@@ -122,7 +124,11 @@ impl Default for PanelVisibility {
 }
 
 /// The editor's session state.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// Cloned but not compared: the asset browser holds egui texture handles, and "two editor
+/// states are equal" is not a question anything in the editor asks. Tests compare the
+/// fields they mean (`scene`, `selected`, `dirty`).
+#[derive(Debug, Clone)]
 pub struct EditorState {
     /// The scene file currently open, if any.
     pub scene_path: Option<PathBuf>,
@@ -152,6 +158,10 @@ pub struct EditorState {
     pub status: Status,
     /// The file dialog, while one is open.
     pub dialog: Option<FileDialog>,
+    /// The open project, which owns `assets/` and `scenes/`.
+    pub project: Option<Project>,
+    /// The asset browser's filter, listing and preview.
+    pub assets: AssetBrowserState,
     /// Set by the window close button, `Esc`, or `File > Exit`.
     quit_requested: bool,
 }
@@ -176,6 +186,8 @@ impl EditorState {
             viewport_rect: None,
             status: Status::default(),
             dialog: None,
+            project: None,
+            assets: AssetBrowserState::new(),
             quit_requested: false,
         }
     }
@@ -292,14 +304,31 @@ impl EditorState {
             .ok_or_else(|| "no scene open".to_owned())?;
         scene.save_to_path(path).map_err(|error| describe(&error))?;
         self.scene_path = Some(path.to_path_buf());
+        // A scene saved into the project is a scene of the project: `project.toml` is the
+        // list a game (or the user) reads to find them.
+        if let Some(project) = self.project.as_mut() {
+            if project.register_scene(path) {
+                if let Err(error) = project.save() {
+                    log::warn!("could not update project.toml: {error}");
+                }
+            }
+        }
         self.mark_saved();
         self.status = Status::info(format!("Saved {}", path.display()));
         Ok(())
     }
 
-    /// Opens the "Open Scene" dialog in the current directory.
+    /// Where a scene dialog should start: the project's `scenes/`, or the cwd.
+    pub fn scenes_directory(&self) -> PathBuf {
+        match &self.project {
+            Some(project) => project.scenes_dir(),
+            None => default_dialog_directory(),
+        }
+    }
+
+    /// Opens the "Open Scene" dialog in the project's scenes folder.
     pub fn open_dialog(&mut self) {
-        self.dialog = Some(FileDialog::open(default_dialog_directory()));
+        self.dialog = Some(FileDialog::open(self.scenes_directory()));
     }
 
     /// Opens the "Save Scene As" dialog, pre-filled with the current name.
@@ -308,7 +337,71 @@ impl EditorState {
             .scene_name()
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| "untitled".to_owned());
-        self.dialog = Some(FileDialog::save(default_dialog_directory(), name));
+        self.dialog = Some(FileDialog::save(self.scenes_directory(), name));
+    }
+
+    /// Opens the "Open Project" dialog in the current directory.
+    pub fn open_project_dialog(&mut self) {
+        self.dialog = Some(FileDialog::open_project(default_dialog_directory()));
+    }
+
+    /// Opens a "New Project" dialog: the user picks the parent folder and types a name.
+    pub fn new_project_dialog(&mut self) {
+        self.dialog = Some(FileDialog::new_project(default_dialog_directory()));
+    }
+
+    /// Opens the "Import Asset" dialog in the current directory.
+    pub fn import_dialog(&mut self) {
+        self.dialog = Some(FileDialog::import(default_dialog_directory()));
+    }
+
+    /// Makes `project` the open project, refreshing the asset browser.
+    ///
+    /// Warnings from [`Project::validate`] go to the status line: a project with a missing
+    /// scene is still usable, and refusing to open it would be worse than saying so.
+    pub fn set_project(&mut self, project: Project) {
+        let warnings = project.validate().unwrap_or_default();
+        self.project = Some(project);
+        self.assets.clear();
+        self.assets.refresh(self.project.as_ref());
+        self.status = match warnings.first() {
+            Some(warning) => Status::warning(warning.clone()),
+            None => Status::info(format!(
+                "Project {}",
+                self.project
+                    .as_ref()
+                    .map(|p| p.name.clone())
+                    .unwrap_or_default()
+            )),
+        };
+    }
+
+    /// Creates a project under `parent/name` and opens it.
+    pub fn create_project(&mut self, parent: impl AsRef<Path>, name: &str) -> Result<(), String> {
+        let root = parent.as_ref().join(name.trim());
+        let project = Project::create(&root, name)?;
+        self.set_project(project);
+        Ok(())
+    }
+
+    /// Opens an existing project directory.
+    pub fn open_project(&mut self, root: impl AsRef<Path>) -> Result<(), String> {
+        let project = Project::open(root)?;
+        self.set_project(project);
+        Ok(())
+    }
+
+    /// Imports `source` into the project's assets and refreshes the browser.
+    pub fn import_asset(&mut self, source: impl AsRef<Path>) -> Result<PathBuf, String> {
+        let project = self
+            .project
+            .as_mut()
+            .ok_or_else(|| "open a project before importing assets".to_owned())?;
+        let entry = project.import_asset(source.as_ref())?;
+        self.assets.refresh(self.project.as_ref());
+        self.assets.selected = Some(entry.path.clone());
+        self.status = Status::info(format!("Imported {}", entry.label));
+        Ok(entry.path)
     }
 
     /// Saves, asking for a path when there is none yet.

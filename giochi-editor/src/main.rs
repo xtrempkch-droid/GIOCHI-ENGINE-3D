@@ -13,17 +13,19 @@ const USAGE: &str = "\
 giochi-editor — visual scene editor for GIOCHI-ENGINE
 
 Usage:
-  giochi-editor [--scene FILE] [--frames N]
+  giochi-editor [--project DIR] [--scene FILE] [--frames N]
   giochi-editor --help
 
 Options:
-  --scene FILE  open a .scene file before the first frame
-  --frames N    render N frames and exit (used by the headless check)
-  -h, --help    show this help
+  --project DIR  open a project (a folder containing project.toml)
+  --scene FILE   open a .scene file before the first frame
+  --frames N     render N frames and exit (used by the headless check)
+  -h, --help     show this help
 
 Keys:
   Ctrl+N        new scene
   Ctrl+O        open scene (in-editor file dialog)
+  Ctrl+I        import an asset into the project
   Ctrl+S        save            Ctrl+Shift+S  save as
   F2            open/close the in-game console
   Esc           quit (when no text field or dialog owns the key)
@@ -40,6 +42,13 @@ fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--project" => match args.next() {
+                Some(path) if !path.is_empty() => options.project = Some(path.into()),
+                _ => {
+                    eprintln!("--project needs a directory\n\n{USAGE}");
+                    return ExitCode::from(2);
+                }
+            },
             "--scene" => match args.next() {
                 Some(path) if !path.is_empty() => options.scene = Some(path.into()),
                 _ => {

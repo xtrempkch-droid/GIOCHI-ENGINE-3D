@@ -2026,3 +2026,47 @@ all three axis colours, the selection outline and that **nothing** is drawn outs
 viewport rectangle). The cost is that the editor does not preview materials; that is stated
 in the user guide rather than left as a surprise, and it is the one piece of phase 31's
 plan deliberately traded away.
+
+## ADR-065 — A project is a folder with `project.toml`; assets are imported, never linked
+
+**Context.** Phase 34 asks for a project manager, an asset browser over `<project>/assets/`,
+an importer and drag-and-drop. The alternative — keep opening arbitrary `.scene` files and
+let each one reference assets by whatever path it was written with — works for one demo and
+fails as soon as a second machine, or the console, tries to load it.
+
+**Decision.**
+
+- A project is a directory with `project.toml`:
+  ```toml
+  name = "my-project"
+  scenes = ["scenes/default.scene"]
+  ```
+  `Project::create` makes `assets/` and `scenes/`, `Project::open` validates, and
+  `validate()` reports missing scenes and missing folders as **warnings** — a project with
+  a stale listing still opens, because refusing would hide the assets that are fine.
+- Scenes and asset references are stored **relative to the project root**, with `/`
+  separators. `Project::relative_to_root` keeps a path outside the root as given instead of
+  inventing a `..` chain.
+- Saving a scene into the project runs `register_scene` and rewrites `project.toml`; that
+  file is the list a game or the user reads to find the scenes.
+- **Import copies**, into `assets/<kind>/`, with `name-1.ext` on a collision. Linking would
+  make a project depend on where the user happened to have the file; copying makes it
+  self-contained, which is the whole point of a project folder. Re-importing the same file
+  cannot overwrite a copy a scene already points at.
+- The browser's listing is a **snapshot**: scanned when a project opens, after an import, or
+  on **Refresh**. A per-frame `read_dir` over an asset folder on a handheld SD card is a
+  stutter waiting to happen.
+- **glTF is recognised, not loadable.** `.gltf`/`.glb` appear under Models and are marked
+  `(no loader)`, and dropping one reports by name that the loader belongs to the pending
+  Production Pack (ADR-063) and that `.obj` is what works. Hiding them would look like a
+  failed import; doing nothing would be worse than saying so.
+- `toml` 0.8 (MSRV 1.65) is the only new dependency, and it reuses the `serde` derive the
+  scene format already has.
+
+**Consequences.** The editor now has one place that knows where files live, which is what
+phases 38 (projects, recent files, autosave), 40 (packaging) and 41–45 (the racer's
+`assets/tracks/`) all need. The cost is that a scene edited outside a project stores paths
+that only work relative to wherever it was saved — true before this phase too, now stated.
+Verified by `tests/project_flow.rs` (create → import → save → reopen, missing scene warning,
+import without project, dialogs' start directory) and by
+`cargo run -p giochi-editor --example editor_project_demo`, which prints `project=ok`.

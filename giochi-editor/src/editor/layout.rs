@@ -28,7 +28,7 @@ use crate::editor::editor_state::{Status, StatusKind};
 use crate::editor::icons::IconSet;
 use crate::editor::viewport::{self, ViewportInput};
 use crate::editor::{EditorState, EditorTheme};
-use crate::panels::{hierarchy, inspector};
+use crate::panels::{asset_browser, hierarchy, inspector};
 
 /// Identifier of the menu bar panel, stable across frames.
 pub const MENU_BAR_PANEL: &str = "giochi_editor_menu_bar";
@@ -40,7 +40,7 @@ pub const INSPECTOR_PANEL: &str = "giochi_editor_inspector";
 pub const ASSET_BROWSER_PANEL: &str = "giochi_editor_asset_browser";
 
 /// What the layout produced this frame.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct LayoutMetrics {
     /// The central rectangle the scene is rendered into, in points.
     ///
@@ -49,6 +49,8 @@ pub struct LayoutMetrics {
     pub viewport_rect: Option<Rect>,
     /// What the pointer did over the viewport this frame.
     pub input: ViewportInput,
+    /// An asset released over the viewport, for the loop to instantiate.
+    pub dropped_asset: Option<asset_browser::AssetDrag>,
 }
 
 /// Draws the whole editor chrome and returns the rectangles the rest of the editor needs.
@@ -98,12 +100,7 @@ pub fn draw(
             .height_range(110.0..=420.0)
             .show(ctx, |ui| {
                 panel_header(ui, "ASSET BROWSER", theme);
-                hint(
-                    ui,
-                    "The project's assets appear here.",
-                    "Phase 34 — Asset browser",
-                    theme,
-                );
+                asset_browser::draw(ui, state, theme);
             });
     }
 
@@ -117,6 +114,15 @@ pub fn draw(
             let _ = ui.allocate_rect(rect, egui::Sense::click_and_drag());
             metrics.viewport_rect = Some(rect);
             metrics.input = viewport::read_input(ctx, Some(rect));
+
+            // Phase 34: the viewport accepts an asset dragged out of the browser. egui
+            // tracks the payload; the drop is reported through `metrics` so the loop can
+            // mutate the scene (this closure already holds `&mut state` for the panels,
+            // and doing it here would nest the borrows).
+            metrics.dropped_asset = ui
+                .interact(rect, egui::Id::new("giochi-viewport-drop"), egui::Sense::hover())
+                .dnd_release_payload::<asset_browser::AssetDrag>()
+                .map(|payload| (*payload).clone());
 
             match &state.scene {
                 Some(scene) => {
@@ -180,6 +186,22 @@ fn menu_bar(ctx: &egui::Context, state: &mut EditorState, theme: &EditorTheme) {
                     if confirm_replace(state) {
                         state.open_dialog();
                     }
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button("New Project…").clicked() {
+                    state.new_project_dialog();
+                    ui.close();
+                }
+                if ui.button("Open Project…").clicked() {
+                    state.open_project_dialog();
+                    ui.close();
+                }
+                if ui
+                    .add(egui::Button::new("Import Asset…").shortcut_text("Ctrl+I"))
+                    .clicked()
+                {
+                    state.import_dialog();
                     ui.close();
                 }
                 ui.separator();
@@ -279,12 +301,29 @@ fn file_dialog(ctx: &egui::Context, state: &mut EditorState) {
     match dialog.show(ctx) {
         DialogOutcome::Pending => state.dialog = Some(dialog),
         DialogOutcome::Open(path) => {
-            if let Err(error) = state.open_scene(&path) {
+            // The same outcome serves three dialogs; which one it is decides what an
+            // "open" means. A project directory is a directory, a scene is a `.scene`
+            // file, and an import is any file.
+            let is_project = dialog.kind == crate::editor::DialogKind::OpenProject;
+            let is_import = dialog.kind == crate::editor::DialogKind::ImportAsset;
+            let result = if is_project {
+                state.open_project(&path)
+            } else if is_import {
+                state.import_asset(&path).map(|_| ())
+            } else {
+                state.open_scene(&path)
+            };
+            if let Err(error) = result {
                 state.report(Status::error(error));
             }
         }
         DialogOutcome::Save(path) => {
             if let Err(error) = state.save_scene_as(&path) {
+                state.report(Status::error(error));
+            }
+        }
+        DialogOutcome::CreateProject { parent, name } => {
+            if let Err(error) = state.create_project(&parent, &name) {
                 state.report(Status::error(error));
             }
         }

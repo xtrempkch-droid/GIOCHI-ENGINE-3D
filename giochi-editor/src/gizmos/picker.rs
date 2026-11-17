@@ -86,6 +86,28 @@ pub fn pick(
     best.map(|(_, id)| id)
 }
 
+/// Where `position` (viewport points) meets the floor plane `y = 0`.
+///
+/// Used by the asset browser's drop: a model dropped on the viewport lands on the ground
+/// under the cursor instead of at the origin, which is what makes dropping five objects
+/// five objects and not one pile. `None` when the ray is parallel to the floor or hits it
+/// behind the camera — a camera aimed at the horizon — so the caller can fall back.
+pub fn ground_point(position: egui::Pos2, rect: Rect, camera: &OrbitCamera) -> Option<[f32; 3]> {
+    let ray = ray_through(position, rect, camera)?;
+    if ray.direction.y.abs() < 1e-6 {
+        return None;
+    }
+    let distance = -ray.origin.y / ray.direction.y;
+    if distance <= 0.0 || !distance.is_finite() {
+        return None;
+    }
+    let point = ray.origin + ray.direction * distance;
+    if !point.is_finite() {
+        return None;
+    }
+    Some([point.x, 0.0, point.z])
+}
+
 /// Distance along `ray` to the entry point of `[min, max]`, or `None` when it misses.
 ///
 /// A box behind the ray (`exit < 0`) misses; a ray that starts inside returns `0.0`, which
@@ -205,6 +227,49 @@ mod tests {
         );
 
         assert_eq!(pick(&scene, rect().center(), rect(), &camera), Some(near));
+    }
+
+    #[test]
+    fn the_centre_of_the_viewport_meets_the_floor_past_the_target() {
+        let camera = camera();
+        let point = ground_point(rect().center(), rect(), &camera).expect("floor");
+        assert_eq!(point[1], 0.0);
+
+        // The target is at y = 0.5, so the ray continues *through* it and hits the floor
+        // slightly beyond — the point must be collinear with the eye→target line and in
+        // front of the camera, not the same place as the target.
+        let eye = camera.eye();
+        let direction = (camera.target - eye).normalize();
+        let to_point = Vec3::new(point[0], point[1], point[2]) - eye;
+        let along = to_point.dot(direction);
+        assert!(along > 0.0, "the floor point is behind the camera");
+        let perpendicular = (to_point - direction * along).length();
+        assert!(perpendicular < 1e-3, "{perpendicular} off the view ray");
+        assert!(along > camera.distance, "the floor is past the target");
+    }
+
+    #[test]
+    fn a_camera_parallel_to_the_floor_has_no_ground_point() {
+        let camera = OrbitCamera {
+            pitch: 0.0,
+            ..OrbitCamera::default()
+        };
+        assert!(ground_point(rect().center(), rect(), &camera).is_none());
+    }
+
+    #[test]
+    fn a_click_above_the_horizon_has_no_ground_point() {
+        let camera = camera();
+        // The top edge of the viewport, looking up at the sky.
+        assert!(ground_point(egui::pos2(400.0, 1.0), rect(), &camera).is_none());
+    }
+
+    #[test]
+    fn dropping_further_right_lands_further_along_the_x_axis() {
+        let camera = camera();
+        let left = ground_point(egui::pos2(200.0, 500.0), rect(), &camera).expect("floor");
+        let right = ground_point(egui::pos2(600.0, 500.0), rect(), &camera).expect("floor");
+        assert!(right[0] > left[0], "{left:?} vs {right:?}");
     }
 
     #[test]

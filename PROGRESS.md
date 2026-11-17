@@ -12,7 +12,7 @@ ADR-061). O Salto B começou em **2026-11-17**.
 | 31 — Viewport | **concluída** (2026-11-17) | 55 testes de unidade no editor + 1 smoke com cena + 1 teste de **pixels** (grid, 3 eixos, contorno de seleção, nada fora do retângulo); `--scene default.scene --frames 60` via x11 e 10 frames via dummy |
 | 32 — Hierarchy + seleção | pendente | — |
 | 33 — Inspector (**MVP do editor**) | **concluída** (2026-11-17) | 94 testes de unidade no editor (Euler↔quatérnio, editores sem input não alteram nada, multi-seleção, MVP gravar/reabrir) + smoke + pixels; execução real com o inspector desenhado a 90 frames |
-| 34 — Asset browser | pendente | — |
+| 34 — Asset browser | **concluída** (2026-11-17) | 127 testes de unidade no editor + 5 de integração do fluxo de projeto; `editor_project_demo` imprime `project=ok`; editor aberto com `--project … --scene …` a 90 frames |
 | 35a/35b — Gizmos | pendente | — |
 | 36 — Hierarquia (create/delete/duplicate) | pendente | — |
 | 37 — Undo/redo | pendente | — |
@@ -242,10 +242,47 @@ e a `CommandStack` e refatora o inspector — que hoje escreve o nó e marca dir
 esses comandos. `roughness`/`emissive` também ficam de fora: o formato e o renderer só
 consomem `specular`/`shininess` (ADR-063).
 
+### Gates da Fase 34
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo test --workspace` — 127 testes de unidade no editor + 5 de `project_flow`
+- [x] `cargo doc --workspace --no-deps`
+- [x] `scripts/gates.sh` completo — "All gates passed"
+- [x] `cargo run -p giochi-editor --example editor_project_demo` — `project=ok`
+- [x] `cargo run -p giochi-editor -- --project /tmp/giochi-p34 --scene …/demo.scene --frames 90` (x11)
+- [x] `cargo check -p giochi-editor --target aarch64-unknown-linux-gnu`
+
+### Entregue na Fase 34
+
+| Ficheiro | O que faz |
+|---|---|
+| `project.rs` | `Project` (criar/abrir/gravar `project.toml`), `AssetKind`, `AssetEntry`, importação com nomes únicos, `scan_assets`, `validate` com avisos |
+| `panels/asset_browser.rs` | filtros, listagem em snapshot, preview (imagem real / cubo wireframe / resumo da cena), `AssetDrag`, drop de textura no material |
+| `editor/dialog.rs` | um diálogo para cenas, projetos e import: `OpenScene`, `SaveScene`, `OpenProject`, `NewProject`, `ImportAsset` |
+| `editor/editor_state.rs` | `project`, `assets`, `create_project`/`open_project`/`import_asset`, `scenes_directory`, registo da cena ao gravar |
+| `gizmos/picker.rs` | `ground_point` (raio contra o plano `y = 0`) para o drop cair sob o cursor |
+| `lib.rs` | `--project DIR`, `Ctrl+I`, `apply_asset_drop` (testável sem SDL) |
+| `tests/project_flow.rs` | criar → importar → gravar → reabrir, aviso de cena em falta, import sem projeto, diretório inicial dos diálogos |
+| `examples/editor_project_demo.rs` | a aceitação completa contra uma pasta real; imprime `project=ok` |
+
+### O que o plano pedia e o que foi entregue
+
+O plano pedia "drag-and-drop de glTF pro viewport instancia na cena". Não há loader glTF
+neste repositório (ADR-063), por isso o `.gltf`/`.glb` é **reconhecido e marcado**
+`(no loader)`, e o drop diz porquê e sugere `.obj`; o `.obj` instancia de facto, no chão sob
+o cursor. Esconder o formato pareceria uma importação falhada. A zona de drop de textura no
+material do inspector foi entregue como pedido.
+
+O plano também pedia uma "árvore de diretórios"; a listagem é plana, com o caminho relativo
+em cada linha e filtros por tipo. Uma árvore expansível para `assets/` de um jogo é
+essencialmente uma pasta com três subpastas — a lista mostra a mesma informação sem estado
+de expansão para manter — e a Fase 40 pode trocá-la sem tocar no `Project`.
+
 ### Próxima fase
 
-**Fase 34 — Asset browser**: árvore de assets do projeto, filtros por tipo, import e
-drag-to-viewport para instanciar.
+**Fase 35a — Gizmos 3D (translate + rotate)**: setas e círculos no objeto selecionado,
+arrastar para mover/rodar, `Q`/`W`/`E`, picking analítico de raio contra cilindro.
 
 ## Growth Pack (Fases 19–24)
 

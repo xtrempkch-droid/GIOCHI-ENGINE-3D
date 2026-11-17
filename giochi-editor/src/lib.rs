@@ -40,6 +40,7 @@ use sdl2::keyboard::Keycode;
 pub mod editor;
 pub mod gizmos;
 pub mod panels;
+pub mod project;
 
 /// Version of the editor, as declared in `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -65,6 +66,8 @@ pub struct EditorOptions {
     pub title: String,
     /// A scene to open before the first frame, as `--scene`.
     pub scene: Option<std::path::PathBuf>,
+    /// A project directory to open before the first frame, as `--project`.
+    pub project: Option<std::path::PathBuf>,
 }
 
 impl Default for EditorOptions {
@@ -75,6 +78,7 @@ impl Default for EditorOptions {
             frames: None,
             title: format!("giochi-editor v{VERSION}"),
             scene: None,
+            project: None,
         }
     }
 }
@@ -103,6 +107,11 @@ pub fn run(options: EditorOptions) -> Result<EditorRunStats, GiochiError> {
     log::info!("video driver: {}", engine.platform().video_driver_name());
 
     let mut state = editor::EditorState::new();
+    if let Some(path) = &options.project {
+        if let Err(error) = state.open_project(path) {
+            state.report(editor::Status::error(error));
+        }
+    }
     if let Some(path) = &options.scene {
         if let Err(error) = state.open_scene(path) {
             state.report(editor::Status::error(error));
@@ -195,6 +204,14 @@ pub fn run(options: EditorOptions) -> Result<EditorRunStats, GiochiError> {
         // over it. Apply the camera part and remember the rectangle for the next frame,
         // which is drawn before egui runs.
         state.viewport_rect = metrics.viewport_rect;
+        if let (Some(drag), Some(rect)) = (&metrics.dropped_asset, metrics.viewport_rect) {
+            let position = metrics
+                .input
+                .click
+                .or_else(|| backend.context().pointer_hover_pos())
+                .unwrap_or_else(|| rect.center());
+            apply_asset_drop(&mut state, drag, rect, position);
+        }
         if let Some(rect) = metrics.viewport_rect {
             if metrics.input.moves_the_camera() {
                 metrics
@@ -225,6 +242,61 @@ pub fn run(options: EditorOptions) -> Result<EditorRunStats, GiochiError> {
     log::info!("giochi-editor: {frames} frame(s) rendered");
 
     Ok(EditorRunStats { frames })
+}
+
+/// Instantiates an asset dropped on the viewport.
+///
+/// Only `.obj` meshes become nodes today. Everything else reports why not, by name: a
+/// drop that silently does nothing is the failure mode this function exists to avoid.
+fn apply_asset_drop(
+    state: &mut editor::EditorState,
+    drag: &panels::asset_browser::AssetDrag,
+    rect: egui::Rect,
+    position: egui::Pos2,
+) -> bool {
+    use giochi_engine_3d::scene::{MeshSource, SceneNode, SceneNodeId};
+
+    if drag.kind != project::AssetKind::Model {
+        state.report(editor::Status::warning(format!(
+            "{} is a {}; drop it on the matching slot instead",
+            drag.node_name(),
+            drag.kind.label().to_lowercase()
+        )));
+        return false;
+    }
+    if !drag.is_loadable() {
+        state.report(editor::Status::warning(format!(
+            "{}: the glTF loader is part of the pending Production Pack (ADR-063); \
+             use an .obj model",
+            drag.node_name()
+        )));
+        return false;
+    }
+    let Some(scene) = state.scene.as_mut() else {
+        state.report(editor::Status::warning(
+            "open or create a scene before dropping an asset",
+        ));
+        return false;
+    };
+
+    // Where the cursor points on the floor (y = 0). A miss (the camera looking at the
+    // horizon) falls back to the orbit target, so the object always lands somewhere the
+    // user can see instead of at a division-by-zero.
+    let position = gizmos::picker::ground_point(position, rect, &state.viewport_camera)
+        .unwrap_or_else(|| state.viewport_camera.target.to_array());
+
+    let mut node = SceneNode::new(SceneNodeId::new(0), drag.node_name());
+    node.mesh = Some(MeshSource::Obj(drag.relative.clone()));
+    node.transform.position = position;
+    let node = scene.add_node(node);
+    let id = node.id;
+    state.select(Some(id));
+    state.mark_dirty();
+    state.report(editor::Status::info(format!(
+        "Added {} at ({:.2}, {:.2}, {:.2})",
+        node.name, position[0], position[1], position[2]
+    )));
+    true
 }
 
 /// Applies a click or double-click in the viewport to the selection.
@@ -283,16 +355,20 @@ fn handle_shortcuts(ctx: &egui::Context, state: &mut editor::EditorState, wants_
     let mut save = false;
     let mut open = false;
     let mut new = false;
+    let mut import = false;
     ctx.input_mut(|input| {
         save_as = input.consume_key(with_shift, egui::Key::S);
         save = input.consume_key(modifiers, egui::Key::S);
         open = input.consume_key(modifiers, egui::Key::O);
         new = input.consume_key(modifiers, egui::Key::N);
+        import = input.consume_key(modifiers, egui::Key::I);
     });
     if save_as {
         state.save_dialog();
     } else if save {
         state.save_or_ask();
+    } else if import {
+        state.import_dialog();
     } else if open {
         state.open_dialog();
     } else if new {
@@ -371,6 +447,97 @@ mod tests {
             "framing pulls the camera in, got {}",
             state.viewport_camera.distance
         );
+    }
+
+    fn model_drag(name: &str, relative: &str) -> panels::asset_browser::AssetDrag {
+        panels::asset_browser::AssetDrag {
+            path: std::path::PathBuf::from(name),
+            relative: relative.to_owned(),
+            kind: project::AssetKind::Model,
+        }
+    }
+
+    #[test]
+    fn dropping_an_obj_on_the_viewport_adds_a_node_at_the_ground_point() {
+        let mut state = state_with_default_scene();
+        let drag = model_drag(
+            "/p/assets/models/race_car.obj",
+            "assets/models/race_car.obj",
+        );
+        let rect = test_rect();
+        assert!(apply_asset_drop(&mut state, &drag, rect, rect.center()));
+
+        let scene = state.scene.as_ref().expect("scene");
+        assert_eq!(scene.nodes.len(), 4, "the default three plus the drop");
+        let node = scene.nodes.last().expect("new node");
+        assert_eq!(node.name, "race_car");
+        assert_eq!(
+            node.mesh,
+            Some(giochi_engine_3d::scene::MeshSource::Obj(
+                "assets/models/race_car.obj".to_owned()
+            ))
+        );
+        assert_eq!(node.transform.position[1], 0.0, "it lands on the floor");
+        assert_eq!(state.primary(), Some(node.id), "and it is selected");
+        assert!(state.dirty);
+        assert!(state.status.text.contains("Added"), "{}", state.status.text);
+    }
+
+    #[test]
+    fn two_drops_land_in_different_places() {
+        let mut state = state_with_default_scene();
+        let rect = test_rect();
+        let drag = model_drag("/p/assets/models/box.obj", "assets/models/box.obj");
+        apply_asset_drop(&mut state, &drag, rect, egui::pos2(300.0, 500.0));
+        apply_asset_drop(&mut state, &drag, rect, egui::pos2(500.0, 500.0));
+
+        let scene = state.scene.as_ref().expect("scene");
+        let positions: Vec<[f32; 3]> = scene
+            .nodes
+            .iter()
+            .filter(|node| node.name == "box")
+            .map(|node| node.transform.position)
+            .collect();
+        assert_eq!(positions.len(), 2);
+        assert_ne!(positions[0], positions[1], "a pile would be a bug");
+    }
+
+    #[test]
+    fn dropping_a_gltf_explains_the_missing_loader_instead_of_doing_nothing() {
+        let mut state = state_with_default_scene();
+        let drag = model_drag("/p/assets/models/car.gltf", "assets/models/car.gltf");
+        let rect = test_rect();
+        assert!(!apply_asset_drop(&mut state, &drag, rect, rect.center()));
+        assert_eq!(state.scene.as_ref().map(|s| s.nodes.len()), Some(3));
+        assert!(state.status.text.contains("glTF"), "{}", state.status.text);
+        assert_eq!(state.status.kind, editor::StatusKind::Warning);
+    }
+
+    #[test]
+    fn dropping_a_texture_on_the_viewport_says_where_it_goes() {
+        let mut state = state_with_default_scene();
+        let drag = panels::asset_browser::AssetDrag {
+            path: std::path::PathBuf::from("/p/assets/textures/grass.png"),
+            relative: "assets/textures/grass.png".to_owned(),
+            kind: project::AssetKind::Texture,
+        };
+        let rect = test_rect();
+        assert!(!apply_asset_drop(&mut state, &drag, rect, rect.center()));
+        assert_eq!(state.scene.as_ref().map(|s| s.nodes.len()), Some(3));
+        assert!(
+            state.status.text.contains("texture"),
+            "{}",
+            state.status.text
+        );
+    }
+
+    #[test]
+    fn dropping_an_asset_with_no_scene_says_to_open_one() {
+        let mut state = editor::EditorState::new();
+        let drag = model_drag("/p/assets/models/box.obj", "assets/models/box.obj");
+        let rect = test_rect();
+        assert!(!apply_asset_drop(&mut state, &drag, rect, rect.center()));
+        assert!(state.status.text.contains("scene"), "{}", state.status.text);
     }
 
     #[test]

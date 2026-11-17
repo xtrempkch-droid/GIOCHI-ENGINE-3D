@@ -1,9 +1,9 @@
 # giochi-editor — guia do utilizador
 
-Editor visual de cenas da GIOCHI-ENGINE. Este documento cobre as **Fases 30 a 33**: como
+Editor visual de cenas da GIOCHI-ENGINE. Este documento cobre as **Fases 30 a 34**: como
 abrir o editor, o que já está na janela, como navegar no viewport, como criar/abrir/gravar
-cenas, como selecionar objetos e como editar as suas propriedades. Cresce uma secção por
-fase até ao guia completo da Fase 40.
+cenas, como selecionar e editar objetos, e como trabalhar com projetos e assets. Cresce uma
+secção por fase até ao guia completo da Fase 40.
 
 ---
 
@@ -61,7 +61,7 @@ depois**: cada painel diz qual é a fase que o preenche.
 |---|---|---|
 | Hierarchy | árvore com hierarquia, ícones por tipo, seleção | **32, feito** |
 | Inspector | Transform, Mesh, Material, Light, Camera | **33, feito** |
-| Asset Browser | árvore de assets do projeto, import, drag-to-viewport | 34 |
+| Asset Browser | assets do projeto, filtros, preview, import, drag-to-viewport | **34, feito** |
 | Viewport | cena em wireframe, grid, eixos, câmara orbit | **31, feito** |
 
 O viewport mostra o **mundo**, não o sombreado: grid no plano XZ, os três eixos, a caixa de
@@ -79,6 +79,9 @@ Já funcionam:
 
 | Ação | Onde | Atalho |
 |---|---|---|
+| Novo projeto | `File > New Project…` | — |
+| Abrir projeto | `File > Open Project…` | — |
+| Importar asset | `File > Import Asset…` | `Ctrl+I` |
 | Nova cena (cubo + sol + câmara) | `File > New Scene` | `Ctrl+N` |
 | Abrir cena | `File > Open Scene…` | `Ctrl+O` |
 | Gravar | `File > Save` | `Ctrl+S` |
@@ -99,6 +102,7 @@ Substituir uma cena com alterações por gravar é recusado: grave primeiro.
 |---|---|
 | `Ctrl+N` / `Ctrl+O` / `Ctrl+S` / `Ctrl+Shift+S` | nova, abrir, gravar, gravar como |
 | `Esc` | Sair — exceto quando a consola, um diálogo ou um campo de texto tem o foco |
+| `Ctrl+I` | Importar um asset para o projeto |
 | `F2` | Abrir/fechar a consola in-game do `giochi-engine` |
 
 `Q`/`W`/`E`/`R` (select/translate/rotate/scale) chegam com os gizmos, nas Fases 35a/35b;
@@ -173,12 +177,62 @@ Notas:
 **MVP:** nova cena → selecionar o cubo → mudar posição, cor e escala no inspector → gravar
 → fechar → reabrir. Tudo preservado.
 
-## 3.4 O diálogo de ficheiros
+## 3.4 Projetos e assets
 
-`File > Open Scene…` e `File > Save As…` abrem um diálogo desenhado pelo próprio editor
-(egui), não o `rfd`: no GIOCHI-OS não há `xdg-desktop-portal` nem D-Bus de sessão, e um
-diálogo que só funciona no desktop do programador é pior do que nenhum. O diálogo lista
-pastas e ficheiros `.scene`, tem campo de nome, `Up` e `Refresh`. ADR-064 regista a troca.
+Um **projeto** é uma pasta com `project.toml`:
+
+```text
+my-project/
+├── project.toml      name = "my-project"
+│                     scenes = ["scenes/level.scene"]
+├── assets/           importados: models/ textures/ sounds/ scenes/
+└── scenes/           as cenas do projeto
+```
+
+### Criar e abrir
+
+- `File > New Project…` — escolhe-se a **pasta-mãe** e escreve-se o nome; o editor cria
+  `my-project/` com `assets/` e `scenes/` e abre-o.
+- `File > Open Project…` — lista pastas e mostra `project.toml` dentro delas; confirmar com
+  `Open` abre a pasta atual.
+- Abrir pela linha de comando: `cargo run -p giochi-editor -- --project /caminho/do/projeto`.
+
+Com um projeto aberto, `Ctrl+O` e `Ctrl+S` começam e gravam em `scenes/`. Gravar uma cena
+dentro do projeto acrescenta-a a `scenes = [...]` em `project.toml` — é essa lista que o
+jogo lê para encontrar as cenas.
+
+Um projeto que lista uma cena inexistente **abre na mesma**, com aviso na barra de estado.
+Recusar esconderia os assets que estão bem.
+
+### Asset browser
+
+| Elemento | O que faz |
+|---|---|
+| filtros `All` / `Models` / `Textures` / `Sounds` / `Scenes` | filtram a listagem, que é lida de `assets/` |
+| `Refresh` | relê a pasta (a listagem é uma fotografia, não um `read_dir` por frame) |
+| `Import Asset…` (`Ctrl+I`) | copia um ficheiro para `assets/<tipo>/`, com `nome-1.ext` se o nome já existir |
+| clique numa linha | mostra o preview (imagem real para texturas, cubo wireframe para modelos, nº de objetos para cenas) |
+| arrastar para o viewport | um `.obj` instancia um nó no chão sob o cursor |
+
+**Só `.obj` instancia.** Um `.gltf`/`.glb` aparece na lista marcado `(no loader)` e, ao ser
+arrastado, diz que o loader glTF pertence à Production Pack ainda pendente e que `.obj` é o
+que funciona. Esconder o ficheiro pareceria uma importação falhada; não fazer nada seria
+pior do que dizer porquê.
+
+Arrastar uma **textura** para o viewport **não** faz nada útil: o destino é o slot
+`Material > texture` do inspector, que aceita o drop e escreve o caminho relativo ao
+projeto (`assets/textures/...`) no material.
+
+Importar duas vezes o mesmo ficheiro cria `name.png` e `name-1.png`: uma cena que já aponta
+para a primeira cópia nunca é sobrescrita.
+
+## 3.5 O diálogo de ficheiros
+
+Todos os diálogos são desenhados pelo próprio editor (egui), não o `rfd`: no GIOCHI-OS não
+há `xdg-desktop-portal` nem D-Bus de sessão, e um diálogo que só funciona no desktop do
+programador é pior do que nenhum. O mesmo diálogo serve para abrir/gravar cenas, abrir
+projetos, criar projetos e importar assets — muda o título, o que lista e o que o botão
+confirma. Tem `Up`, `Refresh` e campo de nome. ADR-064 regista a troca.
 
 ---
 
@@ -222,7 +276,9 @@ de pintura duplicado no editor.
 | `editor/layout.rs` | painéis, menu, viewport; devolve `LayoutMetrics` |
 | `editor/orbit_camera.rs` | câmara do viewport (yaw/pitch/distância, pan, zoom, projeção) |
 | `editor/viewport.rs` | projeção e desenho do wireframe, clipping ao retângulo |
-| `editor/dialog.rs` | diálogo de abrir/gravar desenhado em egui |
+| `editor/dialog.rs` | diálogo de abrir/gravar/projeto/import desenhado em egui |
+| `project.rs` | `Project`, `AssetKind`, `AssetEntry`, importação com nomes únicos, scan |
+| `panels/asset_browser.rs` | filtros, listagem, preview, `AssetDrag`, drop de textura |
 | `editor/theme.rs` | paleta e escala tipográfica do editor |
 
 O desenho do viewport acontece **antes** do egui, com o retângulo que o layout produziu no
@@ -231,11 +287,10 @@ de um painel.
 
 ---
 
-## 6. Pendências conhecidas (fim da Fase 33)
+## 6. Pendências conhecidas (fim da Fase 34)
 
 | Pendência | Fase |
 |---|---|
-| Asset browser, drag-to-viewport | 34 |
 | Gizmos translate/rotate/scale | 35a/35b |
 | Criar/apagar/duplicar/reparentar | 36 |
 | Undo/redo global | 37 |
@@ -256,3 +311,5 @@ de um painel.
 | texto pequeno em HiDPI | o backend usa `pixels_per_point = 1.0` | pendente (Fase 40, preferências) |
 | "unsaved changes — Save before replacing the scene" | há alterações por gravar | `Ctrl+S`, depois abrir/criar |
 | a cena abre mas o viewport está vazio | a câmara aponta para o lado oposto | `View > Frame Scene` |
+| "open a project before importing assets" | importar sem projeto | `File > New Project…` primeiro |
+| um `.gltf` não instancia | loader glTF pendente (Production Pack) | usar `.obj` |

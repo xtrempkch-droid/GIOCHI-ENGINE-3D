@@ -324,6 +324,14 @@ jobs:
           cargo run -q -p giochi-editor --example editor_default_scene | tee /tmp/scene.log
           grep -q 'roundtrip=ok' /tmp/scene.log
           cargo run -q -p giochi-editor -- --scene giochi-editor/assets/scenes/default.scene --frames 30
+          # Phase 34: create a project, import real files, save a scene through the
+          # editor's state and reload it; then open that project and scene for real.
+          rm -rf /tmp/giochi-ci-project
+          cargo run -q -p giochi-editor --example editor_project_demo -- /tmp/giochi-ci-project \
+            | tee /tmp/project.log
+          grep -q 'project=ok' /tmp/project.log
+          cargo run -q -p giochi-editor -- --project /tmp/giochi-ci-project \
+            --scene /tmp/giochi-ci-project/scenes/demo.scene --frames 30
 
       - name: Examples
         env:
