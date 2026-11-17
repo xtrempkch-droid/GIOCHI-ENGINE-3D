@@ -1905,3 +1905,46 @@ bot edit.
 Verified on the bump: 332 `devtools` tests, 212 `giochi-engine-3d` tests plus the HUD render
 tests, and the pixel-level acceptance tests for the three UI themes; `ui_demo` and
 `devtools_demo` both run 120 frames with unchanged output lines.
+
+## ADR-062 — The egui backend is a public host API; the editor does not fork it
+
+**Context.** Phase 30 starts `giochi-editor`, and its window has egui panels drawn over an
+SDL render target. The engine already owns exactly that painter: `ui::egui_integration`
+implements egui's textures, clipping and `render_geometry` batching over
+`RenderContext` (ADR-052 rejected `egui-sdl2` because its MSRV and `glow` version do not
+fit). The module was `pub(crate)`, so a separate crate could not reach it.
+
+The alternatives were:
+
+| Option | Cost |
+|---|---|
+| Duplicate the painter in `giochi-editor` | ~400 lines of texture bookkeeping and clip-rect handling copied out of the engine, with two implementations to keep correct |
+| Build the editor inside `giochi-engine` behind a feature | the editor stops being a crate; a game pays for editor code it never uses |
+| Publish the existing backend | two `pub(crate)` keywords and a `Default` impl |
+
+**Decision.** Publish it: `giochi_engine::ui::{EguiBackend, translate_event}`, plus
+`RenderContext::set_resizable` (the window has to answer to the window manager, and an
+editor is the only caller that wants that). Nothing about the engine's own loop changes;
+the engine keeps its single backend in `Engine` and the editor owns its own.
+
+Making a type public is a compatibility surface: `EguiBackend` is now documented as
+host-facing, its `run`/`paint` order is a contract (`textures_delta.set` before painting,
+`free` after), and changing either is a breaking change for the editor.
+
+**Why not the other two.** Duplication was rejected because the engine's backend is
+already pixel-tested (`ui_render`, `devtools_render`, the three theme acceptances); a copy
+would pass those tests while the editor's copy rotted. Putting the editor in the engine was
+rejected by the plan's structure (R1/R2) and by the engine's own layering rule: an editor is
+a consumer, not a subsystem a game links.
+
+**Consequences.** R2 ("the editor consumes the engine, it does not modify it") is honoured
+in substance: the engine gained no editor concept, only visibility on a type it already
+had, and `set_resizable`, which is generic window functionality. The editor's loop, state,
+theme, layout and — from phase 31 — viewport renderer live entirely in `giochi-editor`.
+`tests/c_shape.rs` and the C ABI are unaffected: neither type crosses the FFI, which the
+doc comments state.
+
+Verified with the phase-30 acceptance: `cargo run -p giochi-editor -- --frames 120` opens
+a 1600×900 window, the menu bar and four panels draw, `View` hides the side panels and the
+viewport grows, and `SDL_VIDEODRIVER=dummy cargo test -p giochi-editor` renders three
+frames headlessly.

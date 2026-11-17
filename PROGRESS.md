@@ -1,5 +1,95 @@
 # Estado — GIOCHI-ENGINE
 
+## Salto B — Editor Visual (Fases 30–40)
+
+**Pré-requisito do plano verificado:** Fases 0–29 concluídas (tabela do Growth Pack abaixo;
+a 29 fechou como parcial apenas na recusa do bump para `egui` 0.37, com 0.33.3 aceite por
+ADR-061). O Salto B começou em **2026-11-17**.
+
+| Fase | Estado | Verificado |
+|---|---|---|
+| 30 — Bootstrap do editor | **concluída** (2026-11-17) | 14 testes de unidade + 1 de integração headless (3 frames, `SDL_VIDEODRIVER=dummy`); `cargo run -p giochi-editor -- --frames 120` abriu janela 1600×900 via x11 e desenhou 120 frames; `cargo build -p giochi-editor --release` verde |
+| 31 — Viewport | pendente | — |
+| 32 — Hierarchy + seleção | pendente | — |
+| 33 — Inspector (**MVP do editor**) | pendente | — |
+| 34 — Asset browser | pendente | — |
+| 35a/35b — Gizmos | pendente | — |
+| 36 — Hierarquia (create/delete/duplicate) | pendente | — |
+| 37 — Undo/redo | pendente | — |
+| 38 — Save/load + project | pendente | — |
+| 39 — Play-in-editor | pendente | — |
+| 40 — Build standalone + polimento | pendente | — |
+
+### Gates da Fase 30
+
+Todos verdes, com o comando da raiz:
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — exit 0
+- [x] `SDL_VIDEODRIVER=offscreen cargo test --workspace` — exit 0, incluindo os 15 testes
+      novos do `giochi-editor`
+- [x] `cargo doc --workspace --no-deps` — exit 0 (3 avisos pré-existentes: links de
+      `DevTools::expanded_overlay`, `Theme::apply` e `epaint::Mesh`)
+- [x] `cargo build -p giochi-editor --release`
+- [x] `cargo run -p giochi-editor -- --frames 120` (x11)
+- [x] `SDL_VIDEODRIVER=dummy cargo run -p giochi-editor -- --frames 3`
+
+### Entregue na Fase 30
+
+Crate novo `giochi-editor` (bin + lib), membro do workspace, versão 0.1.0:
+
+| Ficheiro | O que faz |
+|---|---|
+| `src/lib.rs` | `EditorOptions`, `run()` — ciclo próprio: poll SDL → devtools → tradução egui → clear → tema/layout/consola → paint → present |
+| `src/main.rs` | `--frames N`, `--help`, códigos de saída distintos para uso inválido |
+| `editor/editor_state.rs` | `EditorState` (cena, seleção `EntityId`, `EditorMode`, dirty, painéis, quit), `window_title()` com o `*` de dirty |
+| `editor/layout.rs` | barra de menus, Hierarchy/Inspector/Asset Browser redimensionáveis, viewport preto; devolve `LayoutMetrics { viewport_rect }` (a Fase 31 precisa dele para raycast) |
+| `editor/theme.rs` | `EditorTheme::dark()` — paleta e escala tipográfica do editor, separada dos temas de jogo da Fase 21 |
+| `assets/icons/` | 4 ícones (mesh/light/camera/group) em 16×16 e 24×24, PNG RGBA |
+| `tests/editor_smoke.rs` | boot headless real: janela + renderer + backend egui + 3 frames |
+| `docs/EDITOR_USER_GUIDE.md` | guia da fase: abrir, layout, teclas, consola, arquitetura, pendências |
+
+Menu: `File`, `Edit`, `View`, `Play`, `Help` abrem. As entradas de fases futuras estão
+**desativadas** com tooltip da fase; funcionam já `File > Exit`, `Esc`, o botão de fechar, e
+os três toggles de `View`. `F2` abre a consola da Fase 20 no painel inferior.
+
+Janela: 1600×900, redimensionável (`RenderContext::set_resizable`), título gerido pelo
+estado (`giochi-editor v0.1.0` sem cena; `giochi-editor — <stem>[*]` com cena).
+
+### Estrutural — o backend egui passou a ser API de host (ADR-062)
+
+O editor não duplica pintura: `giochi_engine::ui::{EguiBackend, translate_event}` passaram
+de `pub(crate)` a públicos, e `RenderContext::set_resizable` foi acrescentado. É a única
+mudança na engine nesta fase e é **aditiva** — o ciclo, a consola e a UI da cena continuam a
+usar o mesmo backend privado do `Engine`. `EguiBackend` ganhou `Default` (o clippy exigiu
+trocar `unwrap_or_else(EguiBackend::new)` por `unwrap_or_default()` no `Engine`).
+
+### Desvio consciente ao plano: `rfd` adiado para a Fase 31
+
+A lista de dependências da Fase 30 inclui `rfd`, mas a fase não abre nenhum diálogo de
+ficheiro — `File > Open Scene` só existe na Fase 31. Adiar evita compilar `ashpd`/D-Bus e a
+sua árvore num crate que ainda não os usa; o `Cargo.toml` regista a decisão. Também não se
+usou `egui-sdl2` (o plano sugeria): a ADR-052 já o tinha recusado por MSRV e por duplicar o
+`glow`.
+
+### Notas de arquitetura
+
+- O ciclo é do editor, não do `Engine::run_current`: um editor não tem passo fixo nem pilha
+  de cenas. Janela, renderer, mixer e consola continuam a ser da engine.
+- `Esc` fecha a consola quando ela está aberta (o evento consumido pelos devtools não chega
+  ao editor); um campo de texto com foco também retém `Esc` — a Fase 36 (rename inline)
+  depende disso.
+- `LayoutMetrics::viewport_rect` é devolvido, não recalculado: a Fase 32 (raycast) e a 35
+  (gizmos) vão precisar do mesmo retângulo.
+- Os painéis mostram a fase que os preenche, em vez de ficarem mudos; esconder um painel
+  devolve o espaço ao viewport (testado medindo o retângulo central em duas configurações).
+
+### Próxima fase
+
+**Fase 31 — Viewport**: render da cena 3D no centro, `OrbitCamera` (botão direito orbita,
+meio faz pan, scroll zoom), grid e eixos via `debug_draw`, `File > New Scene` /
+`File > Open Scene` (com `rfd`), cena de exemplo com cubo + luz + câmara.
+
 ## Growth Pack (Fases 19–24)
 
 Fases 0–18 concluídas. O Growth Pack começou em 2026-11-14.

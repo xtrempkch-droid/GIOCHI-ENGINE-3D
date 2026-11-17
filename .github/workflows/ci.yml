@@ -307,6 +307,18 @@ jobs:
           cargo run -q -p giochi-demo -- --verify
           cargo run -q -p giochi-demo -- --frames 60
 
+      - name: Editor boot
+        # Salto B phase 30. The editor owns its own loop instead of the engine's, and it
+        # paints with `sdl2::render` rather than GLES, so `dummy` plus the software
+        # renderer is enough: a missing panel, a panic in the layout or a broken egui
+        # backend all fail here. `--frames` is what makes a loop that otherwise waits for
+        # the window to close terminate.
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_RENDER_DRIVER: software
+        run: |
+          cargo run -q -p giochi-editor -- --frames 30
+
       - name: Examples
         env:
           SDL_VIDEODRIVER: dummy

@@ -46,7 +46,11 @@ const BYTES_PER_PIXEL: usize = 4;
 /// Returns `true` when egui consumed the event, which is the signal for the engine to
 /// keep it away from the scene. Keys are consumed only while a text field has focus:
 /// otherwise a console that is open but idle would swallow the game's input.
-pub(crate) fn translate_event(event: &Event, wants_keyboard: bool) -> (Option<egui::Event>, bool) {
+///
+/// `wants_keyboard` is what a host that is *not* the engine passes `true` for: the
+/// visual editor owns the keyboard the whole time, so no keystroke should reach a
+/// game underneath it.
+pub fn translate_event(event: &Event, wants_keyboard: bool) -> (Option<egui::Event>, bool) {
     match event {
         Event::MouseMotion { x, y, .. } => (
             Some(egui::Event::PointerMoved(egui::pos2(*x as f32, *y as f32))),
@@ -238,14 +242,15 @@ fn translate_key(code: Keycode) -> Option<egui::Key> {
 /// Owns the egui context and the textures it asked for, and paints them.
 ///
 /// The engine keeps one inside its `devtools` state. A host that drives a
-/// [`RenderContext`] itself can own one too, which is what the integration test does.
+/// [`RenderContext`] itself — the visual editor, or the integration test — owns one and
+/// calls [`EguiBackend::run`] then [`EguiBackend::paint`] once per frame.
 ///
 /// # C ABI
 ///
 /// Not exposed. C consumers reach the console through `giochi_console_execute` and see
 /// its text through the panel, never through this type.
 #[repr(C)]
-pub(crate) struct EguiBackend {
+pub struct EguiBackend {
     ctx: egui::Context,
     /// egui texture id → engine texture handle. The font atlas is entry zero of every
     /// egui session and is re-uploaded when the glyph set grows.
@@ -275,9 +280,15 @@ impl std::fmt::Debug for EguiBackend {
     }
 }
 
+impl Default for EguiBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EguiBackend {
     /// Creates the context and the font atlas that comes with it.
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             ctx: egui::Context::default(),
             textures: HashMap::new(),
@@ -289,12 +300,21 @@ impl EguiBackend {
         }
     }
 
+    /// The egui context this backend runs.
+    ///
+    /// A host reads it after [`EguiBackend::run`] to ask egui what it wants —
+    /// `wants_keyboard_input` is how the editor decides whether `Esc` closes the window
+    /// or a text field.
+    pub fn context(&self) -> &egui::Context {
+        &self.ctx
+    }
+
     /// Drops the engine handles behind the egui textures.
     ///
     /// Must be called while the registry is still alive; `Drop` cannot do it, because
     /// there is no `RenderContext` at drop time — the same ownership rule as
     /// `DebugOverlay`.
-    pub(crate) fn release(&mut self, render: &mut RenderContext) {
+    pub fn release(&mut self, render: &mut RenderContext) {
         let ids: Vec<egui::TextureId> = self.textures.keys().copied().collect();
         for id in ids {
             self.free_texture(render, &id);
@@ -305,9 +325,8 @@ impl EguiBackend {
     /// Runs one egui frame and returns what it produced.
     ///
     /// `ui` is a trait object rather than a generic so the method stays inside the
-    /// crate's no-generics-public-API rule; it is `pub(crate)`, but keeping the whole
-    /// module uniform avoids a surprise when phase 21 makes part of it public.
-    pub(crate) fn run(
+    /// crate's no-generics-public-API rule.
+    pub fn run(
         &mut self,
         screen: (u32, u32),
         dt: f32,
@@ -333,7 +352,7 @@ impl EguiBackend {
     ///
     /// Order matters: `textures_delta.set` must be applied **before** painting and
     /// `textures_delta.free` **after**, which is what `FullOutput` documents.
-    pub(crate) fn paint(&mut self, render: &mut RenderContext, output: egui::FullOutput) {
+    pub fn paint(&mut self, render: &mut RenderContext, output: egui::FullOutput) {
         for command in &output.platform_output.commands {
             // The engine has no clipboard on a KMSDRM target, and reaching SDL's would
             // mean holding the platform here. Logging keeps the request visible instead

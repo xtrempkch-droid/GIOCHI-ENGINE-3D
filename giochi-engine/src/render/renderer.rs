@@ -404,6 +404,14 @@ impl RenderContext {
             .map_err(|err| GiochiError::Platform(format!("invalid window title: {err}")))
     }
 
+    /// Allows (or forbids) the user to resize the window.
+    ///
+    /// The engine's own loops never call it: a game's window is the size the game chose.
+    /// The visual editor does, because its panels have to answer to the window size.
+    pub fn set_resizable(&mut self, resizable: bool) {
+        self.canvas.window_mut().set_resizable(resizable);
+    }
+
     /// Sets the camera used by [`RenderContext::draw_sprite`].
     pub fn set_camera(&mut self, camera: Camera) {
         self.camera = camera;

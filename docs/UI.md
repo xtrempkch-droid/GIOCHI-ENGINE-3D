@@ -163,6 +163,31 @@ Consequências, todas desejadas:
 editor, um RTS): perguntar antes de agir evita "cliquei no botão e também selecionei o
 tanque atrás dele".
 
+### A API de host (Fase 30)
+
+Um programa que conduz o seu próprio ciclo — o `giochi-editor` — desenha egui com o mesmo
+backend da engine, sem duplicar pintura:
+
+```rust
+use giochi_engine::ui::{translate_event, EguiBackend};
+
+let mut backend = EguiBackend::new();
+for event in &events {
+    if let (Some(event), _) = translate_event(event, /* wants_keyboard = */ true) {
+        egui_events.push(event);
+    }
+}
+let output = backend.run(screen, dt, &egui_events, &mut |ctx| {
+    theme.apply(ctx);
+    // painéis do host
+});
+backend.paint(engine.render_mut(), output);
+```
+
+O contrato é o de sempre: `run` antes de `paint`, e `release` enquanto o registo de
+texturas ainda existe. O ciclo da engine não mudou — continua a usar **um** `EguiBackend`
+privado para a consola e para a UI da cena (ADR-062).
+
 ---
 
 ## 7. Limitações desta fase
@@ -265,5 +290,27 @@ pub struct Ui<'a> {
     pub fn group(&mut self, contents: &mut dyn FnMut(&mut Ui<'_>));
     pub fn wants_pointer(&self) -> bool;
     pub fn used_rect(&self) -> Rect;
+}
+```
+
+Host de egui (Fase 30; §6 acima):
+
+```rust
+pub fn translate_event(event: &sdl2::event::Event, wants_keyboard: bool)
+    -> (Option<egui::Event>, bool);
+
+pub struct EguiBackend { /* contexto, texturas, vértices */ }
+impl EguiBackend {
+    pub fn new() -> Self;
+    pub fn context(&self) -> &egui::Context;
+    pub fn run(&mut self, screen: (u32, u32), dt: f32, events: &[egui::Event],
+               ui: &mut dyn FnMut(&egui::Context)) -> egui::FullOutput;
+    pub fn paint(&mut self, render: &mut RenderContext, output: egui::FullOutput);
+    pub fn release(&mut self, render: &mut RenderContext);
+}
+impl Default for EguiBackend { /* = new() */ }
+
+impl RenderContext {
+    pub fn set_resizable(&mut self, resizable: bool);
 }
 ```

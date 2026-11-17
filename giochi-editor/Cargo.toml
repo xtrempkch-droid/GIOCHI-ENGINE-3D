@@ -1,0 +1,26 @@
+[package]
+name = "giochi-editor"
+description = "Visual scene editor for GIOCHI-ENGINE (Salto B, phases 30-40)"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+# The editor consumes the engine; it never forks it. `devtools` brings the egui
+# backend and the in-game console, `hot_reload` is what makes editing shaders and
+# textures bearable (phase 19 / R8 of the plan).
+giochi-engine = { path = "../giochi-engine", features = ["devtools", "hot_reload"] }
+# Same egui the engine paints with. Two versions would mean two type systems for
+# the same frame, which cannot compile.
+egui = { workspace = true }
+# Events and keycodes: the editor reads SDL directly because it owns its loop.
+sdl2 = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+
+[[bin]]
+name = "giochi-editor"
+path = "src/main.rs"

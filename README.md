@@ -59,6 +59,7 @@ is authoritative.
 | [`giochi-engine-lua`](giochi-engine-lua/) | lib | Reference binding — Lua 5.4 via mLua, no `unsafe` |
 | [`giochi-engine-3d`](giochi-engine-3d/) | lib | 3D: GLES 2.0 over EGL, meshes, **textures**, shaders, lighting, camera |
 | [`giochi-net`](giochi-net/) | lib | Networking: host-authoritative UDP, interest management, optional `laminar`/`mdns` |
+| [`giochi-editor`](giochi-editor/) | bin | Visual scene editor (Salto B, phase 30): egui panels over the engine's renderer |
 | [`giochi-demo`](giochi-demo/) | bin | The demo; `--frames`, `--verify`, `lua <script>` |
 
 ## Build
@@ -187,6 +188,20 @@ GLES painter — the two phase-21/24 pendencies, both opt-in so the phase-12-17
 performance numbers stay comparable.
 
 They need a GL driver; `SDL_VIDEODRIVER=offscreen` runs them headless.
+
+### Editor
+
+The visual editor (`giochi-editor`, Salto B phases 30–40) is its own crate. Phase 30 is
+the bootstrap — a resizable 1600×900 window with the menu bar, Hierarchy, Inspector,
+Asset Browser and viewport placeholders:
+
+```bash
+cargo run -p giochi-editor                      # opens the editor
+cargo run -p giochi-editor -- --frames 3        # headless check, then exit
+```
+
+The user guide is [docs/EDITOR_USER_GUIDE.md](docs/EDITOR_USER_GUIDE.md). The editor
+reuses the engine's egui backend instead of forking it (ADR-062).
 
 ### Profiling
 

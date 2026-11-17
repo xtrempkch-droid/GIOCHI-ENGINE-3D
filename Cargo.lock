@@ -600,6 +600,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "giochi-editor"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "env_logger",
+ "giochi-engine",
+ "log",
+ "sdl2",
+]
+
+[[package]]
 name = "giochi-engine"
 version = "0.5.1"
 dependencies = [

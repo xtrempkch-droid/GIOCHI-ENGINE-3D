@@ -980,7 +980,7 @@ impl Engine {
         let screen = self.render.drawable_size();
         let frame_time = self.devtools.frame_time();
         let theme = self.ui_theme;
-        let mut backend = self.ui_backend.take().unwrap_or_else(EguiBackend::new);
+        let mut backend = self.ui_backend.take().unwrap_or_default();
 
         let output = backend.run(screen, frame_time, &events, &mut |ctx| {
             theme.apply(ctx);
