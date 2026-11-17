@@ -28,7 +28,7 @@ use crate::editor::editor_state::{Status, StatusKind};
 use crate::editor::icons::IconSet;
 use crate::editor::viewport::{self, ViewportInput};
 use crate::editor::{EditorState, EditorTheme};
-use crate::panels::hierarchy;
+use crate::panels::{hierarchy, inspector};
 
 /// Identifier of the menu bar panel, stable across frames.
 pub const MENU_BAR_PANEL: &str = "giochi_editor_menu_bar";
@@ -87,13 +87,7 @@ pub fn draw(
             .width_range(220.0..=520.0)
             .show(ctx, |ui| {
                 panel_header(ui, "INSPECTOR", theme);
-                hint(
-                    ui,
-                    "Nothing selected. Transform, Mesh, Material, Light and Camera \
-                     appear here.",
-                    "Phase 33 — Inspector (editor MVP)",
-                    theme,
-                );
+                inspector::draw(ui, state, theme);
             });
     }
 

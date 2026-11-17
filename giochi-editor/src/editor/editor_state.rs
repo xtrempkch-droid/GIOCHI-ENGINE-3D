@@ -238,9 +238,10 @@ impl EditorState {
     pub fn new_scene(&mut self) {
         let scene = Scene::default_scene();
         self.frame_scene(&scene);
+        let first = scene.nodes.first().map(|node| node.id);
         self.scene = Some(scene);
         self.scene_path = None;
-        self.selected.clear();
+        self.select(first);
         self.mark_saved();
         self.status = Status::info("New scene");
     }
@@ -255,9 +256,10 @@ impl EditorState {
         let path = path.as_ref();
         let scene = Scene::load_from_path(path).map_err(|error| describe(&error))?;
         self.frame_scene(&scene);
+        let first = scene.nodes.first().map(|node| node.id);
         self.scene = Some(scene);
         self.scene_path = Some(path.to_path_buf());
-        self.selected.clear();
+        self.select(first);
         self.mark_saved();
         self.status = Status::info(format!("Opened {}", path.display()));
         Ok(())
@@ -503,6 +505,11 @@ mod tests {
         assert_eq!(state.scene_path, None);
         assert!(state.viewport_camera.distance > 0.0);
         assert!(!state.status.text.is_empty());
+        assert_eq!(
+            state.primary(),
+            Some(EntityId(1)),
+            "the first object is selected so the inspector shows something"
+        );
     }
 
     #[test]

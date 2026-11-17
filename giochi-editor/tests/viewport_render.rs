@@ -245,6 +245,7 @@ fn the_layout_and_the_viewport_together_paint_a_frame() {
     let theme = EditorTheme::dark();
     let mut state = giochi_editor::editor::EditorState::new();
     state.new_scene();
+    state.select(Some(giochi_engine_3d::scene::SceneNodeId(1)));
     std::env::set_var("SDL_VIDEODRIVER", "dummy");
 
     engine.render_mut().clear(theme.viewport_color());

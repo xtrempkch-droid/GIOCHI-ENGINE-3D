@@ -11,7 +11,7 @@ ADR-061). O Salto B começou em **2026-11-17**.
 | 30 — Bootstrap do editor | **concluída** (2026-11-17) | 14 testes de unidade + 1 de integração headless (3 frames, `SDL_VIDEODRIVER=dummy`); `cargo run -p giochi-editor -- --frames 120` abriu janela 1600×900 via x11 e desenhou 120 frames; `cargo build -p giochi-editor --release` verde |
 | 31 — Viewport | **concluída** (2026-11-17) | 55 testes de unidade no editor + 1 smoke com cena + 1 teste de **pixels** (grid, 3 eixos, contorno de seleção, nada fora do retângulo); `--scene default.scene --frames 60` via x11 e 10 frames via dummy |
 | 32 — Hierarchy + seleção | pendente | — |
-| 33 — Inspector (**MVP do editor**) | pendente | — |
+| 33 — Inspector (**MVP do editor**) | **concluída** (2026-11-17) | 94 testes de unidade no editor (Euler↔quatérnio, editores sem input não alteram nada, multi-seleção, MVP gravar/reabrir) + smoke + pixels; execução real com o inspector desenhado a 90 frames |
 | 34 — Asset browser | pendente | — |
 | 35a/35b — Gizmos | pendente | — |
 | 36 — Hierarquia (create/delete/duplicate) | pendente | — |
@@ -210,11 +210,42 @@ geometria ("Values of 'uv' out of bounds"), uma vez por ícone e por frame. Pass
 `painter.image` com UV explícito `0..1`: zero avisos e um quad menor. Isto só apareceu
 porque o editor foi aberto — os testes de unidade não desenham ícones.
 
+### Gates da Fase 33
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `cargo test --workspace` — 94 testes de unidade no editor
+- [x] `cargo doc --workspace --no-deps`
+- [x] `scripts/gates.sh` completo — "All gates passed"
+- [x] `cargo run -p giochi-editor -- --scene …default.scene --frames 90` (x11), inspector
+      visível, zero avisos
+- [x] `cargo check -p giochi-editor --target aarch64-unknown-linux-gnu`
+
+### Entregue na Fase 33
+
+| Ficheiro | O que faz |
+|---|---|
+| `panels/inspector.rs` | secções Transform/Mesh/Material/Light/Camera, editores reutilizáveis, `quat_to_euler_degrees`/`euler_degrees_to_quat`, escrita do nó alterado e dirty |
+| `panels/mod.rs` | exporta o inspector |
+| `editor/layout.rs` | painel direito passa a ser o inspector |
+| `editor_state.rs` | `new_scene`/`open_scene` selecionam o primeiro objeto, para o inspector mostrar algo |
+
+**MVP verificado:** cena nova → cubo selecionado → posição e cor alteradas → gravar →
+reabrir → valores preservados (`an_edit_through_the_state_dirty_the_scene_and_survives_a_save`).
+
+### Desvio registado: sem `SetPropertyCommand` nesta fase
+
+O plano pedia um stub `SetPropertyCommand<T>` na Fase 33. Não entrou: a R6 diz que **a
+partir da Fase 37** toda a edição passa pelo command system, e um stub que aplica sem
+pilha de undo seria código morto a fingir de pronto. A Fase 37 introduz o `trait Command`
+e a `CommandStack` e refatora o inspector — que hoje escreve o nó e marca dirty — para
+esses comandos. `roughness`/`emissive` também ficam de fora: o formato e o renderer só
+consomem `specular`/`shininess` (ADR-063).
+
 ### Próxima fase
 
-**Fase 33 — Inspector (MVP do editor)**: Transform (posição/rotação/escala com
-`DragValue`), Mesh, Material (cor + textura), Light e Camera do selecionado, a aplicar em
-tempo real; com isso o editor passa a montar uma cena simples de ponta a ponta.
+**Fase 34 — Asset browser**: árvore de assets do projeto, filtros por tipo, import e
+drag-to-viewport para instanciar.
 
 ## Growth Pack (Fases 19–24)
 

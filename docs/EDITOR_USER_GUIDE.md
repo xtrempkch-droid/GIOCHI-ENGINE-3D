@@ -1,9 +1,9 @@
 # giochi-editor — guia do utilizador
 
-Editor visual de cenas da GIOCHI-ENGINE. Este documento cobre as **Fases 30 a 32**: como
+Editor visual de cenas da GIOCHI-ENGINE. Este documento cobre as **Fases 30 a 33**: como
 abrir o editor, o que já está na janela, como navegar no viewport, como criar/abrir/gravar
-cenas e como selecionar objetos. Cresce uma secção por fase até ao guia completo da
-Fase 40.
+cenas, como selecionar objetos e como editar as suas propriedades. Cresce uma secção por
+fase até ao guia completo da Fase 40.
 
 ---
 
@@ -60,7 +60,7 @@ depois**: cada painel diz qual é a fase que o preenche.
 | Painel | Conteúdo | Fase |
 |---|---|---|
 | Hierarchy | árvore com hierarquia, ícones por tipo, seleção | **32, feito** |
-| Inspector | Transform, Mesh, Material, Light, Camera | 33 |
+| Inspector | Transform, Mesh, Material, Light, Camera | **33, feito** |
 | Asset Browser | árvore de assets do projeto, import, drag-to-viewport | 34 |
 | Viewport | cena em wireframe, grid, eixos, câmara orbit | **31, feito** |
 
@@ -140,7 +140,40 @@ que o jogo verá. O canto inferior esquerdo mostra a distância atual.
 
 Ao abrir ou criar uma cena, a câmara enquadra automaticamente as malhas existentes.
 
-## 3.3 O diálogo de ficheiros
+## 3.3 Inspector (o MVP do editor)
+
+Com a Fase 33 o editor passa a **montar** uma cena, não só a vê-la. Ao abrir ou criar uma
+cena, o primeiro objeto fica selecionado e o inspector mostra-o. As secções são
+colapsáveis:
+
+| Secção | Campos |
+|---|---|
+| **Transform** | posição (X/Y/Z, passo 0.1), rotação em **Euler graus** (o quatérnio é convertido), escala |
+| **Mesh** | tipo (none/cube/sphere/plane/obj) e os parâmetros do tipo; para `obj`, o caminho |
+| **Material** | cor base (RGBA), caminho da textura, `specular`, `shininess` |
+| **Light** | direção (o sentido em que a luz viaja), cor, `ambient`, `specular`, `shininess` |
+| **Camera** | posição, alvo, `up`, `fov`, `near`, `far` |
+
+Cada alteração aplica-se **imediatamente** ao viewport e marca a cena como alterada (o `*`
+no título). As secções de luz e câmara só aparecem nos objetos que são luz ou câmara.
+
+Notas:
+
+- a rotação é editada em graus e convertida para quatérnio ao gravar; os valores são
+  normalizados, por isso uma rotação equivalente pode aparecer noutros ângulos depois de
+  reabrir;
+- `specular`/`shininess` são os campos que o renderer GLES 2.0 consome. `roughness` e
+  `emissive` pertencem à Production Pack ainda pendente, e não há slider para um campo que
+  não faria nada no ecrã;
+- o **undo não existe** até à Fase 37: uma alteração é definitiva, e é por isso que o aviso
+  de alterações por gravar já existe desde a Fase 31;
+- com vários objetos selecionados o inspector diz "N objects selected" e edita o
+  **primário** (o primeiro clicado).
+
+**MVP:** nova cena → selecionar o cubo → mudar posição, cor e escala no inspector → gravar
+→ fechar → reabrir. Tudo preservado.
+
+## 3.4 O diálogo de ficheiros
 
 `File > Open Scene…` e `File > Save As…` abrem um diálogo desenhado pelo próprio editor
 (egui), não o `rfd`: no GIOCHI-OS não há `xdg-desktop-portal` nem D-Bus de sessão, e um
@@ -198,11 +231,10 @@ de um painel.
 
 ---
 
-## 6. Pendências conhecidas (fim da Fase 32)
+## 6. Pendências conhecidas (fim da Fase 33)
 
 | Pendência | Fase |
 |---|---|
-| Inspector editável | 33 |
 | Asset browser, drag-to-viewport | 34 |
 | Gizmos translate/rotate/scale | 35a/35b |
 | Criar/apagar/duplicar/reparentar | 36 |
