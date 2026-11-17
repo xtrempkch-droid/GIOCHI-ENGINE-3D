@@ -13,16 +13,24 @@ const USAGE: &str = "\
 giochi-editor — visual scene editor for GIOCHI-ENGINE
 
 Usage:
-  giochi-editor [--frames N]
+  giochi-editor [--scene FILE] [--frames N]
   giochi-editor --help
 
 Options:
-  --frames N   render N frames and exit (used by the headless check)
-  -h, --help   show this help
+  --scene FILE  open a .scene file before the first frame
+  --frames N    render N frames and exit (used by the headless check)
+  -h, --help    show this help
 
 Keys:
-  F2           open/close the in-game console
-  Esc          quit (when no text field or console owns the key)
+  Ctrl+N        new scene
+  Ctrl+O        open scene (in-editor file dialog)
+  Ctrl+S        save            Ctrl+Shift+S  save as
+  F2            open/close the in-game console
+  Esc           quit (when no text field or dialog owns the key)
+
+Viewport:
+  right drag    orbit           middle drag   pan
+  wheel         zoom
 ";
 
 fn main() -> ExitCode {
@@ -32,6 +40,13 @@ fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--scene" => match args.next() {
+                Some(path) if !path.is_empty() => options.scene = Some(path.into()),
+                _ => {
+                    eprintln!("--scene needs a path\n\n{USAGE}");
+                    return ExitCode::from(2);
+                }
+            },
             "--frames" => {
                 let parsed = args.next().and_then(|value| value.parse::<u64>().ok());
                 match parsed {

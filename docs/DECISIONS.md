@@ -1948,3 +1948,81 @@ Verified with the phase-30 acceptance: `cargo run -p giochi-editor -- --frames 1
 a 1600×900 window, the menu bar and four panels draw, `View` hides the side panels and the
 viewport grows, and `SDL_VIDEODRIVER=dummy cargo test -p giochi-editor` renders three
 frames headlessly.
+
+## ADR-063 — The scene format lives in the 3D crate and is JSON with a version
+
+**Context.** The Salto B plan required a serialisable level format in its phase 27 and told
+the editor to consume it. The repository did not have one: phases 25–29 here were the 0.5.x
+release work, not the plan's Production Pack (recorded in `PROGRESS.md`). Phase 31 is the
+first phase that needs to *open* a scene, so the gap had to be filled before it, not
+worked around inside the editor.
+
+**Decision.** `giochi_engine_3d::scene`, compiled in unconditionally:
+
+- `Scene { format, version, name, next_id, nodes }`, one flat node list, parents by id;
+- nodes are `#[repr(C)]`-free data (`[f32; N]` arrays) with `serde` derive, so the file
+  never inherits the engine's `_reserved` tails and does not need `serde` on `glam`;
+- `SCENE_FORMAT_VERSION = 1`; `from_json` **refuses** a newer file (`UnsupportedVersion`)
+  instead of guessing, and `migrate` is the single place a version 2 step will live;
+- `next_id` is persisted and only grows, so ids are never reused after a delete — the
+  undo stack (phase 37) and the selection (phase 32) store ids;
+- `deny_unknown_fields` everywhere: a mistyped field is an error, not a silent default;
+- `validate()` separates fatal invariants (duplicate id, missing parent, cycle) from
+  warnings (duplicate name, `next_id` that would reuse an id);
+- `save_to_path` writes `*.scene.tmp` and renames, so a crash mid-save cannot destroy the
+  previous good file.
+
+**Why the 3D crate.** The consumer that matters is `giochi-racer`: it boots from a `.scene`
+without the editor installed. A format owned by the editor would make the game depend on
+the editor's crate and its egui/SDL stack, which is the opposite of the plan's structure
+(R2) and of ADR-037 (3D owns the 3D types). `serde` + `serde_json` are pure Rust, add no
+`unsafe`, and do not raise the 1.86 floor.
+
+**Consequences.** The editor has no scene model of its own: `EditorState` holds a
+`giochi_engine_3d::scene::Scene`, and its `EntityId` *is* `SceneNodeId`. Editor-only
+metadata (viewport camera, selection) stays out of the file until phase 38 adds the
+sidecar the plan asks for. Tested with 22 unit tests: round trips through JSON and through
+a file, hierarchy and subtree removal, id reuse, cycle/missing-parent detection, newer-file
+refusal, foreign-file refusal, unknown-field rejection, `next_id` growth, and the bounds the
+editor frames with.
+
+## ADR-064 — The viewport is a projected wireframe; the file dialog is egui, not `rfd`
+
+**Context.** Phase 31's plan asks the viewport to render the scene and warns that "3D
+inside egui requires render-to-texture; `egui-sdl2` + FBO + GLES 2.0 has quirks", offering
+the fallback "viewport occupies the whole window, panels as overlay". It also lists `rfd`
+for file dialogs.
+
+Two facts decide this repository's answer:
+
+1. The editor paints with `sdl2::render` (2D engine). `giochi-engine-3d` creates its own GL
+   context on the same window. SDL's renderer does not expose its GL context, so sharing
+   one means either an unsupported state swap or a second hidden window plus
+   `glReadPixels` into a texture every frame — on Mali-G31-class drivers, the exact place
+   where the plan says this breaks.
+2. The console target (GIOCHI-OS) has no `xdg-desktop-portal`, no session D-Bus and no GTK.
+   `rfd`'s Linux backends therefore do not work where the editor is supposed to run.
+
+**Decision.**
+
+- The viewport projects world geometry with its own `OrbitCamera` and submits **lines** to
+  the same 2D renderer the panels use — the technique the engine's `DebugDraw::draw_aabb_3d`
+  and `draw_grid_3d` already ship (phase 20), which the plan itself suggested for the grid.
+  Lines are clipped (Liang–Barsky) to the viewport rectangle and drawn **before** egui, so
+  they cannot land on a panel. The camera is a separate value from the scene's camera node.
+- Materials and lighting are **not** rendered in the editor. The editor shows where things
+  are; the game window shows how they look. Phase 40 may add an FBO-based shaded preview as
+  polish, and would then replace `viewport::draw` behind the same signature.
+- The file dialog is drawn with egui (`editor::dialog`), listing `.scene` files, with `Up`
+  and `Refresh`. It works on KMSDRM because it uses the context the editor already has.
+- The frame can be read back for tests: `RenderContext::read_pixels_rgba`. SDL's packed
+  32-bit conversions proved unreliable on the software renderer (measured: asking for
+  `RGBA8888` returned the bytes rotated), so the helper reads `RGB24` and expands it, and
+  the doc comment records the measurement.
+
+**Consequences.** No new native dependency, no second window, no GL context juggling, and
+the editor's acceptance is testable by pixels (`tests/viewport_render.rs` asserts the grid,
+all three axis colours, the selection outline and that **nothing** is drawn outside the
+viewport rectangle). The cost is that the editor does not preview materials; that is stated
+in the user guide rather than left as a surprise, and it is the one piece of phase 31's
+plan deliberately traded away.

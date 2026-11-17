@@ -13,6 +13,13 @@ repository.workspace = true
 # backend and the in-game console, `hot_reload` is what makes editing shaders and
 # textures bearable (phase 19 / R8 of the plan).
 giochi-engine = { path = "../giochi-engine", features = ["devtools", "hot_reload"] }
+# Phase 31. The viewport needs the scene format and the 3D math (`Camera3D`); it does
+# not need the GL renderer, which is why the crate is a dependency and not a second
+# window (ADR-064).
+giochi-engine-3d = { path = "../giochi-engine-3d", default-features = false }
+# Matrix and vector math for the viewport camera. The same `glam` version the 3D crate
+# uses, reached directly so the editor does not depend on how the 3D crate wraps it.
+glam = { workspace = true }
 # Same egui the engine paints with. Two versions would mean two type systems for
 # the same frame, which cannot compile.
 egui = { workspace = true }
@@ -24,3 +31,9 @@ env_logger = { workspace = true }
 [[bin]]
 name = "giochi-editor"
 path = "src/main.rs"
+
+# Phase 31. `New Scene` is a function, but the acceptance is a file that can be read
+# back, so the example writes it, reloads it and prints what it found.
+[[example]]
+name = "editor_default_scene"
+path = "examples/editor_default_scene.rs"

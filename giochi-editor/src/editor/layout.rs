@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! ┌──────────────────────────────────────────────────────┐
-//! │ File  Edit  View  Play  Help                         │  menu bar
+//! │ File  Edit  View  Play  Help           New scene     │  menu bar + status
 //! ├────────────┬────────────────────────────┬────────────┤
 //! │ Hierarchy  │                            │ Inspector  │
 //! │            │        Viewport            │            │
@@ -11,16 +11,21 @@
 //! └──────────────────────────────────────────────────────┘
 //! ```
 //!
-//! Phase 30 draws the frame and nothing in it: every panel is a titled placeholder that
-//! names the phase that fills it (32, 33 and 34), and the viewport is the clear colour
-//! phase 31 will render a scene into.
+//! The viewport is rendered **before** egui (see [`crate::editor::viewport`]), using the
+//! rectangle this function produced on the previous frame. The central panel therefore
+//! carries no fill: the scene is already on the canvas underneath, and a filled frame
+//! would paint over it.
 //!
-//! The layout returns [`LayoutMetrics`] instead of printing where it put things. Phase 31
-//! needs the viewport rectangle to turn a mouse position into a ray, and phase 35 needs
-//! it to place gizmos; returning it here is cheaper than recomputing the same rectangles.
+//! The layout returns [`LayoutMetrics`] instead of printing where it put things. The
+//! viewport needs its rectangle to turn a pointer into a ray (phase 32), the gizmos need
+//! it to place handles (phase 35), and the camera needs its height to pan at the right
+//! scale.
 
 use egui::{Align, Layout, Rect, RichText};
 
+use crate::editor::dialog::DialogOutcome;
+use crate::editor::editor_state::{Status, StatusKind};
+use crate::editor::viewport::{self, ViewportInput};
 use crate::editor::{EditorState, EditorTheme};
 
 /// Identifier of the menu bar panel, stable across frames.
@@ -40,11 +45,13 @@ pub struct LayoutMetrics {
     /// `None` only if egui refused to allocate a central panel, which happens when the
     /// window is smaller than the side panels' minimum widths.
     pub viewport_rect: Option<Rect>,
+    /// What the pointer did over the viewport this frame.
+    pub input: ViewportInput,
 }
 
 /// Draws the whole editor chrome and returns the rectangles the rest of the editor needs.
 pub fn draw(ctx: &egui::Context, state: &mut EditorState, theme: &EditorTheme) -> LayoutMetrics {
-    menu_bar(ctx, state);
+    menu_bar(ctx, state, theme);
 
     if state.panels.hierarchy {
         egui::SidePanel::left(HIERARCHY_PANEL)
@@ -53,12 +60,34 @@ pub fn draw(ctx: &egui::Context, state: &mut EditorState, theme: &EditorTheme) -
             .width_range(180.0..=440.0)
             .show(ctx, |ui| {
                 panel_header(ui, "HIERARCHY", theme);
-                hint(
-                    ui,
-                    "No scene open. The object tree appears here.",
-                    "Phase 32 — Hierarchy + selection",
-                    theme,
-                );
+                match &state.scene {
+                    Some(scene) => {
+                        ui.label(
+                            RichText::new(format!(
+                                "{} object(s) — tree arrives in phase 32",
+                                scene.nodes.len()
+                            ))
+                            .color(theme.muted)
+                            .small(),
+                        );
+                        for node in scene.nodes.iter().take(12) {
+                            ui.label(
+                                RichText::new(format!("{}  {}", node.kind(), node.name))
+                                    .color(theme.muted)
+                                    .small(),
+                            );
+                        }
+                        if scene.nodes.len() > 12 {
+                            ui.label(RichText::new("…").color(theme.muted).small());
+                        }
+                    }
+                    None => hint(
+                        ui,
+                        "No scene open. The object tree appears here.",
+                        "Phase 32 — Hierarchy + selection",
+                        theme,
+                    ),
+                }
             });
     }
 
@@ -97,37 +126,94 @@ pub fn draw(ctx: &egui::Context, state: &mut EditorState, theme: &EditorTheme) -
 
     let mut metrics = LayoutMetrics::default();
     egui::CentralPanel::default()
-        .frame(egui::Frame::NONE.fill(theme.viewport))
+        // No fill: the scene was drawn on the canvas before this pass. A filled frame
+        // here would hide it (ADR-064).
+        .frame(egui::Frame::NONE)
         .show(ctx, |ui| {
             let rect = ui.max_rect();
+            let _ = ui.allocate_rect(rect, egui::Sense::click_and_drag());
             metrics.viewport_rect = Some(rect);
-            ui.painter().rect_filled(rect, 0.0, theme.viewport);
-            ui.centered_and_justified(|ui| {
-                ui.label(
-                    RichText::new("VIEWPORT")
-                        .strong()
-                        .color(theme.muted)
-                        .size(16.0),
-                );
-                ui.label(
-                    RichText::new("The scene renders here in phase 31.")
-                        .color(theme.muted)
-                        .small(),
-                );
-            });
+            metrics.input = viewport::read_input(ctx, Some(rect));
+
+            match &state.scene {
+                Some(scene) => {
+                    let camera = &state.viewport_camera;
+                    ui.painter().text(
+                        rect.left_top() + egui::vec2(10.0, 8.0),
+                        egui::Align2::LEFT_TOP,
+                        format!(
+                            "{} — {} object(s)",
+                            scene.name,
+                            scene.nodes.len()
+                        ),
+                        egui::FontId::proportional(12.0),
+                        theme.muted,
+                    );
+                    ui.painter().text(
+                        rect.left_bottom() + egui::vec2(10.0, -8.0),
+                        egui::Align2::LEFT_BOTTOM,
+                        format!(
+                            "orbit RMB · pan MMB · zoom wheel · dist {:.1}",
+                            camera.distance
+                        ),
+                        egui::FontId::proportional(11.0),
+                        theme.muted,
+                    );
+                }
+                None => {
+                    ui.painter().text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "VIEWPORT\nFile > New Scene  (Ctrl+N)",
+                        egui::FontId::proportional(15.0),
+                        theme.muted,
+                    );
+                }
+            }
         });
+
+    file_dialog(ctx, state);
 
     metrics
 }
 
-fn menu_bar(ctx: &egui::Context, state: &mut EditorState) {
+fn menu_bar(ctx: &egui::Context, state: &mut EditorState, theme: &EditorTheme) {
     egui::TopBottomPanel::top(MENU_BAR_PANEL).show(ctx, |ui| {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
-                planned(ui, "New Scene…", "", 31);
-                planned(ui, "Open Scene…", "Ctrl+O", 31);
-                planned(ui, "Save", "Ctrl+S", 38);
-                planned(ui, "Save As…", "Ctrl+Shift+S", 38);
+                if ui
+                    .add(egui::Button::new("New Scene").shortcut_text("Ctrl+N"))
+                    .clicked()
+                {
+                    if confirm_replace(state) {
+                        state.new_scene();
+                    }
+                    ui.close();
+                }
+                if ui
+                    .add(egui::Button::new("Open Scene…").shortcut_text("Ctrl+O"))
+                    .clicked()
+                {
+                    if confirm_replace(state) {
+                        state.open_dialog();
+                    }
+                    ui.close();
+                }
+                ui.separator();
+                if ui
+                    .add(egui::Button::new("Save").shortcut_text("Ctrl+S"))
+                    .clicked()
+                {
+                    state.save_or_ask();
+                    ui.close();
+                }
+                if ui
+                    .add(egui::Button::new("Save As…").shortcut_text("Ctrl+Shift+S"))
+                    .clicked()
+                {
+                    state.save_dialog();
+                    ui.close();
+                }
                 ui.separator();
                 if ui.button("Exit").clicked() {
                     state.request_quit();
@@ -150,6 +236,17 @@ fn menu_bar(ctx: &egui::Context, state: &mut EditorState) {
                 ui.checkbox(&mut state.panels.hierarchy, "Hierarchy");
                 ui.checkbox(&mut state.panels.inspector, "Inspector");
                 ui.checkbox(&mut state.panels.asset_browser, "Asset Browser");
+                ui.separator();
+                if ui.button("Frame Scene").clicked() {
+                    if let Some(scene) = &state.scene {
+                        if let Some((min, max)) = scene.mesh_bounds() {
+                            state.viewport_camera.frame_aabb(min, max);
+                        } else {
+                            state.viewport_camera = Default::default();
+                        }
+                    }
+                    ui.close();
+                }
             });
 
             ui.menu_button("Play", |ui| {
@@ -162,8 +259,54 @@ fn menu_bar(ctx: &egui::Context, state: &mut EditorState) {
                 planned(ui, "Keyboard Shortcuts", "", 40);
                 planned(ui, "About giochi-editor", "", 40);
             });
+
+            // The status line is part of the menu bar rather than a second panel: the
+            // bottom edge already belongs to the asset browser, and a one-line bar would
+            // take height from the viewport for a message that is usually empty.
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if !state.status.text.is_empty() {
+                    let color = match state.status.kind {
+                        StatusKind::Error => theme.danger,
+                        StatusKind::Warning => egui::Color32::from_rgb(0xd8, 0xa8, 0x40),
+                        StatusKind::Idle | StatusKind::Info => theme.muted,
+                    };
+                    ui.label(RichText::new(&state.status.text).small().color(color));
+                }
+            });
         });
     });
+}
+
+/// Refuses to replace a scene with unsaved changes, and says why.
+fn confirm_replace(state: &mut EditorState) -> bool {
+    if state.dirty {
+        state.report(Status::warning(
+            "unsaved changes — Save (Ctrl+S) before replacing the scene",
+        ));
+        false
+    } else {
+        true
+    }
+}
+
+fn file_dialog(ctx: &egui::Context, state: &mut EditorState) {
+    let Some(mut dialog) = state.dialog.take() else {
+        return;
+    };
+    match dialog.show(ctx) {
+        DialogOutcome::Pending => state.dialog = Some(dialog),
+        DialogOutcome::Open(path) => {
+            if let Err(error) = state.open_scene(&path) {
+                state.report(Status::error(error));
+            }
+        }
+        DialogOutcome::Save(path) => {
+            if let Err(error) = state.save_scene_as(&path) {
+                state.report(Status::error(error));
+            }
+        }
+        DialogOutcome::Cancel => {}
+    }
 }
 
 /// A menu entry that exists in the plan but not in this phase.
@@ -236,8 +379,6 @@ mod tests {
             .viewport_rect
             .expect("a 1600x900 window has a viewport");
 
-        // Left 260 + right 300 + the window's chrome: the viewport is the middle strip,
-        // and it must be the largest region on screen.
         assert!(
             rect.width() > 500.0,
             "viewport is {} wide, expected the central strip",
@@ -280,6 +421,28 @@ mod tests {
         assert!(!state.dirty);
         assert!(!state.quit_requested());
         assert_eq!(state.mode, EditorMode::Select);
+        assert_eq!(state.dialog, None);
+    }
+
+    #[test]
+    fn the_layout_draws_a_scene_without_panicking() {
+        let mut state = EditorState::new();
+        state.new_scene();
+        let metrics = layout_at([1600.0, 900.0], &mut state);
+        assert!(metrics.viewport_rect.is_some());
+        assert!(state.scene.is_some());
+    }
+
+    #[test]
+    fn a_dirty_scene_is_not_replaced_silently() {
+        let mut state = EditorState::new();
+        state.new_scene();
+        state.mark_dirty();
+        assert!(!confirm_replace(&mut state));
+        assert_eq!(state.status.kind, StatusKind::Warning);
+
+        state.mark_saved();
+        assert!(confirm_replace(&mut state));
     }
 
     #[test]

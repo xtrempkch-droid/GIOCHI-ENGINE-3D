@@ -191,17 +191,22 @@ They need a GL driver; `SDL_VIDEODRIVER=offscreen` runs them headless.
 
 ### Editor
 
-The visual editor (`giochi-editor`, Salto B phases 30–40) is its own crate. Phase 30 is
-the bootstrap — a resizable 1600×900 window with the menu bar, Hierarchy, Inspector,
-Asset Browser and viewport placeholders:
+The visual editor (`giochi-editor`, Salto B phases 30–40) is its own crate. Phases 30–31
+give a resizable 1600×900 window with the menu bar, the Hierarchy/Inspector/Asset Browser
+panels and a viewport that draws the scene as a projected wireframe (grid, axes, node
+boxes, selection outline), with an orbit camera and New/Open/Save through the scene format:
 
 ```bash
 cargo run -p giochi-editor                      # opens the editor
 cargo run -p giochi-editor -- --frames 3        # headless check, then exit
+cargo run -p giochi-editor -- --scene giochi-editor/assets/scenes/default.scene
+cargo run -p giochi-editor --example editor_default_scene   # writes + reloads the default scene
 ```
 
-The user guide is [docs/EDITOR_USER_GUIDE.md](docs/EDITOR_USER_GUIDE.md). The editor
-reuses the engine's egui backend instead of forking it (ADR-062).
+The user guide is [docs/EDITOR_USER_GUIDE.md](docs/EDITOR_USER_GUIDE.md); the scene format
+is in [docs/3D.md](docs/3D.md) §6. The editor reuses the engine's egui backend instead of
+forking it (ADR-062), and the viewport draws with the same 2D renderer instead of opening a
+second GL context (ADR-064).
 
 ### Profiling
 

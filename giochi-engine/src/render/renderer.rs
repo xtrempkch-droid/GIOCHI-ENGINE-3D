@@ -412,6 +412,46 @@ impl RenderContext {
         self.canvas.window_mut().set_resizable(resizable);
     }
 
+    /// Reads the whole canvas back as RGBA8, row-major, top row first.
+    ///
+    /// The 3D renderer has had `read_pixels` since its lighting tests needed to assert
+    /// shading instead of call sequences; the 2D side did not, so a UI or an editor could
+    /// only be tested by "it did not panic". The editor's viewport test reads a frame and
+    /// asserts the grid and the axes are where the projection says they are.
+    ///
+    /// Expensive — a full framebuffer copy — so it belongs in tests and screenshots, not
+    /// in a frame loop.
+    ///
+    /// # Why `RGB24` and not `RGBA8888`
+    ///
+    /// Measured on SDL 2.26 with the software renderer (`tests/_probe`, since deleted):
+    /// clearing to `rgb(8, 9, 13)` and asking for `RGBA8888` returned the bytes
+    /// `[255, 13, 9, 8]` — alpha first and the colour channels rotated — while `RGB24`
+    /// returned `[8, 9, 13]`, which is the actual colour. SDL's conversion path for the
+    /// packed 32-bit formats on this backend is not trustworthy, and a test that read the
+    /// wrong bytes would fail for the wrong reason. `RGB24` is read and expanded here, so
+    /// the caller always gets honest RGBA.
+    pub fn read_pixels_rgba(&self) -> Result<(u32, u32, Vec<u8>), GiochiError> {
+        let (width, height) = self.size();
+        let rgb = self
+            .canvas
+            .read_pixels(None, sdl2::pixels::PixelFormatEnum::RGB24)
+            .map_err(|err| GiochiError::Render(format!("failed to read pixels: {err}")))?;
+        let count = (width as usize) * (height as usize);
+        if rgb.len() < count * 3 {
+            return Err(GiochiError::Render(format!(
+                "read {} bytes for a {width}x{height} frame; expected {}",
+                rgb.len(),
+                count * 3
+            )));
+        }
+        let mut rgba = Vec::with_capacity(count * 4);
+        for pixel in rgb.chunks_exact(3) {
+            rgba.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
+        }
+        Ok((width, height, rgba))
+    }
+
     /// Sets the camera used by [`RenderContext::draw_sprite`].
     pub fn set_camera(&mut self, camera: Camera) {
         self.camera = camera;

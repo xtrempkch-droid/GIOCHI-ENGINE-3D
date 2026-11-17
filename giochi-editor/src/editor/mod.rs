@@ -1,13 +1,19 @@
-//! Editor session state, theme and panel layout.
+//! Editor session state, theme, camera, viewport and file dialog.
 //!
-//! Phase 30 ships these three modules. The panels' *contents* arrive in phases 32–34;
-//! keeping the state and the layout separate now is what lets them be added one at a
-//! time without rewriting the loop.
+//! Phase 30 shipped the state, the theme and the layout; phase 31 adds the viewport and
+//! everything it needs (a camera, a projection and a file dialog). Keeping them separate
+//! is what lets phases 32–40 add panels and commands without rewriting the loop.
 
+pub mod dialog;
 pub mod editor_state;
 pub mod layout;
+pub mod orbit_camera;
 pub mod theme;
+pub mod viewport;
 
-pub use editor_state::{EditorMode, EditorState, EntityId, PanelVisibility};
+pub use dialog::{DialogKind, DialogOutcome, FileDialog};
+pub use editor_state::{EditorMode, EditorState, EntityId, PanelVisibility, Status, StatusKind};
 pub use layout::{draw, LayoutMetrics};
+pub use orbit_camera::OrbitCamera;
 pub use theme::EditorTheme;
+pub use viewport::ViewportInput;

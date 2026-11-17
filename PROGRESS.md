@@ -9,7 +9,7 @@ ADR-061). O Salto B começou em **2026-11-17**.
 | Fase | Estado | Verificado |
 |---|---|---|
 | 30 — Bootstrap do editor | **concluída** (2026-11-17) | 14 testes de unidade + 1 de integração headless (3 frames, `SDL_VIDEODRIVER=dummy`); `cargo run -p giochi-editor -- --frames 120` abriu janela 1600×900 via x11 e desenhou 120 frames; `cargo build -p giochi-editor --release` verde |
-| 31 — Viewport | pendente | — |
+| 31 — Viewport | **concluída** (2026-11-17) | 55 testes de unidade no editor + 1 smoke com cena + 1 teste de **pixels** (grid, 3 eixos, contorno de seleção, nada fora do retângulo); `--scene default.scene --frames 60` via x11 e 10 frames via dummy |
 | 32 — Hierarchy + seleção | pendente | — |
 | 33 — Inspector (**MVP do editor**) | pendente | — |
 | 34 — Asset browser | pendente | — |
@@ -89,7 +89,7 @@ usou `egui-sdl2` (o plano sugeria): a ADR-052 já o tinha recusado por MSRV e po
 - Os painéis mostram a fase que os preenche, em vez de ficarem mudos; esconder um painel
   devolve o espaço ao viewport (testado medindo o retângulo central em duas configurações).
 
-### Bloqueio da Fase 31 — a Production Pack (25–29 **do plano**) não existe neste repositório
+### A Production Pack (25–29 **do plano**) não existe neste repositório — resolvido pela opção A
 
 O plano do Salto B assume que as Fases 25–29 foram a Production Pack: loader glTF/GLB,
 material system (normal/emissive/roughness), formato de cena JSON, save/load versionado,
@@ -114,19 +114,22 @@ renderer, backend egui e um layout. A Fase 31 é a primeira que consome: os crit
 aceite falam em abrir "um `.scene` existente (criado na Fase 27)" e em `File > New Scene`
 com cubo + luz + câmara carregados "do formato de cena da Fase 27".
 
-**Decisão:** parar antes da Fase 31 e não inventar um formato de cena dentro do editor. Um
-formato de cena é estrutural — o `giochi-racer` (Fases 41–45) tem de o ler sem depender do
-editor — e a R2 manda avisar o utilizador em vez de o improvisar. As opções, com custo, em
-`IDEAS.md` não: isto não é uma ideia fora de âmbito, é a dependência em falta.
+**Decisão tomada:** opção **A** — a Fase 26.5, só o formato de cena, implementada em
+`giochi-engine-3d::scene` (ADR-063). A Fase 30 foi entregue sem consumir nada da pack; a 31
+consome o formato e ficou desbloqueada. Um formato de cena é estrutural — o `giochi-racer`
+(Fases 41–45) tem de o ler sem depender do editor — e a R2 manda avisar em vez de o
+improvisar dentro do editor. As opções que foram consideradas:
 
 | Opção | O que é | Custo estimado |
 |---|---|---|
-| **A (recomendada)** — "Fase 26.5": formato de cena só | `giochi-engine-3d::scene`: `Scene`/`SceneNode` (`Id` estável `u64`, nome, parent, `Transform3D`, mesh path, material, light, camera), JSON via `serde` + `serde_json`, `version` + migração, round-trip testado | 1 sessão pequena |
+| **A (feita)** — "Fase 26.5": formato de cena só | `giochi-engine-3d::scene`: `Scene`/`SceneNode` (`Id` estável `u64`, nome, parent, `Transform3D`, mesh path, material, light, camera), JSON via `serde` + `serde_json`, `version` + migração, round-trip testado | 1 sessão pequena |
 | B — Production Pack completa | A + glTF/GLB + material PBR-lite + save/load com slots + câmaras + A* + buses + i18n | 4–6 sessões; é a Fase 25–29 do plano |
-| C — formato dentro do editor | mais rápido agora, mas o jogo passa a depender do editor para ler cenas, contra a estrutura do plano | 1 sessão + dívida permanente |
+| C — formato dentro do editor | rejeitada: o jogo passaria a depender do editor para ler cenas | 1 sessão + dívida permanente |
 
-Sem A nem B, os critérios de aceite da Fase 31 não são verificáveis e a Fase 38 (save/load)
-não tem sobre o que assentar. A Fase 30 fica como está: verde, commitada e inofensiva.
+A pack completa (**B**) continua por fazer: glTF/GLB, materiais PBR-lite, save/load com
+slots, câmaras de jogo (follow/shake/cutscene), A*, buses de áudio e i18n. Nada na Fase 31
+depende delas; a Fase 41 (carro e pista) depende de glTF, e a 44 de buses. Ficam registadas
+como pendências reais, não como ideias.
 
 ### Próxima fase
 : render da cena 3D no centro, `OrbitCamera` (botão direito orbita,

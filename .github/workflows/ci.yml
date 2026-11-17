@@ -318,6 +318,12 @@ jobs:
           SDL_RENDER_DRIVER: software
         run: |
           cargo run -q -p giochi-editor -- --frames 30
+          # The default scene is written, reloaded and compared by the example; the
+          # editor then opens it, so the loader, the viewport projection and the window
+          # title all run in CI.
+          cargo run -q -p giochi-editor --example editor_default_scene | tee /tmp/scene.log
+          grep -q 'roundtrip=ok' /tmp/scene.log
+          cargo run -q -p giochi-editor -- --scene giochi-editor/assets/scenes/default.scene --frames 30
 
       - name: Examples
         env:

@@ -1,8 +1,8 @@
 # giochi-editor — guia do utilizador
 
-Editor visual de cenas da GIOCHI-ENGINE. Este documento é o guia **da Fase 30**: como
-abrir o editor, o que já está na janela e o que cada painel espera das fases seguintes.
-Cresce uma secção por fase até ao guia completo da Fase 40.
+Editor visual de cenas da GIOCHI-ENGINE. Este documento cobre as **Fases 30 e 31**: como
+abrir o editor, o que já está na janela, como navegar no viewport e como criar, abrir e
+gravar cenas. Cresce uma secção por fase até ao guia completo da Fase 40.
 
 ---
 
@@ -10,6 +10,7 @@ Cresce uma secção por fase até ao guia completo da Fase 40.
 
 ```bash
 cargo run -p giochi-editor --release
+cargo run -p giochi-editor --release -- --scene giochi-editor/assets/scenes/default.scene
 ```
 
 A janela abre a **1600×900**, redimensionável. Sem ecrã (CI, SSH, KMSDRM sem TTY) o SDL
@@ -23,7 +24,8 @@ SDL_VIDEODRIVER=dummy cargo run -p giochi-editor -- --frames 3
 ```
 
 `--frames N` desenha N frames e sai. É o que o teste `tests/editor_smoke.rs` usa e o que
-torna a aceitação da fase verificável sem clicar.
+torna a aceitação da fase verificável sem clicar. `--scene FILE` abre uma cena antes do
+primeiro frame; sem ela, o editor começa vazio e diz como criar uma.
 
 ### Drivers de vídeo
 
@@ -56,13 +58,15 @@ depois**: cada painel diz qual é a fase que o preenche.
 
 | Painel | Conteúdo | Fase |
 |---|---|---|
-| Hierarchy | árvore da cena, seleção, destaque no viewport | 32 |
+| Hierarchy | árvore da cena, seleção, destaque no viewport | 32 (lista simples desde a 31) |
 | Inspector | Transform, Mesh, Material, Light, Camera | 33 |
 | Asset Browser | árvore de assets do projeto, import, drag-to-viewport | 34 |
-| Viewport | render da cena, câmara orbit, grid e eixos | 31 |
+| Viewport | cena em wireframe, grid, eixos, câmara orbit | **31, feito** |
 
-O viewport é preto de propósito: pinta a cor de fundo da cena, e é a Fase 31 que lhe põe
-um cubo, um grid e uma câmara.
+O viewport mostra o **mundo**, não o sombreado: grid no plano XZ, os três eixos, a caixa de
+cada nó (malha, luz, câmara, grupo) e o contorno amarelo do selecionado. É deliberado — a
+Fase 31 não abre um segundo contexto GL dentro do editor (ADR-064); o jogo é que mostra o
+resultado com materiais e luz.
 
 ### Menu
 
@@ -72,25 +76,55 @@ mapa de menus não mudar de fase para fase.
 
 Já funcionam:
 
-| Ação | Onde |
-|---|---|
-| Sair | `File > Exit`, ou `Esc`, ou o botão de fechar da janela |
-| Mostrar/esconder Hierarchy, Inspector e Asset Browser | `View` |
+| Ação | Onde | Atalho |
+|---|---|---|
+| Nova cena (cubo + sol + câmara) | `File > New Scene` | `Ctrl+N` |
+| Abrir cena | `File > Open Scene…` | `Ctrl+O` |
+| Gravar | `File > Save` | `Ctrl+S` |
+| Gravar como | `File > Save As…` | `Ctrl+Shift+S` |
+| Enquadrar a cena | `View > Frame Scene` | — |
+| Mostrar/esconder painéis | `View` | — |
+| Sair | `File > Exit` | `Esc` |
 
 Esconder um painel devolve o espaço ao viewport; o layout do egui é elástico, por isso
 arrastar as bordas dos painéis também funciona.
 
----
+O menu bar mostra à direita a última ação ("Opened …", "Saved …") ou o erro que a impediu.
+Substituir uma cena com alterações por gravar é recusado: grave primeiro.
 
 ## 3. Teclado
 
 | Tecla | Efeito |
 |---|---|
-| `Esc` | Sair — exceto quando a consola está aberta ou um campo de texto tem o foco |
+| `Ctrl+N` / `Ctrl+O` / `Ctrl+S` / `Ctrl+Shift+S` | nova, abrir, gravar, gravar como |
+| `Esc` | Sair — exceto quando a consola, um diálogo ou um campo de texto tem o foco |
 | `F2` | Abrir/fechar a consola in-game do `giochi-engine` |
 
 `Q`/`W`/`E`/`R` (select/translate/rotate/scale) chegam com os gizmos, nas Fases 35a/35b;
 `Ctrl+Z`/`Ctrl+Y` chegam na Fase 37. O estado `EditorMode` já existe para os receber.
+
+---
+
+## 3.1 Viewport
+
+| Gesto | Efeito |
+|---|---|
+| arrastar com o **botão direito** | orbitar em torno do alvo |
+| arrastar com o **botão do meio** | fazer pan no plano do ecrã |
+| **roda** do rato | zoom multiplicativo (um entalhe muda a mesma proporção a qualquer distância) |
+| `View > Frame Scene` | enquadra o AABB de todas as malhas |
+
+A câmara do viewport é **independente** da câmara da cena: mover-se no editor não altera o
+que o jogo verá. O canto inferior esquerdo mostra a distância atual.
+
+Ao abrir ou criar uma cena, a câmara enquadra automaticamente as malhas existentes.
+
+## 3.2 O diálogo de ficheiros
+
+`File > Open Scene…` e `File > Save As…` abrem um diálogo desenhado pelo próprio editor
+(egui), não o `rfd`: no GIOCHI-OS não há `xdg-desktop-portal` nem D-Bus de sessão, e um
+diálogo que só funciona no desktop do programador é pior do que nenhum. O diálogo lista
+pastas e ficheiros `.scene`, tem campo de nome, `Up` e `Refresh`. ADR-064 regista a troca.
 
 ---
 
@@ -128,26 +162,35 @@ de pintura duplicado no editor.
 
 | Módulo | Responsabilidade |
 |---|---|
-| `src/lib.rs` | opções, ciclo, `run()` |
-| `src/main.rs` | linha de comando (`--frames`, `--help`) |
-| `editor/editor_state.rs` | cena aberta, seleção, modo, dirty, painéis |
+| `src/lib.rs` | opções, ciclo, `run()`, atalhos |
+| `src/main.rs` | linha de comando (`--scene`, `--frames`, `--help`) |
+| `editor/editor_state.rs` | cena aberta, seleção, modo, dirty, painéis, gravar/abrir |
 | `editor/layout.rs` | painéis, menu, viewport; devolve `LayoutMetrics` |
+| `editor/orbit_camera.rs` | câmara do viewport (yaw/pitch/distância, pan, zoom, projeção) |
+| `editor/viewport.rs` | projeção e desenho do wireframe, clipping ao retângulo |
+| `editor/dialog.rs` | diálogo de abrir/gravar desenhado em egui |
 | `editor/theme.rs` | paleta e escala tipográfica do editor |
+
+O desenho do viewport acontece **antes** do egui, com o retângulo que o layout produziu no
+frame anterior: assim uma linha projetada uns pixels fora do viewport não aparece por cima
+de um painel.
 
 ---
 
-## 6. Pendências conhecidas da Fase 30
+## 6. Pendências conhecidas (fim da Fase 31)
 
 | Pendência | Fase |
 |---|---|
-| Abrir/gravar cenas, diálogos de ficheiro (`rfd`) | 31 e 38 |
-| Câmara do viewport (orbit/pan/zoom) e independência da câmara da cena | 31 |
-| Destaque de seleção e raycast | 32 |
+| Árvore clicável, seleção por click no viewport (raycast) | 32 |
+| Inspector editável | 33 |
+| Asset browser, drag-to-viewport | 34 |
+| Gizmos translate/rotate/scale | 35a/35b |
+| Criar/apagar/duplicar/reparentar | 36 |
 | Undo/redo global | 37 |
-| Preferências, atalhos documentados no menu, About | 40 |
-
-`rfd` não entra na Fase 30 porque não há nenhum diálogo para abrir; entra na Fase 31, com
-o primeiro `File > Open Scene`.
+| Projetos, `recent.toml`, autosave, aviso ao fechar, metadados do editor no save | 38 |
+| Play-in-editor | 39 |
+| Preferências, About, atalhos no menu | 40 |
+| Sombreado no viewport (FBO/GLES) | fora de âmbito — ADR-064 |
 
 ---
 
@@ -159,3 +202,5 @@ o primeiro `File > Open Scene`.
 | aviso `kmsdrm video driver unavailable` | comportamento normal num desktop | ignorar ou fixar `SDL_VIDEODRIVER` |
 | janela abre e fecha logo | `--frames` foi passado | correr sem `--frames` |
 | texto pequeno em HiDPI | o backend usa `pixels_per_point = 1.0` | pendente (Fase 40, preferências) |
+| "unsaved changes — Save before replacing the scene" | há alterações por gravar | `Ctrl+S`, depois abrir/criar |
+| a cena abre mas o viewport está vazio | a câmara aponta para o lado oposto | `View > Frame Scene` |

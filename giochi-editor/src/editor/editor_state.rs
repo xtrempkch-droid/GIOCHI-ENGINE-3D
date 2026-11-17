@@ -1,44 +1,75 @@
 //! Everything the editor remembers between frames.
 //!
 //! `EditorState` is the *editor's* state, not the scene's: which file is open, what is
-//! selected, which gizmo is armed, whether there are unsaved changes. The scene itself
-//! arrives in phase 31 and the selection becomes a scene entity then — which is why
-//! [`EntityId`] is a stable value and not a pointer (phase 38 saves it in the scene
-//! metadata).
+//! selected, which gizmo is armed, whether there are unsaved changes, and the viewport
+//! camera. The scene itself is the engine's [`Scene`], loaded and saved through the
+//! format in `giochi-engine-3d` — the editor never invents its own file format.
 
-use std::fmt;
 use std::path::{Path, PathBuf};
+
+use giochi_engine_3d::scene::{Scene, SceneError};
+
+use crate::editor::dialog::FileDialog;
+use crate::editor::orbit_camera::OrbitCamera;
 
 /// Identifies one object in the edited scene.
 ///
-/// A plain `u64` rather than an index into a `Vec`: indices shift when a node is deleted
-/// or reparented, and an undo stack that stores indices undoes the wrong node. The scene
-/// format assigns these and phase 38 persists them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct EntityId(pub u64);
+/// The editor reuses the scene format's id instead of defining a second one: an id that
+/// is saved in a file and an id that lives in an undo stack must not be two value spaces.
+pub use giochi_engine_3d::scene::SceneNodeId as EntityId;
 
-impl EntityId {
-    /// Wraps a raw identifier.
-    pub const fn new(raw: u64) -> Self {
-        Self(raw)
-    }
-
-    /// The raw identifier, for the scene format.
-    pub const fn raw(self) -> u64 {
-        self.0
-    }
+/// What a status message means, which decides the colour the menu bar draws it with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StatusKind {
+    /// Nothing to report yet.
+    #[default]
+    Idle,
+    /// Something worked.
+    Info,
+    /// Something worked, with a caveat.
+    Warning,
+    /// Something failed.
+    Error,
 }
 
-impl fmt::Display for EntityId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "#{}", self.0)
+/// The last thing the editor did, for the menu bar.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Status {
+    /// The message.
+    pub text: String,
+    /// What it means.
+    pub kind: StatusKind,
+}
+
+impl Status {
+    /// A message of the given kind.
+    pub fn new(kind: StatusKind, text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            kind,
+        }
+    }
+
+    /// An informational message.
+    pub fn info(text: impl Into<String>) -> Self {
+        Self::new(StatusKind::Info, text)
+    }
+
+    /// An error message.
+    pub fn error(text: impl Into<String>) -> Self {
+        Self::new(StatusKind::Error, text)
+    }
+
+    /// A warning.
+    pub fn warning(text: impl Into<String>) -> Self {
+        Self::new(StatusKind::Warning, text)
     }
 }
 
 /// What dragging in the viewport does.
 ///
 /// The toolbar and the `Q`/`W`/`E`/`R` shortcuts arrive with the gizmos (phases 35a and
-/// 35b); phase 30 only carries the value so the rest of the editor can be written
+/// 35b); phase 31 only carries the value so the rest of the editor can be written
 /// against it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EditorMode {
@@ -65,7 +96,7 @@ impl EditorMode {
     }
 }
 
-/// Which of the placeholder panels are visible.
+/// Which of the panels are visible.
 ///
 /// The `View` menu toggles these. A closed panel is not drawn at all rather than drawn
 /// collapsed, so the central viewport gets the space back — which is the only reason to
@@ -95,14 +126,28 @@ impl Default for PanelVisibility {
 pub struct EditorState {
     /// The scene file currently open, if any.
     pub scene_path: Option<PathBuf>,
+    /// The scene being edited, or `None` before `File > New Scene` / `File > Open`.
+    pub scene: Option<Scene>,
     /// The selected object, if any. Phase 32 turns this into a multi-selection.
     pub selected: Option<EntityId>,
     /// The armed viewport tool.
     pub mode: EditorMode,
     /// Whether the scene has unsaved changes.
     pub dirty: bool,
-    /// Which placeholder panels are shown.
+    /// Which panels are shown.
     pub panels: PanelVisibility,
+    /// The viewport's own camera. Never the scene's (`CameraDesc`).
+    pub viewport_camera: OrbitCamera,
+    /// The rectangle the viewport occupied on the previous frame.
+    ///
+    /// Drawing happens before egui runs (see [`crate::editor::viewport`]), so one
+    /// frame's worth of rectangle is kept between frames. `None` on the first frame of a
+    /// session.
+    pub viewport_rect: Option<egui::Rect>,
+    /// The last thing the editor did, shown in the menu bar.
+    pub status: Status,
+    /// The file dialog, while one is open.
+    pub dialog: Option<FileDialog>,
     /// Set by the window close button, `Esc`, or `File > Exit`.
     quit_requested: bool,
 }
@@ -118,10 +163,15 @@ impl EditorState {
     pub fn new() -> Self {
         Self {
             scene_path: None,
+            scene: None,
             selected: None,
             mode: EditorMode::Select,
             dirty: false,
             panels: PanelVisibility::default(),
+            viewport_camera: OrbitCamera::default(),
+            viewport_rect: None,
+            status: Status::default(),
+            dialog: None,
             quit_requested: false,
         }
     }
@@ -156,6 +206,109 @@ impl EditorState {
         self.quit_requested
     }
 
+    /// Replaces the open scene with `File > New Scene`'s default and frames it.
+    pub fn new_scene(&mut self) {
+        let scene = Scene::default_scene();
+        self.frame_scene(&scene);
+        self.scene = Some(scene);
+        self.scene_path = None;
+        self.selected = None;
+        self.mark_saved();
+        self.status = Status::info("New scene");
+    }
+
+    /// Loads `path`, replacing whatever was open.
+    ///
+    /// # Errors
+    ///
+    /// The scene format's error, converted to a line the menu bar can show. The scene
+    /// that was open stays open.
+    pub fn open_scene(&mut self, path: impl AsRef<Path>) -> Result<(), String> {
+        let path = path.as_ref();
+        let scene = Scene::load_from_path(path).map_err(|error| describe(&error))?;
+        self.frame_scene(&scene);
+        self.scene = Some(scene);
+        self.scene_path = Some(path.to_path_buf());
+        self.selected = None;
+        self.mark_saved();
+        self.status = Status::info(format!("Opened {}", path.display()));
+        Ok(())
+    }
+
+    /// Saves to the current path.
+    ///
+    /// # Errors
+    ///
+    /// `"no path yet; use Save As"` when the scene has never been saved; the caller
+    /// opens the save dialog in that case.
+    pub fn save_scene(&mut self) -> Result<(), String> {
+        let path = self
+            .scene_path
+            .clone()
+            .ok_or_else(|| "no path yet; use Save As".to_owned())?;
+        self.save_scene_as(path)
+    }
+
+    /// Saves to `path`, which becomes the current path.
+    ///
+    /// # Errors
+    ///
+    /// The scene format's error, or `"no scene open"` when there is nothing to save.
+    pub fn save_scene_as(&mut self, path: impl AsRef<Path>) -> Result<(), String> {
+        let path = path.as_ref();
+        let scene = self
+            .scene
+            .as_ref()
+            .ok_or_else(|| "no scene open".to_owned())?;
+        scene.save_to_path(path).map_err(|error| describe(&error))?;
+        self.scene_path = Some(path.to_path_buf());
+        self.mark_saved();
+        self.status = Status::info(format!("Saved {}", path.display()));
+        Ok(())
+    }
+
+    /// Opens the "Open Scene" dialog in the current directory.
+    pub fn open_dialog(&mut self) {
+        self.dialog = Some(FileDialog::open(default_dialog_directory()));
+    }
+
+    /// Opens the "Save Scene As" dialog, pre-filled with the current name.
+    pub fn save_dialog(&mut self) {
+        let name = self
+            .scene_name()
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "untitled".to_owned());
+        self.dialog = Some(FileDialog::save(default_dialog_directory(), name));
+    }
+
+    /// Saves, asking for a path when there is none yet.
+    pub fn save_or_ask(&mut self) {
+        if self.scene.is_none() {
+            self.status = Status::warning("nothing to save");
+            return;
+        }
+        match self.save_scene() {
+            Ok(()) => {}
+            Err(_) => self.save_dialog(),
+        }
+    }
+
+    /// Records an outcome and logs it at the matching level.
+    pub fn report(&mut self, status: Status) {
+        log::log!(log::Level::from(status.kind), "{}", status.text);
+        self.status = status;
+    }
+
+    /// Points the viewport camera at the scene's meshes.
+    fn frame_scene(&mut self, scene: &Scene) {
+        match scene.mesh_bounds() {
+            Some((min, max)) => self.viewport_camera.frame_aabb(min, max),
+            // An empty scene still has a grid to look at, so the camera keeps its
+            // default framing instead of being pointed at nothing.
+            None => self.viewport_camera = OrbitCamera::default(),
+        }
+    }
+
     /// The window title, with the `*` the plan asks for while there are unsaved changes.
     ///
     /// The engine's title buffer is 64 bytes (`ENGINE_TITLE_CAPACITY`), so the platform
@@ -171,23 +324,53 @@ impl EditorState {
         }
     }
 
-    /// The file stem of the open scene, if there is one.
+    /// The scene's display name: the file stem, or the scene's own name.
     pub fn scene_name(&self) -> Option<String> {
         self.scene_path
             .as_deref()
             .and_then(Path::file_stem)
             .map(|name| name.to_string_lossy().into_owned())
+            .or_else(|| self.scene.as_ref().map(|scene| scene.name.clone()))
+    }
+}
+
+fn describe(error: &SceneError) -> String {
+    error.to_string()
+}
+
+/// Where a dialog opens when the editor has no better idea: the working directory, which
+/// is where `cargo run` put the user.
+fn default_dialog_directory() -> PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+impl From<StatusKind> for log::Level {
+    fn from(kind: StatusKind) -> Self {
+        match kind {
+            StatusKind::Error => log::Level::Error,
+            StatusKind::Warning => log::Level::Warn,
+            StatusKind::Idle | StatusKind::Info => log::Level::Info,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use giochi_engine_3d::scene::SceneNodeId;
+
+    fn temp_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "giochi-editor-state-{name}-{}.scene",
+            std::process::id()
+        ))
+    }
 
     #[test]
     fn a_fresh_editor_has_no_scene_and_no_selection() {
         let state = EditorState::new();
         assert_eq!(state.scene_path, None);
+        assert_eq!(state.scene, None);
         assert_eq!(state.selected, None);
         assert_eq!(state.mode, EditorMode::Select);
         assert!(!state.dirty);
@@ -255,5 +438,86 @@ mod tests {
         let mut state = EditorState::new();
         state.request_quit();
         assert!(state.quit_requested());
+    }
+
+    #[test]
+    fn a_new_scene_has_the_three_objects_and_frames_them() {
+        let mut state = EditorState::new();
+        state.new_scene();
+        let scene = state.scene.as_ref().expect("scene");
+        assert_eq!(scene.nodes.len(), 3);
+        assert!(!state.dirty, "a new scene is not a modification");
+        assert_eq!(state.scene_path, None);
+        assert!(state.viewport_camera.distance > 0.0);
+        assert!(!state.status.text.is_empty());
+    }
+
+    #[test]
+    fn saving_without_a_path_asks_for_save_as() {
+        let mut state = EditorState::new();
+        state.new_scene();
+        let error = state.save_scene().expect_err("no path");
+        assert!(error.contains("Save As"), "{error}");
+    }
+
+    #[test]
+    fn open_save_and_reopen_preserve_the_scene() {
+        let path = temp_path("roundtrip");
+        let mut state = EditorState::new();
+        state.new_scene();
+        state.save_scene_as(&path).expect("saved");
+        assert!(!state.dirty);
+        assert_eq!(state.scene_path.as_deref(), Some(path.as_path()));
+
+        let expected = state.scene.clone().expect("scene");
+        let mut other = EditorState::new();
+        other.open_scene(&path).expect("opened");
+        assert_eq!(other.scene.as_ref(), Some(&expected));
+        assert!(!other.dirty);
+        assert!(other.status.text.contains("Opened"));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn opening_a_missing_file_reports_the_path_and_keeps_the_old_scene() {
+        let mut state = EditorState::new();
+        state.new_scene();
+        let before = state.scene.clone();
+        let error = state
+            .open_scene("/nonexistent/definitely/missing.scene")
+            .expect_err("missing file");
+        assert!(error.contains("missing.scene"), "{error}");
+        assert_eq!(
+            state.scene, before,
+            "a failed open must not clear the scene"
+        );
+    }
+
+    #[test]
+    fn opening_a_foreign_file_reports_why() {
+        let path = temp_path("foreign");
+        std::fs::write(&path, r#"{"format": "not-giochi"}"#).expect("written");
+        let mut state = EditorState::new();
+        let error = state.open_scene(&path).expect_err("not a scene");
+        assert!(error.contains("not a giochi scene"), "{error}");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_scene_name_survives_save_as_and_titles_the_window() {
+        let path = temp_path("titled");
+        let mut state = EditorState::new();
+        state.new_scene();
+        state.save_scene_as(&path).expect("saved");
+        state.mark_dirty();
+        assert!(state.window_title().ends_with('*'));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn the_scene_id_type_is_the_editor_id_type() {
+        let id: EntityId = SceneNodeId::new(3);
+        assert_eq!(id.raw(), 3);
     }
 }

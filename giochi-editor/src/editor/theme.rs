@@ -64,6 +64,15 @@ impl EditorTheme {
         "editor-dark"
     }
 
+    /// The viewport clear colour in the engine's own colour type.
+    ///
+    /// The editor paints the scene with `sdl2::render`, which takes `giochi_engine::Color`
+    /// (8-bit channels), while egui takes `Color32`. Converting at the boundary keeps the
+    /// palette in one place.
+    pub fn viewport_color(&self) -> giochi_engine::Color {
+        giochi_engine::Color::rgb(self.viewport.r(), self.viewport.g(), self.viewport.b())
+    }
+
     /// Applies the palette and the type scale to `ctx`.
     ///
     /// Called once per frame; egui compares the style and only rebuilds when it changed,
