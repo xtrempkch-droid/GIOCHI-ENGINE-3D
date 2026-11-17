@@ -53,7 +53,14 @@ pub struct ViewportInput {
     pub scroll: f32,
     /// Whether the pointer is over the viewport at all.
     pub hovered: bool,
-    /// Primary button pressed this frame, with the pointer position.
+    /// The pointer position while a button is down, even outside the viewport: a drag that
+    /// left the rectangle must keep following the pointer, or it sticks.
+    pub pointer: Option<egui::Pos2>,
+    /// Primary button pressed this frame, inside the viewport.
+    pub pressed: Option<egui::Pos2>,
+    /// Primary button released this frame, anywhere.
+    pub released: bool,
+    /// A completed click (pressed and released without dragging) inside the viewport.
     pub click: Option<egui::Pos2>,
     /// Primary button double-clicked this frame, with the pointer position.
     pub double_click: Option<egui::Pos2>,
@@ -96,32 +103,38 @@ pub fn read_input(ctx: &egui::Context, rect: Option<Rect>) -> ViewportInput {
         .input(|input| input.pointer.hover_pos())
         .is_some_and(|position| rect.contains(position));
 
-    if !hovered {
-        return ViewportInput {
-            hovered: false,
-            ..ViewportInput::default()
-        };
-    }
-
     let mut input = ViewportInput {
         hovered,
         ..ViewportInput::default()
     };
 
-    if pointer.button_down(egui::PointerButton::Secondary) {
-        input.orbit = pointer.delta();
+    // A drag that leaves the viewport must keep tracking the pointer, so the position and
+    // the release are read unconditionally and only the *start* of a gesture is gated on
+    // the pointer being inside.
+    let dragging = pointer.any_down();
+    if hovered || dragging {
+        input.pointer = pointer.interact_pos();
     }
-    if pointer.button_down(egui::PointerButton::Middle) {
-        input.pan = pointer.delta();
+    if hovered {
+        if pointer.button_down(egui::PointerButton::Secondary) {
+            input.orbit = pointer.delta();
+        }
+        if pointer.button_down(egui::PointerButton::Middle) {
+            input.pan = pointer.delta();
+        }
+        input.scroll = ctx.input(|i| i.smooth_scroll_delta.y);
+        input.toggle_modifier = ctx.input(|i| i.modifiers.command);
+        if pointer.button_pressed(egui::PointerButton::Primary) {
+            input.pressed = pointer.interact_pos();
+        }
+        if pointer.button_clicked(egui::PointerButton::Primary) {
+            input.click = pointer.interact_pos();
+        }
+        if pointer.button_double_clicked(egui::PointerButton::Primary) {
+            input.double_click = pointer.interact_pos();
+        }
     }
-    input.scroll = ctx.input(|i| i.smooth_scroll_delta.y);
-    input.toggle_modifier = ctx.input(|i| i.modifiers.command);
-    if pointer.button_clicked(egui::PointerButton::Primary) {
-        input.click = pointer.interact_pos();
-    }
-    if pointer.button_double_clicked(egui::PointerButton::Primary) {
-        input.double_click = pointer.interact_pos();
-    }
+    input.released = pointer.button_released(egui::PointerButton::Primary);
     input
 }
 
@@ -138,6 +151,36 @@ pub fn draw(
     camera: &OrbitCamera,
     selected: &[SceneNodeId],
     theme: &EditorTheme,
+) {
+    draw_with_gizmo(
+        render,
+        rect,
+        scene,
+        camera,
+        selected,
+        theme,
+        GizmoView::default(),
+    );
+}
+
+/// What the gizmo should show this frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GizmoView {
+    /// The armed tool. `Select` draws no handles.
+    pub mode: crate::editor::EditorMode,
+    /// The handle currently being dragged, if any.
+    pub active: Option<crate::gizmos::GizmoHandle>,
+}
+
+/// Draws the scene and, when one object is selected and a tool is armed, its gizmo.
+pub fn draw_with_gizmo(
+    render: &mut RenderContext,
+    rect: Rect,
+    scene: Option<&Scene>,
+    camera: &OrbitCamera,
+    selected: &[SceneNodeId],
+    theme: &EditorTheme,
+    gizmo: GizmoView,
 ) {
     if rect.width() < 2.0 || rect.height() < 2.0 {
         return;
@@ -171,6 +214,24 @@ pub fn draw(
     for node in &scene.nodes {
         draw_node(render, rect, &view_projection, node, scene, selected, theme);
     }
+
+    // The gizmo attaches to exactly one selected node. With none or several, no handles:
+    // a gizmo that means "the average of these" is a feature nobody asked for.
+    if gizmo.mode != crate::editor::EditorMode::Select && selected.len() == 1 {
+        if let Some(node) = scene.node(selected[0]) {
+            let world = world_transform(scene, node);
+            let center = Vec3::new(world.position[0], world.position[1], world.position[2]);
+            let geometry = crate::gizmos::GizmoGeometry::for_camera(center, camera, rect);
+            crate::gizmos::paint::draw_for_mode(
+                render,
+                rect,
+                camera,
+                geometry,
+                gizmo.mode,
+                gizmo.active,
+            );
+        }
+    }
 }
 
 fn draw_grid(render: &mut RenderContext, rect: Rect, view_projection: &Mat4, color: Color) {
@@ -180,7 +241,7 @@ fn draw_grid(render: &mut RenderContext, rect: Rect, view_projection: &Mat4, col
         // The two centre lines are the axes' negative halves and are drawn by
         // `draw_axes`; skipping them here avoids double-drawing with a different colour.
         if offset.abs() > 1e-4 {
-            segment(
+            draw_segment(
                 render,
                 rect,
                 view_projection,
@@ -188,7 +249,7 @@ fn draw_grid(render: &mut RenderContext, rect: Rect, view_projection: &Mat4, col
                 Vec3::new(offset, 0.0, GRID_EXTENT),
                 color,
             );
-            segment(
+            draw_segment(
                 render,
                 rect,
                 view_projection,
@@ -209,7 +270,7 @@ fn draw_axes(
     // Two units long in each direction: long enough to read as an axis at the default
     // distance, short enough not to run off the grid.
     for (direction, color) in axes {
-        segment(
+        draw_segment(
             render,
             rect,
             view_projection,
@@ -217,7 +278,7 @@ fn draw_axes(
             *direction * 2.0,
             *color,
         );
-        segment(
+        draw_segment(
             render,
             rect,
             view_projection,
@@ -270,7 +331,7 @@ fn draw_node(
     if let Some(camera) = node.camera {
         let eye = node.transform.position;
         let target = camera.target;
-        segment(
+        draw_segment(
             render,
             rect,
             view_projection,
@@ -287,7 +348,7 @@ fn draw_node(
 /// Public because the picker (phase 32) and the hierarchy's "frame this" both need the
 /// same box the viewport draws — two definitions would drift and a click would select a
 /// box the user cannot see.
-pub fn node_world_bounds(scene: &Scene, node: &SceneNode) -> ([f32; 3], [f32; 3]) {
+pub fn world_transform(scene: &Scene, node: &SceneNode) -> giochi_engine_3d::scene::NodeTransform {
     let mut node = node.clone();
     // The node's transform is local; the viewport shows world space. Walking to the root
     // is cheap (a scene has tens of nodes) and keeps `Scene` free of a cached hierarchy
@@ -306,12 +367,18 @@ pub fn node_world_bounds(scene: &Scene, node: &SceneNode) -> ([f32; 3], [f32; 3]
             break;
         }
     }
+    node.transform
+}
 
+/// The node's world-space AABB as `(min, max)`.
+pub fn node_world_bounds(scene: &Scene, node: &SceneNode) -> ([f32; 3], [f32; 3]) {
+    let world = world_transform(scene, node);
     if node.is_mesh() {
-        let (min, max) = node.transform.aabb();
-        (min, max)
+        world.aabb()
     } else {
-        let centre = node.transform.position;
+        // A light, camera or group has no geometry; a small fixed box at its position is
+        // what makes it clickable and visible at all.
+        let centre = world.position;
         let half = 0.25;
         (
             [centre[0] - half, centre[1] - half, centre[2] - half],
@@ -398,12 +465,16 @@ fn box_edges(
         (3, 7),
     ];
     for (a, b) in EDGES {
-        segment(render, rect, view_projection, corners[a], corners[b], color);
+        draw_segment(render, rect, view_projection, corners[a], corners[b], color);
     }
 }
 
 /// Projects, clips and draws one world-space segment.
-fn segment(
+///
+/// Public because the gizmos draw with the same projection, clipping and colour handling
+/// as the scene — two painters would disagree by a pixel and the handle would not be under
+/// the arrow.
+pub fn draw_segment(
     render: &mut RenderContext,
     rect: Rect,
     view_projection: &Mat4,
@@ -411,10 +482,10 @@ fn segment(
     to: Vec3,
     color: Color,
 ) {
-    let Some(from) = project(from, view_projection, rect) else {
+    let Some(from) = project_point(from, view_projection, rect) else {
         return;
     };
-    let Some(to) = project(to, view_projection, rect) else {
+    let Some(to) = project_point(to, view_projection, rect) else {
         return;
     };
     let Some((from, to)) = clip_segment(from, to, rect) else {
@@ -428,7 +499,7 @@ fn segment(
 /// A point behind the camera has `w <= 0`; dividing by it would mirror the point into
 /// the viewport and draw geometry that is not there. Rejecting it is what keeps the grid
 /// from reappearing when the camera is under the floor.
-fn project(point: Vec3, view_projection: &Mat4, rect: Rect) -> Option<egui::Pos2> {
+pub fn project_point(point: Vec3, view_projection: &Mat4, rect: Rect) -> Option<egui::Pos2> {
     let clip = *view_projection * point.extend(1.0);
     if clip.w <= 1e-6 {
         return None;
@@ -526,7 +597,7 @@ mod tests {
     fn the_target_projects_to_the_centre_of_the_viewport() {
         let camera = camera();
         let matrix = Mat4::from_cols_array(&camera.view_projection(800.0 / 600.0));
-        let centre = project(camera.target, &matrix, rect()).expect("in front");
+        let centre = project_point(camera.target, &matrix, rect()).expect("in front");
         assert!((centre.x - 500.0).abs() < 1e-3, "{centre:?}");
         assert!((centre.y - 350.0).abs() < 1e-3, "{centre:?}");
     }
@@ -536,7 +607,7 @@ mod tests {
         let camera = camera();
         let matrix = Mat4::from_cols_array(&camera.view_projection(1.0));
         let behind = camera.eye() + (camera.eye() - camera.target) * 2.0;
-        assert!(project(behind, &matrix, rect()).is_none());
+        assert!(project_point(behind, &matrix, rect()).is_none());
     }
 
     #[test]
@@ -568,6 +639,19 @@ mod tests {
     #[test]
     fn clipping_rejects_a_fully_horizontal_line_above_the_viewport() {
         assert!(clip_segment(egui::pos2(0.0, 10.0), egui::pos2(900.0, 10.0), rect()).is_none());
+    }
+
+    #[test]
+    fn a_release_is_reported_even_when_the_pointer_is_outside() {
+        let ctx = egui::Context::default();
+        let mut input = ViewportInput::default();
+        let rect = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0));
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            input = read_input(ctx, Some(rect));
+        });
+        assert!(!input.released);
+        assert!(input.pressed.is_none());
+        assert!(input.pointer.is_none());
     }
 
     #[test]

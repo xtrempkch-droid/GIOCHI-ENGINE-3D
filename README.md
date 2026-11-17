@@ -191,14 +191,14 @@ They need a GL driver; `SDL_VIDEODRIVER=offscreen` runs them headless.
 
 ### Editor
 
-The visual editor (`giochi-editor`, Salto B phases 30–40) is its own crate. Phases 30–34
+The visual editor (`giochi-editor`, Salto B phases 30–40) is its own crate. Phases 30–35a
 give a resizable 1600×900 window with the menu bar, the Hierarchy/Inspector/Asset Browser
 panels, a viewport that draws the scene as a projected wireframe (grid, axes, node boxes,
 selection outline) with an orbit camera, New/Open/Save through the scene format,
 hierarchy + viewport selection (click, Ctrl+click, double-click to frame), an inspector that
 edits Transform, Mesh, Material, Light and Camera in place, and projects (`project.toml`
-with `assets/` and `scenes/`), asset import and drag-to-viewport instantiation — enough to
-build a scene, save it and reopen it:
+with `assets/` and `scenes/`), asset import and drag-to-viewport instantiation, and move and
+rotate gizmos (`Q`/`W`/`E`, drag a handle) — enough to build a scene, edit it and reopen it:
 
 ```bash
 cargo run -p giochi-editor                      # opens the editor
@@ -212,7 +212,8 @@ cargo run -p giochi-editor --example editor_project_demo    # project + import, 
 The user guide is [docs/EDITOR_USER_GUIDE.md](docs/EDITOR_USER_GUIDE.md); the scene format
 is in [docs/3D.md](docs/3D.md) §6. The editor reuses the engine's egui backend instead of
 forking it (ADR-062), and the viewport draws with the same 2D renderer instead of opening a
-second GL context (ADR-064).
+second GL context (ADR-064); a gizmo drag recomputes its node from the transform the drag
+started with, so one drag is one edit (ADR-066).
 
 ### Profiling
 

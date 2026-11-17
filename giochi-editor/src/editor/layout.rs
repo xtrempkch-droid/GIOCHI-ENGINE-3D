@@ -27,7 +27,7 @@ use crate::editor::dialog::DialogOutcome;
 use crate::editor::editor_state::{Status, StatusKind};
 use crate::editor::icons::IconSet;
 use crate::editor::viewport::{self, ViewportInput};
-use crate::editor::{EditorState, EditorTheme};
+use crate::editor::{EditorMode, EditorState, EditorTheme};
 use crate::panels::{asset_browser, hierarchy, inspector};
 
 /// Identifier of the menu bar panel, stable across frames.
@@ -124,11 +124,53 @@ pub fn draw(
                 .dnd_release_payload::<asset_browser::AssetDrag>()
                 .map(|payload| (*payload).clone());
 
+            // Phase 35a: the tool bar. It floats over the viewport instead of taking a
+            // strip of its own, because a strip would move the rectangle the camera was
+            // aimed with every time a tool changed.
+            let mut requested: Option<EditorMode> = None;
+            egui::Area::new(egui::Id::new("giochi-toolbar"))
+                .fixed_pos(rect.left_top() + egui::vec2(10.0, 8.0))
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    egui::Frame::NONE
+                        .fill(theme.panel)
+                        .stroke(egui::Stroke::new(1.0_f32, theme.surface_hover))
+                        .corner_radius(4.0)
+                        .inner_margin(egui::Margin::same(4))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                for (mode, label) in [
+                                    (EditorMode::Select, "Q  Select"),
+                                    (EditorMode::Translate, "W  Move"),
+                                    (EditorMode::Rotate, "E  Rotate"),
+                                    (EditorMode::Scale, "R  Scale"),
+                                ] {
+                                    let armed = state.mode == mode;
+                                    if ui
+                                        .selectable_label(armed, label)
+                                        .on_hover_text(match mode {
+                                            EditorMode::Select => "Click to select",
+                                            EditorMode::Translate => "Drag an arrow to move",
+                                            EditorMode::Rotate => "Drag a ring to rotate",
+                                            EditorMode::Scale => "Not implemented yet (phase 35b)",
+                                        })
+                                        .clicked()
+                                    {
+                                        requested = Some(mode);
+                                    }
+                                }
+                            });
+                        });
+                });
+            if let Some(mode) = requested {
+                state.set_mode(mode);
+            }
+
             match &state.scene {
                 Some(scene) => {
                     let camera = &state.viewport_camera;
                     ui.painter().text(
-                        rect.left_top() + egui::vec2(10.0, 8.0),
+                        rect.left_top() + egui::vec2(10.0, 40.0),
                         egui::Align2::LEFT_TOP,
                         format!(
                             "{} — {} object(s)",
@@ -142,7 +184,8 @@ pub fn draw(
                         rect.left_bottom() + egui::vec2(10.0, -8.0),
                         egui::Align2::LEFT_BOTTOM,
                         format!(
-                            "orbit RMB · pan MMB · zoom wheel · dist {:.1}",
+                            "orbit RMB · pan MMB · zoom wheel · {} · dist {:.1}",
+                            state.mode.name(),
                             camera.distance
                         ),
                         egui::FontId::proportional(11.0),

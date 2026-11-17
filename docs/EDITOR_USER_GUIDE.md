@@ -144,6 +144,42 @@ que o jogo verá. O canto inferior esquerdo mostra a distância atual.
 
 Ao abrir ou criar uma cena, a câmara enquadra automaticamente as malhas existentes.
 
+### Ferramentas e gizmos (Fase 35a)
+
+Uma barra flutua no canto superior esquerdo do viewport com as ferramentas. As teclas são as
+mesmas de qualquer pacote 3D:
+
+| Tecla | Ferramenta | O que faz |
+|---|---|---|
+| `Q` | Select | clicar escolhe objetos; nenhum gizmo é desenhado |
+| `W` | Move | três setas (X vermelho, Y verde, Z azul) transladam o objeto |
+| `E` | Rotate | três anéis rodam o objeto em torno de X, Y ou Z |
+| `R` | Scale | ainda não implementado — chega na Fase 35b |
+
+O gizmo aparece **só** quando há exatamente um objeto selecionado. Com zero ou com vários não
+há handles: um gizmo que significasse "a média destes objetos" seria uma funcionalidade que
+ninguém pediu.
+
+Como arrastar:
+
+- **setas do Move**: agarre a seta e arraste. O objeto anda **só** ao longo desse eixo, e a
+  distância é a do pointer projetado no eixo — não a do movimento do rato no ecrã, por isso
+  arrastar na diagonal não "escorrega" para os outros eixos;
+- **quadrado central** do Move: move no plano paralelo ao ecrã, útil para pôr objetos à altura
+  dos olhos sem mexer em profundidade;
+- **anéis do Rotate**: agarre o anel e arraste; o ângulo é o que o pointer varreu no plano do
+  anel. Passar dos ±180° continua a rodar em vez de saltar;
+- **clique fora dos handles** volta a selecionar (é o comportamento do `Q`);
+- **filho de um objeto rodado** anda ao longo da seta que vê, porque o deslocamento é aplicado
+  no espaço do pai.
+
+Enquanto arrasta, o viewport não seleciona nada: o mesmo clique que agarrou a seta iria também
+apanhar o objeto que está atrás dela. Um arrasto conta como **uma** alteração — o `*` do título
+aparece ao largar o botão, não a cada frame. (O undo continua a chegar na Fase 37; guardar o
+estado inicial do arrasto já está feito, precisamente para lá.)
+
+Arrastar para fora do viewport continua a mover o objeto; largar fora também termina o arrasto.
+
 ## 3.3 Inspector (o MVP do editor)
 
 Com a Fase 33 o editor passa a **montar** uma cena, não só a vê-la. Ao abrir ou criar uma

@@ -10,10 +10,11 @@ ADR-061). O Salto B começou em **2026-11-17**.
 |---|---|---|
 | 30 — Bootstrap do editor | **concluída** (2026-11-17) | 14 testes de unidade + 1 de integração headless (3 frames, `SDL_VIDEODRIVER=dummy`); `cargo run -p giochi-editor -- --frames 120` abriu janela 1600×900 via x11 e desenhou 120 frames; `cargo build -p giochi-editor --release` verde |
 | 31 — Viewport | **concluída** (2026-11-17) | 55 testes de unidade no editor + 1 smoke com cena + 1 teste de **pixels** (grid, 3 eixos, contorno de seleção, nada fora do retângulo); `--scene default.scene --frames 60` via x11 e 10 frames via dummy |
-| 32 — Hierarchy + seleção | pendente | — |
+| 32 — Hierarchy + seleção | **concluída** (2026-11-17) | 1 teste de ícones (8 PNG) + testes de `picker` (raio→AABB, unproject) e de `Hierarchy`; clique/Ctrl+clique/duplo-clique no viewport e na árvore; ícones carregados com `painter.image` (UV explícito, ADR-064) |
 | 33 — Inspector (**MVP do editor**) | **concluída** (2026-11-17) | 94 testes de unidade no editor (Euler↔quatérnio, editores sem input não alteram nada, multi-seleção, MVP gravar/reabrir) + smoke + pixels; execução real com o inspector desenhado a 90 frames |
 | 34 — Asset browser | **concluída** (2026-11-17) | 127 testes de unidade no editor + 5 de integração do fluxo de projeto; `editor_project_demo` imprime `project=ok`; editor aberto com `--project … --scene …` a 90 frames |
-| 35a/35b — Gizmos | pendente | — |
+| 35a — Gizmos (translate + rotate) | **concluída** (2026-11-17) | 167 testes de unidade no editor + teste de **pixels** `the_gizmo_reaches_the_framebuffer`; arrasto medido em teste (`dragging_a_move_arrow_moves_the_node_by_the_dragged_distance`) |
+| 35b — Gizmos (scale + AABB) | pendente | — |
 | 36 — Hierarquia (create/delete/duplicate) | pendente | — |
 | 37 — Undo/redo | pendente | — |
 | 38 — Save/load + project | pendente | — |
@@ -279,10 +280,50 @@ em cada linha e filtros por tipo. Uma árvore expansível para `assets/` de um j
 essencialmente uma pasta com três subpastas — a lista mostra a mesma informação sem estado
 de expansão para manter — e a Fase 40 pode trocá-la sem tocar no `Project`.
 
+### Gates da Fase 35a
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — exit 0
+- [x] `cargo test --workspace` — **1100 testes**, 0 falhas; o `giochi-editor` passou a
+      **167** testes de unidade (+40 dos gizmos e da interação)
+- [x] `cargo test -p giochi-editor --test viewport_render` — teste de pixels novo
+      `the_gizmo_reaches_the_framebuffer`
+- [x] `cargo doc --workspace --no-deps --document-private-items`
+- [x] `scripts/gates.sh` completo — "All gates passed"
+- [x] `cargo run -p giochi-editor -- --scene giochi-editor/assets/scenes/default.scene --frames 90` (x11) — 90 frames
+- [x] `cargo check -p giochi-editor --target aarch64-unknown-linux-gnu`
+
+### Entregue na Fase 35a
+
+| Ficheiro | O que faz |
+|---|---|
+| `gizmos/mod.rs` | `GizmoHandle`, `GizmoGeometry` (setas de tamanho constante no ecrã via `units_per_point`), `ParentSpace`, `Drag`/`DragKind` |
+| `gizmos/translate.rs` | picking do centro e das três setas, aproximação mínima raio↔eixo, plano do ecrã, `apply_offset` no espaço do pai |
+| `gizmos/rotate.rs` | picking dos três anéis por distância raio↔anel, ângulo no plano do anel, `unwrap` de ±π, `apply_rotation` |
+| `gizmos/paint.rs` | setas com ponta de losango, anéis de 48 segmentos, quadrado central; handle ativo em amarelo |
+| `editor/viewport.rs` | `draw_with_gizmo` + `GizmoView`; `world_transform`/`draw_segment`/`project_point` públicos |
+| `editor/editor_state.rs` | `drag: Option<Drag>`, `set_mode`, `gizmo_target`; `EditorMode::from_key` |
+| `lib.rs` | `apply_viewport_interaction` (terminar → seguir → começar → selecionar), `begin_gizmo_drag`, `parent_space`, teclas `Q`/`W`/`E`/`R` |
+| `editor/viewport.rs` (`ViewportInput`) | `pointer`/`pressed`/`released`, lidos mesmo fora do retângulo |
+| `editor/layout.rs` | barra de ferramentas flutuante sobre o viewport (não gasta uma faixa que mudaria a retângulo da câmara) |
+
+### Desvios e notas da Fase 35a
+
+- O plano falava em "picking analítico de raio contra cilindro". As setas são testadas por
+  **16 amostras** ao longo do segmento até ao pointer (`distance_ray_to_segment`) e os anéis
+  por distância analítica raio↔circunferência. A 16 amostras a tolerância de 7 pontos é
+  contínua na prática, e a alternativa (cilindro + tampões + cones) seria mais código para o
+  mesmo resultado num alvo que não precisa de precisão sub-pixel (R7).
+- O plano pedia a AABB visual e o `R` de escala na 35; ficam na **35b**, que já estava
+  separada no plano.
+- `Drag` guarda o `NodeTransform` inicial e **recalcula tudo a cada frame** a partir dele
+  (ADR-066): um arrasto é uma alteração, não N alterações — é o que a Fase 37 vai precisar.
+- Nada de undo ainda (R6, Fase 37). O `*` no título aparece **ao largar** o botão.
+
 ### Próxima fase
 
-**Fase 35a — Gizmos 3D (translate + rotate)**: setas e círculos no objeto selecionado,
-arrastar para mover/rodar, `Q`/`W`/`E`, picking analítico de raio contra cilindro.
+**Fase 35b — Gizmos (scale + AABB visual)**: caixa de escala por eixo e central, `R` a
+funcionar, AABB do objeto selecionado desenhada como caixa tracejada.
 
 ## Growth Pack (Fases 19–24)
 

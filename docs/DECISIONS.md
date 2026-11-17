@@ -2070,3 +2070,45 @@ that only work relative to wherever it was saved — true before this phase too,
 Verified by `tests/project_flow.rs` (create → import → save → reopen, missing scene warning,
 import without project, dialogs' start directory) and by
 `cargo run -p giochi-editor --example editor_project_demo`, which prints `project=ok`.
+
+---
+
+## ADR-066 — A gizmo drag recovers the target transform every frame from the state it started in
+
+**Context.** Phase 35a adds translate and rotate handles. The obvious implementation applies
+each frame's pointer delta to the node's current transform: simple, and wrong in three ways.
+The error accumulates, so a slow drag and a fast one end somewhere different; a drag that
+crosses the axis and comes back does not return to where it started; and phase 37 has to undo
+one *drag*, which needs the transform from before the drag — recoverable from per-frame deltas
+only by replaying them.
+
+**Decision.**
+
+- `Drag` stores the node, the handle, the **start** `NodeTransform`, the frozen
+  `GizmoGeometry`, the parent's `ParentSpace`, and a `DragKind` holding the grab parameter
+  (the axis parameter or the ring angle at the press).
+- Every frame `Drag::transform_for(ray)` recomputes the transform **from `start`**: the
+  distance travelled along the axis, or the angle swept on the ring. Nothing accumulates, so
+  a drag out and back lands exactly on the original value, and the value does not depend on
+  the frame rate.
+- Rotation unwraps: `unwrap(raw, previous)` picks the 2π branch nearest the last angle, so
+  crossing ±π does not spin the object by 360°.
+- The geometry is **frozen** at press time. If the handles were recomputed per frame they
+  would follow the node, and the arrow would crawl away from under the pointer.
+- A drag applies the offset in the **parent's** space when the node has a parent, so a child
+  of a rotated object moves along the arrow the user sees, not along its own local axes.
+- One drag commits **one** modification: `dirty` is set and the status line is written when
+  the button is released, not on every frame. The `start` transform is what phase 37's
+  `CommandStack` will push, which is why it is kept in the `Drag`.
+- While a drag is alive the pointer never selects: the press that grabbed the arrow would
+  otherwise also pick the node behind it.
+- Pointer position and release are read from SDL even when the pointer has left the viewport
+  rectangle, so dragging past the edge keeps working instead of sticking. Only the *start* of
+  a gesture requires the pointer to be inside.
+
+**Consequences.** Phase 35b's scale gizmo is the same shape with one more `DragKind`, and
+phase 37 gets its undo unit for free. The cost is one `NodeTransform` copy per drag and a
+`transform_for` call per frame — nothing measurable next to the per-frame wireframe pass.
+Verified by the `giochi-editor` unit tests (axis parameter recovery, parent space with a
+rotated parent, wrapping near ±π, a release ending the drag) and by the pixel test
+`the_gizmo_reaches_the_framebuffer`, which asserts the handles actually reach the canvas.

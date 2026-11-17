@@ -179,13 +179,17 @@ pub fn run(options: EditorOptions) -> Result<EditorRunStats, GiochiError> {
         // frame's layout produced. egui then paints the panels around it, so a line
         // projected a pixel or two outside the viewport cannot land on a panel.
         if let Some(previous_rect) = state.viewport_rect {
-            editor::viewport::draw(
+            editor::viewport::draw_with_gizmo(
                 engine.render_mut(),
                 previous_rect,
                 state.scene.as_ref(),
                 &state.viewport_camera,
                 &state.selected,
                 &theme,
+                editor::viewport::GizmoView {
+                    mode: state.mode,
+                    active: state.drag.as_ref().map(|drag| drag.handle),
+                },
             );
         }
 
@@ -219,7 +223,8 @@ pub fn run(options: EditorOptions) -> Result<EditorRunStats, GiochiError> {
                     .apply_to_camera(&mut state.viewport_camera, rect.height());
             }
 
-            apply_viewport_pick(&mut state, &metrics.input, rect);
+            let camera = state.viewport_camera;
+            apply_viewport_interaction(&mut state, &metrics.input, rect, &camera);
         }
         engine.render_mut().present();
 
@@ -299,6 +304,120 @@ fn apply_asset_drop(
     true
 }
 
+/// Applies a frame of viewport interaction: finish a drag, continue one, start one, or
+/// fall back to selection.
+///
+/// The order is what makes dragging feel right: while a drag is alive the pointer never
+/// selects anything, because the same press that grabbed the arrow would otherwise also
+/// pick whatever node is behind it.
+fn apply_viewport_interaction(
+    state: &mut editor::EditorState,
+    input: &editor::ViewportInput,
+    rect: egui::Rect,
+    camera: &editor::OrbitCamera,
+) {
+    // 1. A drag in progress: follow the pointer; on release, end it.
+    if let Some(mut drag) = state.drag.take() {
+        if input.released {
+            if let Some(scene) = state.scene.as_mut() {
+                if let Some(node) = scene.node(drag.node).cloned() {
+                    if node.transform != drag.start {
+                        // One drag, one modification: the dirty flag is set here, not per
+                        // frame, and phase 37 will push exactly this before/after pair.
+                        state.mark_dirty();
+                        state.status = editor::Status::info(drag.description());
+                    }
+                }
+            }
+            return;
+        }
+
+        if let Some(position) = input.pointer {
+            if let Some(ray) = gizmos::picker::ray_through(position, rect, camera) {
+                drag.advance(ray);
+                let transform = drag.transform_for(ray);
+                if let Some(scene) = state.scene.as_mut() {
+                    if let Some(node) = scene.node_mut(drag.node) {
+                        node.transform = transform;
+                    }
+                }
+            }
+        }
+        state.drag = Some(drag);
+        return;
+    }
+
+    // 2. A press on a handle starts a drag, in preference to selecting a node.
+    if let Some(position) = input.pressed.or(input.double_click) {
+        if let Some(started) = begin_gizmo_drag(state, position, rect, camera) {
+            state.drag = Some(started);
+            return;
+        }
+    }
+
+    apply_viewport_pick(state, input, rect);
+}
+
+/// Starts a gizmo drag if the press landed on a handle.
+fn begin_gizmo_drag(
+    state: &mut editor::EditorState,
+    position: egui::Pos2,
+    rect: egui::Rect,
+    camera: &editor::OrbitCamera,
+) -> Option<gizmos::Drag> {
+    use giochi_engine_3d::scene::SceneNodeId;
+
+    if state.mode == editor::EditorMode::Select {
+        return None;
+    }
+    let node = state.gizmo_target().cloned()?;
+    let scene = state.scene.as_ref()?;
+    let ray = gizmos::picker::ray_through(position, rect, camera)?;
+
+    let world = editor::viewport::world_transform(scene, &node);
+    let center = glam::Vec3::new(world.position[0], world.position[1], world.position[2]);
+    let geometry = gizmos::GizmoGeometry::for_camera(center, camera, rect);
+
+    let parent = parent_space(scene, &node);
+    let id: SceneNodeId = node.id;
+
+    match state.mode {
+        editor::EditorMode::Translate => {
+            let handle = gizmos::translate::pick(ray, geometry, gizmos::AXIS_TOLERANCE_POINTS)?;
+            gizmos::translate::begin(id, node.transform, handle, ray, geometry, parent)
+        }
+        editor::EditorMode::Rotate => {
+            let handle = gizmos::rotate::pick(
+                ray,
+                geometry,
+                gizmos::RING_POINTS,
+                gizmos::AXIS_TOLERANCE_POINTS,
+                camera,
+            )?;
+            gizmos::rotate::begin(id, node.transform, handle, ray, geometry, parent)
+        }
+        editor::EditorMode::Select | editor::EditorMode::Scale => None,
+    }
+}
+
+/// The parent's world rotation and scale, for a node's local transform.
+fn parent_space(
+    scene: &giochi_engine_3d::scene::Scene,
+    node: &giochi_engine_3d::scene::SceneNode,
+) -> gizmos::ParentSpace {
+    let Some(parent_id) = node.parent else {
+        return gizmos::ParentSpace::default();
+    };
+    let Some(parent) = scene.node(parent_id) else {
+        return gizmos::ParentSpace::default();
+    };
+    let world = editor::viewport::world_transform(scene, parent);
+    gizmos::ParentSpace {
+        rotation: glam::Quat::from_array(world.rotation),
+        scale: glam::Vec3::new(world.scale[0], world.scale[1], world.scale[2]),
+    }
+}
+
 /// Applies a click or double-click in the viewport to the selection.
 ///
 /// Split out of the loop so the wiring is testable without SDL events: the picker and the
@@ -363,10 +482,28 @@ fn handle_shortcuts(ctx: &egui::Context, state: &mut editor::EditorState, wants_
         new = input.consume_key(modifiers, egui::Key::N);
         import = input.consume_key(modifiers, egui::Key::I);
     });
+    // Bare letters, no modifiers: the tool keys are the only unmodified shortcuts, so
+    // there is no ambiguity with the Ctrl combinations above.
+    let mut tool = None;
+    ctx.input_mut(|input| {
+        for (key, mode) in [
+            (egui::Key::Q, editor::EditorMode::Select),
+            (egui::Key::W, editor::EditorMode::Translate),
+            (egui::Key::E, editor::EditorMode::Rotate),
+            (egui::Key::R, editor::EditorMode::Scale),
+        ] {
+            if input.consume_key(egui::Modifiers::NONE, key) {
+                tool = Some(mode);
+            }
+        }
+    });
+
     if save_as {
         state.save_dialog();
     } else if save {
         state.save_or_ask();
+    } else if let Some(mode) = tool {
+        state.set_mode(mode);
     } else if import {
         state.import_dialog();
     } else if open {
@@ -447,6 +584,121 @@ mod tests {
             "framing pulls the camera in, got {}",
             state.viewport_camera.distance
         );
+    }
+
+    /// The screen position of the tip of a translate arrow, which is guaranteed to be on
+    /// the handle: the geometry puts the tip exactly `length` from the centre.
+    fn arrow_tip(state: &editor::EditorState, handle: gizmos::GizmoHandle) -> egui::Pos2 {
+        let rect = test_rect();
+        let scene = state.scene.as_ref().expect("scene");
+        let node = scene.node(state.primary().expect("node")).expect("node");
+        let world = editor::viewport::world_transform(scene, node);
+        let center = glam::Vec3::new(world.position[0], world.position[1], world.position[2]);
+        let geometry = gizmos::GizmoGeometry::for_camera(center, &state.viewport_camera, rect);
+        let view = glam::Mat4::from_cols_array(
+            &state
+                .viewport_camera
+                .view_projection(rect.width() / rect.height()),
+        );
+        let axis = handle.axis().expect("a direction handle");
+        editor::viewport::project_point(geometry.tip(axis), &view, rect).expect("on screen")
+    }
+
+    fn press(position: egui::Pos2) -> editor::ViewportInput {
+        editor::ViewportInput {
+            hovered: true,
+            pointer: Some(position),
+            pressed: Some(position),
+            ..editor::ViewportInput::default()
+        }
+    }
+
+    #[test]
+    fn dragging_a_move_arrow_moves_the_node_by_the_dragged_distance() {
+        let mut state = state_with_default_scene();
+        state.set_mode(editor::EditorMode::Translate);
+        let rect = test_rect();
+        let camera = state.viewport_camera;
+        let start = state
+            .scene
+            .as_ref()
+            .expect("scene")
+            .node(editor::EntityId(1))
+            .expect("cube")
+            .transform
+            .position;
+
+        let grab = arrow_tip(&state, gizmos::GizmoHandle::X);
+        apply_viewport_interaction(&mut state, &press(grab), rect, &camera);
+        assert!(state.drag.is_some(), "the press grabbed the X arrow");
+
+        // Drag along the arrow's screen direction; the node must follow the axis only.
+        let moved = grab + egui::vec2(60.0, 0.0);
+        let input = editor::ViewportInput {
+            hovered: true,
+            pointer: Some(moved),
+            ..editor::ViewportInput::default()
+        };
+        apply_viewport_interaction(&mut state, &input, rect, &camera);
+
+        let after = state
+            .scene
+            .as_ref()
+            .expect("scene")
+            .node(editor::EntityId(1))
+            .expect("cube")
+            .transform
+            .position;
+        assert!(after[0] > start[0] + 0.5, "{start:?} -> {after:?}");
+        assert!(
+            (after[1] - start[1]).abs() < 1e-4,
+            "no vertical drift: {after:?}"
+        );
+        assert!(
+            (after[2] - start[2]).abs() < 1e-4,
+            "no depth drift: {after:?}"
+        );
+        assert!(
+            !state.dirty,
+            "a drag in progress is not a committed edit yet"
+        );
+
+        let release = editor::ViewportInput {
+            hovered: true,
+            pointer: Some(moved),
+            released: true,
+            ..editor::ViewportInput::default()
+        };
+        apply_viewport_interaction(&mut state, &release, rect, &camera);
+        assert!(state.drag.is_none(), "release ends the drag");
+        assert!(state.dirty, "and that commits it");
+        assert!(state.status.text.contains("X"), "{}", state.status.text);
+    }
+
+    #[test]
+    fn a_press_off_the_handles_falls_back_to_selection() {
+        let mut state = state_with_default_scene();
+        state.set_mode(editor::EditorMode::Translate);
+        let rect = test_rect();
+        let camera = state.viewport_camera;
+        // The cube's centre projects to the middle of the viewport, where the centre square
+        // lives; aim at the bottom-left corner, far from every handle.
+        let empty = egui::pos2(30.0, 560.0);
+        let before = state.selected.clone();
+        apply_viewport_interaction(&mut state, &press(empty), rect, &camera);
+        assert!(state.drag.is_none(), "nothing was grabbed");
+        assert_eq!(state.selected, before, "selecting is a click, not a press");
+    }
+
+    #[test]
+    fn the_select_tool_ignores_the_handles() {
+        let mut state = state_with_default_scene();
+        let rect = test_rect();
+        let camera = state.viewport_camera;
+        let grab = arrow_tip(&state, gizmos::GizmoHandle::X);
+        apply_viewport_interaction(&mut state, &press(grab), rect, &camera);
+        assert!(state.drag.is_none(), "no handles are drawn in select mode");
+        assert_eq!(state.primary(), Some(editor::EntityId(1)));
     }
 
     fn model_drag(name: &str, relative: &str) -> panels::asset_browser::AssetDrag {

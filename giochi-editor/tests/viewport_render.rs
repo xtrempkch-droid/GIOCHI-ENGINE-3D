@@ -48,6 +48,7 @@ fn the_viewport_paints_a_frame() {
     the_selection_changes_pixels();
     an_empty_viewport_is_only_the_clear_colour();
     the_layout_and_the_viewport_together_paint_a_frame();
+    the_gizmo_reaches_the_framebuffer();
 }
 
 fn grid_axes_and_boxes() {
@@ -235,6 +236,75 @@ fn an_empty_viewport_is_only_the_clear_colour() {
     assert_eq!(pixel_at(width, &pixels, 12, 12), viewport_color);
     let centre = pixel_at(width, &pixels, 160, 120);
     assert_ne!(centre, viewport_color, "the centre must have the grid/axes");
+}
+
+fn the_gizmo_reaches_the_framebuffer() {
+    // Phase 35a: the handles are drawn by the viewport before egui, so this is the only
+    // check that they actually reach the canvas rather than only existing in a struct.
+    let mut engine = engine(640, 480);
+    let theme = EditorTheme::dark();
+    let rect = Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(640.0, 480.0));
+    let camera = OrbitCamera::default();
+    let scene = scene();
+    let selected = [giochi_engine_3d::scene::SceneNodeId(1)];
+
+    engine.render_mut().clear(theme.viewport_color());
+    viewport::draw(
+        engine.render_mut(),
+        rect,
+        Some(&scene),
+        &camera,
+        &selected,
+        &theme,
+    );
+    let (width, _, without) = engine.render().read_pixels_rgba().expect("read");
+
+    engine.render_mut().clear(theme.viewport_color());
+    viewport::draw_with_gizmo(
+        engine.render_mut(),
+        rect,
+        Some(&scene),
+        &camera,
+        &selected,
+        &theme,
+        viewport::GizmoView {
+            mode: giochi_editor::editor::EditorMode::Translate,
+            active: Some(giochi_editor::gizmos::GizmoHandle::X),
+        },
+    );
+    let (_, _, with) = engine.render().read_pixels_rgba().expect("read");
+
+    // The three arrows are red, green and blue; the active one turns yellow, so the frame
+    // must gain yellow pixels that were not there before.
+    let mut yellowish = 0;
+    for y in 0..480u32 {
+        for x in 0..width {
+            let (r, g, b) = pixel_at(width, &with, x, y);
+            let (pr, pg, pb) = pixel_at(width, &without, x, y);
+            if (r, g, b) != (pr, pg, pb) && r > 200 && g > 170 && b < 120 {
+                yellowish += 1;
+            }
+        }
+    }
+    assert!(
+        yellowish > 20,
+        "the active X arrow should be drawn in yellow, {yellowish} pixels differ"
+    );
+
+    // And the other two arrows are still there, so a drag cannot be started on nothing.
+    let mut coloured = 0;
+    for y in 0..480u32 {
+        for x in 0..width {
+            let (r, g, b) = pixel_at(width, &with, x, y);
+            let dominant = (r as u16) > (g as u16) + 60
+                || (g as u16) > (r as u16) + 60
+                || (b as u16) > (r as u16) + 60;
+            if dominant {
+                coloured += 1;
+            }
+        }
+    }
+    assert!(coloured > 100, "{coloured} coloured gizmo pixels");
 }
 
 fn the_layout_and_the_viewport_together_paint_a_frame() {

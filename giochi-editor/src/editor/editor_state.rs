@@ -70,9 +70,8 @@ impl Status {
 
 /// What dragging in the viewport does.
 ///
-/// The toolbar and the `Q`/`W`/`E`/`R` shortcuts arrive with the gizmos (phases 35a and
-/// 35b); phase 31 only carries the value so the rest of the editor can be written
-/// against it.
+/// `Q`/`W`/`E` arm select, translate and rotate — the same keys as every 3D package, so
+/// muscle memory carries over. `R` arms scale in phase 35b.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EditorMode {
     /// Click selects, nothing is dragged.
@@ -94,6 +93,17 @@ impl EditorMode {
             Self::Translate => "translate",
             Self::Rotate => "rotate",
             Self::Scale => "scale",
+        }
+    }
+
+    /// The tool bound to a key, if any.
+    pub const fn from_key(key: char) -> Option<Self> {
+        match key {
+            'q' | 'Q' => Some(Self::Select),
+            'w' | 'W' => Some(Self::Translate),
+            'e' | 'E' => Some(Self::Rotate),
+            'r' | 'R' => Some(Self::Scale),
+            _ => None,
         }
     }
 }
@@ -154,6 +164,8 @@ pub struct EditorState {
     /// frame's worth of rectangle is kept between frames. `None` on the first frame of a
     /// session.
     pub viewport_rect: Option<egui::Rect>,
+    /// The gizmo drag in progress, if any. One drag is one undo step (phase 37).
+    pub drag: Option<crate::gizmos::Drag>,
     /// The last thing the editor did, shown in the menu bar.
     pub status: Status,
     /// The file dialog, while one is open.
@@ -184,6 +196,7 @@ impl EditorState {
             panels: PanelVisibility::default(),
             viewport_camera: OrbitCamera::default(),
             viewport_rect: None,
+            drag: None,
             status: Status::default(),
             dialog: None,
             project: None,
@@ -414,6 +427,25 @@ impl EditorState {
             Ok(()) => {}
             Err(_) => self.save_dialog(),
         }
+    }
+
+    /// Arms `mode`, cancelling a drag that belonged to the old one.
+    pub fn set_mode(&mut self, mode: EditorMode) {
+        if self.mode != mode {
+            self.drag = None;
+            self.mode = mode;
+            self.status = Status::info(format!("{} tool", mode.name()));
+        }
+    }
+
+    /// The node a gizmo should attach to: the primary selection, if exactly one object is
+    /// selected and it exists in the scene.
+    pub fn gizmo_target(&self) -> Option<&giochi_engine_3d::scene::SceneNode> {
+        if self.selected.len() != 1 {
+            return None;
+        }
+        let id = self.primary()?;
+        self.scene.as_ref()?.node(id)
     }
 
     /// Records an outcome and logs it at the matching level.
