@@ -20,7 +20,7 @@ o verificador sem janela:
 
 ```bash
 SDL_VIDEODRIVER=dummy cargo run -p giochi-editor -- --frames 3
-# INFO giochi_editor: giochi-editor v0.1.0
+# INFO giochi_editor: giochi-editor v0.5.1
 # INFO giochi_editor: giochi-editor: 3 frame(s) rendered
 ```
 
@@ -261,11 +261,12 @@ Notas:
 - a rotação é editada em graus e convertida para quatérnio ao gravar; os valores são
   normalizados, por isso uma rotação equivalente pode aparecer noutros ângulos depois de
   reabrir;
-- `specular`/`shininess` são os campos que o renderer GLES 2.0 consome. `roughness` e
-  `emissive` pertencem à Production Pack ainda pendente, e não há slider para um campo que
-  não faria nada no ecrã;
-- o **undo não existe** até à Fase 37: uma alteração é definitiva, e é por isso que o aviso
-  de alterações por gravar já existe desde a Fase 31;
+- `specular`/`shininess` e `roughness`/`metallic`/`emissive` estão **ambos** lá: o shader
+  consome os primeiros, e o `MaterialDesc::to_material` deriva a rugosidade dos segundos com
+  `ROUGHNESS_FROM_SHININESS` quando só há `shininess` (ADR-074). Uma cena antiga continua a
+  abrir com o mesmo aspeto;
+- o **undo** existe desde a Fase 37 (ADR-069) para tudo o que o inspector edita, incluindo um
+  arrasto de slider — que conta como um passo, não como sessenta;
 - com vários objetos selecionados o inspector diz "N objects selected" e edita o
   **primário** (o primeiro clicado).
 
@@ -307,12 +308,16 @@ Recusar esconderia os assets que estão bem.
 | `Refresh` | relê a pasta (a listagem é uma fotografia, não um `read_dir` por frame) |
 | `Import Asset…` (`Ctrl+I`) | copia um ficheiro para `assets/<tipo>/`, com `nome-1.ext` se o nome já existir |
 | clique numa linha | mostra o preview (imagem real para texturas, cubo wireframe para modelos, nº de objetos para cenas) |
-| arrastar para o viewport | um `.obj` instancia um nó no chão sob o cursor |
+| arrastar para o viewport | um `.obj`, `.gltf` ou `.glb` instancia um nó no chão sob o cursor |
 
-**Só `.obj` instancia.** Um `.gltf`/`.glb` aparece na lista marcado `(no loader)` e, ao ser
-arrastado, diz que o loader glTF pertence à Production Pack ainda pendente e que `.obj` é o
-que funciona. Esconder o ficheiro pareceria uma importação falhada; não fazer nada seria
-pior do que dizer porquê.
+`.obj` e `.gltf`/`.glb` **instanciam ambos** desde que o loader glTF entrou (Fase 26.6). A
+diferença fica no ficheiro da cena: o `.obj` grava-se como `"mesh": { "obj": … }` e o glTF como
+`"mesh": { "gltf": … }`, porque um glTF traz várias primitivas com materiais próprios e um
+leitor que só conheça OBJ tem de conseguir distingui-los.
+
+Um `.gltf`/`.glb` continua a ser **reconhecido e não apagado** se o loader não conseguir lê-lo
+(ficheiro comprimido com Draco, por exemplo): o drop falha com a razão na barra de estado, em
+vez de deixar um objeto invisível na cena.
 
 Arrastar uma **textura** para o viewport **não** faz nada útil: o destino é o slot
 `Material > texture` do inspector, que aceita o drop e escreve o caminho relativo ao
@@ -373,9 +378,9 @@ Porque é que não há movimento: o preview desenha a cena como ela está. Físi
 movimento pertencem ao jogo (Fases 41–45), que usa a mesma conversão (`PlayPlan`). O editor
 não ganhou um runtime de jogo nesta fase.
 
-Nós que não podem ser desenhados — um `.gltf`, que não tem loader (ADR-063), ou um `.obj` que
-já não está no disco — aparecem contados na barra de estado (`1 mesh(es), 3 instance(s), 1
-unsupported`), em vez de deixarem um buraco silencioso na cena.
+Nós que não podem ser desenhados — um modelo cujo ficheiro já não está no disco, ou um `.gltf`
+que o loader recusa (Draco/meshopt) — aparecem contados na barra de estado
+(`1 mesh(es), 3 instance(s), 1 unsupported`), em vez de deixarem um buraco silencioso na cena.
 
 Em KMSDRM (GIOCHI-OS) o SDL só consegue abrir uma janela: o preview falha e a barra de estado
 diz porquê. Nesse caso a alternativa é abrir a cena no jogo (`giochi-racer`, Fases 41–45).
@@ -463,17 +468,18 @@ de um painel.
 
 ---
 
-## 6. Pendências conhecidas (fim da Fase 34)
+## 6. Limites conhecidos (fim da Fase 40)
 
-| Pendência | Fase |
+As fases 30–40 estão entregues; o que fica abaixo é **decisão**, não trabalho por fazer.
+
+| Limite | Porquê |
 |---|---|
-| Gizmos translate/rotate/scale | 35a/35b |
-| Criar/apagar/duplicar/reparentar | 36 |
-| Undo/redo global | 37 |
-| Projetos, `recent.toml`, autosave, aviso ao fechar, metadados do editor no save | 38 |
-| Play-in-editor | 39 |
-| Preferências, About, atalhos no menu | 40 |
-| Sombreado no viewport (FBO/GLES) | fora de âmbito — ADR-064 |
+| O viewport é wireframe, não sombreado | um FBO/GLES no viewport foi recusado em ADR-064: o editor desenha a geometria projetada, e o aspeto final vê-se no play preview ou no jogo |
+| O play preview desenha a cena como ela está | física e gameplay são do jogo (Fases 41–45); o `PlayPlan` é dados puros para o jogo o reutilizar (ADR-071) |
+| O gizmo só aparece com **um** objeto selecionado | com vários, "rodar em torno de quê" é uma pergunta sem resposta óbvia — está em `IDEAS.md` |
+| Um passo de undo por gesto, não por pixel | é o que torna `Ctrl+Z` utilizável (ADR-069) |
+| O texto é desenhado a `pixels_per_point = 1.0` | legível nos ecrãs do alvo; HiDPI fica em `IDEAS.md` |
+| As texturas de um glTF não são lidas | só os factores de material (ADR-073) |
 
 ---
 
@@ -488,4 +494,4 @@ de um painel.
 | "unsaved changes — Save before replacing the scene" | há alterações por gravar | `Ctrl+S`, depois abrir/criar |
 | a cena abre mas o viewport está vazio | a câmara aponta para o lado oposto | `View > Frame Scene` |
 | "open a project before importing assets" | importar sem projeto | `File > New Project…` primeiro |
-| um `.gltf` não instancia | loader glTF pendente (Production Pack) | usar `.obj` |
+| um `.gltf` não instancia | o ficheiro não está no disco, ou está comprimido (Draco/meshopt) | ver a razão na barra de estado; exportar sem compressão |

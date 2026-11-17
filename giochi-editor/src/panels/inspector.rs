@@ -15,12 +15,10 @@
 //!
 //! # What is not here
 //!
-//! - **Undo**: phase 37. Until then an edit is immediate and final, which is why the
-//!   dirty flag exists from phase 31.
-//! - **PBR fields** (`emissive`, `roughness`): the scene format has `specular` and
-//!   `shininess`, which is what the GLES 2.0 renderer actually consumes. A `roughness`
-//!   slider that changed nothing on screen would be worse than its absence; the PBR-lite
-//!   material is part of the Production Pack still pending (ADR-063).
+//! - **Undo**: landed in phase 37 (ADR-069). An inspector edit is one command, and a
+//!   slider drag coalesces into a single step instead of sixty.
+//! - **Per-texture maps**: a glTF's base-colour/normal/roughness maps are not read, only its
+//!   factors and one `texture` path (ADR-073).
 
 use giochi_engine_3d::scene::{
     CameraDesc, LightDesc, MaterialDesc, MeshSource, NodeTransform, Primitive, SceneNode,

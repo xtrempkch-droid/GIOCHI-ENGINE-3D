@@ -45,7 +45,7 @@
 //! undo an operation on the wrong node after a delete.
 //!
 //! [`SCENE_FORMAT_VERSION`] is the file's version. [`Scene::from_json`] refuses a newer
-//! file than it understands instead of guessing, and [`migrate`] holds the per-version
+//! file than it understands instead of guessing, and `migrate` holds the per-version
 //! steps (none yet — version 1 is the first).
 
 use std::fmt;

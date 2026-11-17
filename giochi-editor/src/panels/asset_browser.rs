@@ -4,16 +4,14 @@
 //!
 //! | Dropped on | Payload | Effect |
 //! |---|---|---|
-//! | viewport | `.obj` model | adds a node at the ground point under the cursor |
+//! | viewport | `.obj`/`.gltf`/`.glb` model | adds a node at the ground point under the cursor |
 //! | inspector's material slot | texture | sets `MaterialDesc::texture` |
 //! | anywhere else | anything | nothing; the drag is cancelled |
 //!
 //! A `.gltf`/`.glb` is listed, draggable and instantiable since phase 26.6 added the glTF
-//! loader; before that a drop reported in the status bar
-//! that its loader belongs to the pending Production Pack and that `.obj` is what works.
-//! That is the honest version of "drag a glTF to the viewport instantiates it" in a
-//! repository whose 3D crate has no glTF loader (ADR-063): the alternative is a drop that
-//! silently does nothing.
+//! loader (ADR-073). A glTF the loader refuses — Draco or meshopt compression — is reported
+//! in the status bar with the reason, because a drop that silently does nothing is worse
+//! than one that says why.
 //!
 //! # The listing is a snapshot
 //!

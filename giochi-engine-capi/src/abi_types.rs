@@ -39,7 +39,12 @@ const _: () = assert!(ENGINE_TITLE_CAPACITY == 64);
 ///   again. The console and hot-reload entry points exist in every build and report
 ///   `GIOCHI_ERROR_UNSUPPORTED` when the corresponding feature is off, because a header
 ///   that changes with the feature set is not a contract.
-pub const GIOCHI_ABI_VERSION: u32 = 6;
+/// * `7` — the audio buses (`giochi_audio_set_bus_volume`, `giochi_audio_bus_volume`).
+///   Additive in the strictest sense: two new symbols in part I's audio section, no
+///   header declaration touched. It still bumps, because a version 6 consumer built
+///   against this header would fail to link against a version 6 library, and "accept
+///   the version you were built for" is the whole promise.
+pub const GIOCHI_ABI_VERSION: u32 = 7;
 
 /// Largest asset the loader accepts, in bytes (64 MiB).
 pub const GIOCHI_MAX_ASSET_SIZE: usize = 64 * 1024 * 1024;

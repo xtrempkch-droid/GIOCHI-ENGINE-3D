@@ -1,7 +1,9 @@
 # GIOCHI-ENGINE — C ABI Contract
 
 **Contract version: `GIOCHI_ABI_VERSION 1` for part I (2D), `2` for part II (3D), `3` for
-part III (frame statistics), `4` for part IV (networking).**
+part III (frame statistics), `4` for part IV (networking), `5` for part V (2D physics),
+`6` for parts VI–IX (particles, animation, console, hot reload), `7` for the audio buses
+(additive inside part I). Current value: **`7`**.
 **Engine version: `0.5.1`**
 **Status: authoritative.** This document is the law of the project. If a Rust type
 cannot be expressed in the C form below, the *type* is redesigned — the contract
@@ -9,11 +11,15 @@ is never relaxed.
 
 Part I (§1–§7) is implemented and exported. Part II (§8–§12) specifies 3D and was
 written before the code on purpose; it shipped in phase 14 and bumped
-`GIOCHI_ABI_VERSION` to 2. Part III (§13) adds frame statistics in phase 18 and bumps it
-to 3. Part IV (§16–§19) adds networking and bumps it to 4. **Every part is additive: no
-signature from an earlier part has ever changed, and a consumer written against version
-1, 2 or 3 keeps working against version 4 unchanged.** That is why this contract tells
-consumers to test `giochi_abi_version() >= 1` rather than equality.
+`GIOCHI_ABI_VERSION` to 2. Part III (§13) adds frame statistics in phase 18 and bumped it
+to 3. Part IV (§§16–§19, `giochi_net_*`) adds networking and bumped it to 4. Part V (§20)
+adds 2D physics and bumped it to 5. Parts VI–IX (§21–§24) add particles, animation, the
+console and hot reload, and bumped it to 6. Version 7 is the one exception to the "a new
+part bumps the number" shape: it adds two *symbols* to part I's audio section (§5.6) and
+nothing else. **Every step has been additive: no signature from an earlier part has ever
+changed, and a consumer written against version 1 keeps working against version 7
+unchanged.** That is why this contract tells consumers to test
+`giochi_abi_version() >= 1` rather than equality.
 
 The header `giochi-engine-capi/include/giochi.h` is generated from the Rust crate
 by `cbindgen` and must match this document exactly; `scripts/gen-header.sh --check`
@@ -375,7 +381,7 @@ of `PROGRESS.md` that implemented it, kept as history; all of them are implement
 
 ```c
 /* Always available, safe to call before giochi_engine_init. */
-uint32_t    giochi_abi_version(void);      /* == GIOCHI_ABI_VERSION (4 now) */
+uint32_t    giochi_abi_version(void);      /* == GIOCHI_ABI_VERSION (7 now) */
 uint32_t    giochi_engine_version(void);   /* major<<16|minor<<8|patch */
 const char* giochi_get_last_error(void);   /* thread-local, never NULL */
 
@@ -547,8 +553,8 @@ int32_t     giochi_sound_play(GiochiSound sound, int32_t loops); /* phase 4 */
 void        giochi_audio_set_volume(int32_t volume);             /* phase 4, 0..=128 */
 int32_t     giochi_audio_volume(void);                           /* phase 4 */
 
-void        giochi_audio_set_bus_volume(int32_t bus, int32_t v); /* phase 26.7, 0..=128 */
-int32_t     giochi_audio_bus_volume(int32_t bus);                /* phase 26.7 */
+void        giochi_audio_set_bus_volume(int32_t bus, int32_t v); /* ABI 7, phase 26.7, 0..=128 */
+int32_t     giochi_audio_bus_volume(int32_t bus);                /* ABI 7, phase 26.7 */
 
 int32_t     giochi_audio_available(void);                        /* phase 4 */
 
@@ -1206,7 +1212,7 @@ while (rodando) {
 
 | Requisito | Como é verificado |
 |---|---|
-| `GIOCHI_ABI_VERSION >= 4` (it is 6 today) | `lib.rs::abi_version_matches_contract` |
+| `GIOCHI_ABI_VERSION >= 4` (it is 7 today) | `lib.rs::abi_version_matches_contract` |
 | `GiochiNetInimigo` = 16 bytes, `GiochiNetSnapshot` = 1040, `GiochiNetInput` = 32, `GiochiNetGlobal` = 1216 | `net.rs::tamanho_das_structs_e_estavel` |
 | Handle `0` nunca é válido | `net.rs::handle_zero_nunca_e_valido` |
 | `NULL` é recusado sem escrever | `net.rs::argumentos_null_sao_recusados` |
@@ -1292,7 +1298,7 @@ corre no máximo 4 e descarta o resto.
 
 | Requisito | Como é verificado |
 |---|---|
-| `GIOCHI_ABI_VERSION >= 5` (it is 6 today) | `lib.rs::abi_version_matches_contract` |
+| `GIOCHI_ABI_VERSION >= 5` (it is 7 today) | `lib.rs::abi_version_matches_contract` |
 | O header declara a parte V | `scripts/gen-header.sh --check` |
 | `NULL` é recusado sem crash | `c_smoke.c` (física, secção final) e `python_smoke.py` |
 | Um corpo dinâmico cai e assenta | `c_smoke.c` e `python_smoke.py` (posição final) |
@@ -1387,7 +1393,7 @@ mudanças pendentes e devolve quantas foram aplicadas: chame-o uma vez por frame
 
 | Requisito | Como é verificado |
 |---|---|
-| `GIOCHI_ABI_VERSION == 6` (current) | `lib.rs::abi_version_matches_contract` |
+| `GIOCHI_ABI_VERSION == 7` (current) | `lib.rs::abi_version_matches_contract` |
 | `giochi_particles_*` / `giochi_animator_*` existem e recusam handles inválidos | `c_smoke.c`, `python_smoke.py` |
 | `GiochiParticleConfig` é copiável e o default é válido | `giochi_particles_default_config` nos dois testes |
 | Consola e hot reload existem com e sem feature | `scripts/ffi-smoke.sh` corre os dois builds |

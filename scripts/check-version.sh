@@ -2,7 +2,8 @@
 # Verify that the version declared in Cargo.toml is echoed everywhere it is written
 # down. No argument: report and exit non-zero on any mismatch.
 #
-# A bump touches six places, and forgetting one produces a release whose artefacts
+# A bump touches every member and every file that restates the number, and forgetting one
+# produces a release whose artefacts
 # disagree about what they are -- a header claiming 0.1.0 while the library reports
 # 0.1.1, or a Lua binding whose `giochi.version` is a release behind. The Rust
 # constants are already tied to `CARGO_PKG_VERSION` by a unit test
@@ -51,7 +52,13 @@ expect() {
 # The member manifests pin the path dependency to the workspace version, so a
 # published crate cannot resolve to a version that was never released. A member may
 # either inherit (`version.workspace = true`) or restate the literal.
-for crate in giochi-engine giochi-engine-capi giochi-engine-lua giochi-demo giochi-engine-3d giochi-net; do
+# Every member of the workspace. `giochi-editor` was missing from this list and shipped
+# 0.1.0 for two releases while the engine it embeds said 0.5.1.
+members=(
+    giochi-engine giochi-engine-capi giochi-engine-lua giochi-demo
+    giochi-engine-3d giochi-net giochi-editor
+)
+for crate in "${members[@]}"; do
     file="$crate/Cargo.toml"
     if [[ ! -f "$file" ]]; then
         echo "  MISSING  $file" >&2
@@ -67,7 +74,9 @@ done
 
 # A `{ path = ... , version = "X" }` pin that lags the workspace publishes a crate
 # whose dependency can never be satisfied.
-for file in giochi-engine-capi/Cargo.toml giochi-engine-lua/Cargo.toml giochi-demo/Cargo.toml giochi-engine-3d/Cargo.toml; do
+for crate in "${members[@]}"; do
+    file="$crate/Cargo.toml"
+    [[ -f "$file" ]] || continue
     while IFS= read -r pinned; do
         if [[ "$pinned" != "$version" ]]; then
             echo "  STALE    $file pins a path dependency to $pinned" >&2

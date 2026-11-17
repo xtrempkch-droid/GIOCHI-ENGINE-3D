@@ -182,7 +182,7 @@ mod tests {
     fn abi_version_matches_contract() {
         // The number `docs/C_ABI_CONTRACT.md` names as the current part. Bump it with
         // the contract, never to make a test pass.
-        assert_eq!(GIOCHI_ABI_VERSION, 6);
+        assert_eq!(GIOCHI_ABI_VERSION, 7);
         assert_eq!(giochi_abi_version(), GIOCHI_ABI_VERSION);
     }
 

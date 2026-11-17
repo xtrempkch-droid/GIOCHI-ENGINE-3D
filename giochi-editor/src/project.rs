@@ -20,12 +20,12 @@
 //! [`AssetEntry`] therefore carries both the path on disk and the relative path that goes
 //! into the scene.
 //!
-//! # glTF is recognised but not loadable
+//! # glTF and OBJ are both first class
 //!
-//! The filter shows `.gltf`/`.glb` because they are what a project will contain, and
-//! because hiding them would make a user think the import failed. Dropping one reports,
-//! by name, that the loader belongs to the pending Production Pack (ADR-063) and that
-//! `.obj` is what works today. Silently doing nothing would be worse than either.
+//! The filter shows `.gltf`/`.glb` alongside `.obj`, and both instantiate: the engine grew a
+//! glTF/GLB loader (ADR-073), so `MeshSource` has three cases — a procedural primitive, an
+//! OBJ and a glTF — and the scene records which one an asset was. A glTF that the loader
+//! cannot read (Draco/meshopt compression) is refused by name rather than dropped in silence.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};

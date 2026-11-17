@@ -87,7 +87,7 @@ for example in cube_demo model_viewer mini_fps ball_balance; do
     fi
 done
 
-for doc in C_ABI_CONTRACT ARCHITECTURE KMSDRM CROSS_COMPILE API_GUIDE C_ABI LUA_BINDING REDE DECISIONS; do
+for doc in C_ABI_CONTRACT ARCHITECTURE KMSDRM CROSS_COMPILE API_GUIDE C_ABI LUA_BINDING REDE DECISIONS GAME_SYSTEMS; do
     check "docs/$doc.md" test -f "$work/docs/$doc.md"
 done
 

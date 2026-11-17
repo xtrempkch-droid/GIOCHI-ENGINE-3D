@@ -27,7 +27,13 @@ cd "$repo_root"
 
 out_root="${OUT:-$repo_root/dist}"
 target_triple="${TARGET:-x86_64-unknown-linux-gnu}"
-version="$(sed -n 's/^version = "\(.*\)"/\1/p' giochi-editor/Cargo.toml | head -1)"
+# The editor inherits the workspace version (`version.workspace = true`), so the
+# manifest only carries a literal when it stops inheriting. Read it from there
+# first and fall back to the workspace root, which is what inheritance means.
+version="$(sed -n 's/^version *= *"\(.*\)"$/\1/p' giochi-editor/Cargo.toml | head -1)"
+if [ -z "$version" ]; then
+    version="$(sed -n 's/^version *= *"\(.*\)"$/\1/p' Cargo.toml | head -1)"
+fi
 if [ -z "$version" ]; then
     echo "could not read the editor version from giochi-editor/Cargo.toml" >&2
     exit 1

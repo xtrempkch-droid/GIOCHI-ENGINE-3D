@@ -4,6 +4,68 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+O Salto B: o **editor visual** (fases 30–40) e a **Production Pack** de que as fases 41–45
+dependem. Aditivo por construção — nenhuma assinatura das fases 1–29 mudou, e é por isso que
+a ABI C avança só de 6 para 7.
+
+### Adicionado — `giochi-editor`, o editor visual (fases 30–40)
+
+- Crate novo, binário + biblioteca: menus, quatro painéis (hierarquia, inspector, viewport,
+  asset browser), câmara orbital, viewport desenhado como wireframe projetado, gizmos de
+  translação/rotação/escala, AABB tracejada, criar/apagar/duplicar/reparentar nós.
+- **Undo/redo por comandos** (ADR-069): cada gesto contínuo — arrastar um gizmo, mexer num
+  slider — entra na pilha como **um** passo, não sessenta.
+- Sessão: lista de recentes, autosave num `.autosave` separado, recuperação ao abrir e
+  pergunta ao sair com alterações por gravar (ADR-070).
+- **Play preview** numa segunda janela OpenGL, com a conversão cena→renderer a ser dados puros
+  (`PlayPlan`), para o jogo das fases 41–45 a poder reutilizar (ADR-071).
+- **Pacote standalone** (`scripts/package-editor.sh`): pasta com binário, ícones, README,
+  `VERSION` e `MANIFEST.txt`, com os assets procurados ao lado do binário (ADR-072).
+- Estrutural: o backend egui do motor passou a ser API de host pública
+  (`giochi_engine::ui::{EguiBackend, translate_event}`, ADR-062) e o `RenderContext` ganhou
+  `set_resizable` e `read_pixels_rgba`.
+
+### Adicionado — Production Pack (pré-requisito das fases 41+)
+
+- **glTF/GLB** (`giochi_engine_3d::mesh::load_gltf`, ADR-073): `.gltf` e `.glb`, buffers em
+  chunk GLB, `data:` URI e ficheiro ao lado; transformações dos nós assadas nos vértices;
+  um material por primitiva. O crate `gltf` entra **sem** a feature `import` (traz o `image`,
+  cujo MSRV é 1.88) e o `base64` vem com ele.
+- **Materiais PBR-lite** (ADR-074): `Material` com `emissive`, `metallic` e `roughness`, e
+  `shininess`/`roughness` a coexistirem com um factor de conversão documentado.
+- **Câmaras de jogo** (`giochi_engine_3d::camera`, ADR-076): perseguição com atraso
+  exponencial, shake determinístico e cutscenes com keyframes e easing.
+- **Pathfinding A\*** (`giochi_engine::nav`, ADR-075): grelha com recusa de corte de esquina,
+  desempate total e `smooth`.
+- **Slots de save** (`giochi_engine::save`, ADR-077): cabeçalho do motor + payload opaco,
+  gravação atómica, 8 slots por número.
+- **Buses de áudio** (`giochi_engine::audio::Bus`, ADR-079): master/SFX/música/UI como
+  multiplicador do master, aplicado ao canal já aberto.
+- **i18n** (`giochi_engine::i18n`, ADR-078): catálogos `key = value`, substituição de uma só
+  passagem, cadeia de fallback e deteção de placeholders divergentes entre línguas.
+
+### Adicionado — ABI C v7
+
+- `giochi_audio_set_bus_volume(int32_t bus, int32_t v)` e
+  `giochi_audio_bus_volume(int32_t bus)`, na secção 5.6 do contrato. Aditivo: nenhuma
+  declaração anterior mudou. Sobe para 7 porque um consumidor de v6 compilado contra este
+  header não liga contra uma biblioteca v6 — "aceita a versão para que foste compilado" é a
+  promessa inteira.
+- O preâmbulo do header gerado vive em `giochi-engine-capi/cbindgen.toml`; editá-lo no `.h` é
+  perdido na geração seguinte.
+
+### Corrigido — o editor reportava uma versão que não existe
+
+- `giochi-editor` declarava `version = "0.1.0"` em vez de herdar a do workspace, por isso
+  `giochi-editor --version`, a janela, o About e a pasta do pacote diziam `0.1.0` enquanto o
+  motor que ele embebe dizia `0.5.1`. Passa a `version.workspace = true`, com as dependências
+  de caminho presas à versão do workspace como nos outros seis crates.
+- `scripts/check-version.sh` não verificava o `giochi-editor` **nem** o `giochi-net`: a versão
+  do editor podia divergir sem nada falhar. A lista passou a ser a dos membros do workspace, e
+  `scripts/package-editor.sh` lê a versão herdada em vez de exigir um literal.
+
 ## [0.5.1] — 2026-11-15
 
 ### Corrigido — o snapshot descartava o sinal da posição e truncava `hp` (**protocolo v1 → v2**)

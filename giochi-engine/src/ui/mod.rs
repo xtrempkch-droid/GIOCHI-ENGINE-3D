@@ -5,7 +5,7 @@
 //! | Module | Knows about | Used by |
 //! |---|---|---|
 //! | [`widgets`] | nothing but the engine's math types | a game's menus |
-//! | [`theme`] | egui, for [`Theme::apply`] | the widget layer |
+//! | [`theme`] | egui, for the palette and text styles it applies to a context | the widget layer |
 //! | [`egui_integration`] | egui + `sdl2::render` | the engine, once per frame |
 //!
 //! A game calls [`widgets::Button`], [`widgets::Slider`] and friends, never an `egui` type.

@@ -3,7 +3,9 @@
 A tour of the Rust API in the order you will meet it. Everything here is
 `giochi_engine::*` unless stated otherwise. For the C projection of the same
 surface see [C_ABI_CONTRACT.md](C_ABI_CONTRACT.md); for the reasoning behind the
-boundaries see [ARCHITECTURE.md](ARCHITECTURE.md).
+boundaries see [ARCHITECTURE.md](ARCHITECTURE.md). The game-side systems added by
+the Production Pack — A* navigation, follow/shake/cutscene cameras, save slots,
+audio buses and i18n — have their own page: [GAME_SYSTEMS.md](GAME_SYSTEMS.md).
 
 ---
 

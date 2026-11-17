@@ -772,6 +772,15 @@ other the way they do: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | File | Contents |
 |---|---|
 | [docs/API_GUIDE.md](docs/API_GUIDE.md) | Task-oriented guide: scenes, rendering, input, audio, assets, errors |
+| [docs/3D.md](docs/3D.md) | The 3D crate: GLES context, models (OBJ/glTF), materials, lighting, physics, the scene format |
+| [docs/GAME_SYSTEMS.md](docs/GAME_SYSTEMS.md) | Nav/A\*, game cameras, save slots, audio buses, translations — what the races in phases 41–45 need |
+| [docs/EDITOR_USER_GUIDE.md](docs/EDITOR_USER_GUIDE.md) | The visual editor: panels, gizmos, shortcuts, play preview, packaging |
+| [docs/UI.md](docs/UI.md) | Widgets, layouts, themes (feature `devtools`) |
+| [docs/PHYSICS.md](docs/PHYSICS.md) | 2D and 3D physics on Rapier, two independent features |
+| [docs/ANIMATION.md](docs/ANIMATION.md) | Spritesheets, easing, tweens, an event-driven state machine |
+| [docs/PARTICLES.md](docs/PARTICLES.md) | Curves, 2D emitters, 3D billboards, the CPU budget |
+| [docs/DEVTOOLS.md](docs/DEVTOOLS.md) | In-game console, debug draw, the expanded overlay (feature `devtools`) |
+| [docs/HOT_RELOAD.md](docs/HOT_RELOAD.md) | What reloads, what does not, and why it happens on the main thread |
 | [docs/LUA_BINDING.md](docs/LUA_BINDING.md) | The `giochi` Lua module, capabilities, handles, the reference game |
 | [docs/C_ABI.md](docs/C_ABI.md) | Consuming the engine from C, Python, Go, Zig, C# (parts I–IV) |
 | [docs/REDE.md](docs/REDE.md) | Networking: protocol, interest management, measurements, what is missing |
@@ -781,6 +790,7 @@ other the way they do: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | [docs/KMSDRM.md](docs/KMSDRM.md) | Bare-console video: permissions, failures, runtime libs |
 | [docs/REQUISITOS-IMAGEM.md](docs/REQUISITOS-IMAGEM.md) | What the device image must provide, measured, and what it is missing |
 | [docs/CROSS_COMPILE.md](docs/CROSS_COMPILE.md) | ARM64 cross toolchain |
+| [docs/PERF_LOG.md](docs/PERF_LOG.md) | The measurements behind every optimization, with baselines |
 | [PROGRESS.md](PROGRESS.md) | Phase status and validated gates |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Workflow, gates, coding rules |

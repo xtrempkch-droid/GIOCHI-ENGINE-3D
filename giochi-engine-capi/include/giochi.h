@@ -1,5 +1,5 @@
 /*
- * GIOCHI-ENGINE C ABI, version 6.
+ * GIOCHI-ENGINE C ABI, version 7.
  *
  * Link against libgiochi.so (or libgiochi.a) and call giochi_engine_init() before
  * anything else. Every fallible function returns 0 on success and a negative code
@@ -30,6 +30,10 @@
  * (giochi_animator_*), the in-game console (giochi_console_*) and hot reload
  * (giochi_hot_reload_*), sections 21-24. Still additive, so accept
  * giochi_abi_version() >= the part you use, not == 6.
+ *
+ * Version 7 adds the audio buses: giochi_audio_set_bus_volume and
+ * giochi_audio_bus_volume, section 5.6. Two new symbols inside part I; nothing
+ * elsewhere in the header changed.
  *
  * giochi_console_* and giochi_hot_reload_* exist in every build. A library compiled
  * without the `devtools`/`hot_reload` feature returns GIOCHI_ERROR_UNSUPPORTED from them
@@ -80,7 +84,12 @@ typedef uint64_t GiochiGlTextureHandle; /* 0 invalid */
 //   again. The console and hot-reload entry points exist in every build and report
 //   `GIOCHI_ERROR_UNSUPPORTED` when the corresponding feature is off, because a header
 //   that changes with the feature set is not a contract.
-#define GIOCHI_ABI_VERSION 6
+// * `7` — the audio buses (`giochi_audio_set_bus_volume`, `giochi_audio_bus_volume`).
+//   Additive in the strictest sense: two new symbols in part I's audio section, no
+//   header declaration touched. It still bumps, because a version 6 consumer built
+//   against this header would fail to link against a version 6 library, and "accept
+//   the version you were built for" is the whole promise.
+#define GIOCHI_ABI_VERSION 7
 
 // Largest asset the loader accepts, in bytes (64 MiB).
 #define GIOCHI_MAX_ASSET_SIZE ((64 * 1024) * 1024)

@@ -6,13 +6,15 @@ para não serem perdidas nem implementadas por acidente (R6).
 ## Já pedidas por fases futuras
 
 - [ ] Skeletal 3D (Fase 27+)
-- [ ] Editor visual de cena (Fase 30+)
+- [x] ~~**Editor visual de cena**~~ — entregue (`giochi-editor`, fases 30–40)
 - [ ] Tilemap system (Fase 25+)
 - [ ] Post-processing (Fase 26+)
 - [ ] Networking / multiplayer (Fase 40+) — já existe `giochi-net`, falta integração de jogo
-- [ ] Pathfinding (A* + navmesh)
-- [ ] Audio mixer avançado (bus, efeitos)
-- [ ] Save/load padronizado
+- [x] ~~**Pathfinding**~~ — a grelha A* chegou em `giochi_engine::nav` (ADR-075); o
+      **navmesh** continua em aberto, e é o que a Fase 41+ deve pedir se a pista não for grelha
+- [x] ~~**Audio mixer avançado (bus)**~~ — `Bus` Master/Sfx/Music/Ui em `giochi_engine::audio`
+      (ADR-078); falta o que sobra: **efeitos** (filtros, reverb, ducking)
+- [x] ~~**Save/load padronizado**~~ — `giochi_engine::save::SaveSlots` (ADR-077)
 - [ ] Asset streaming / async loading
 - [ ] Suporte a Windows/Mac (fora do escopo atual ARM64 Linux)
 

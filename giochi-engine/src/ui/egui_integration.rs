@@ -9,7 +9,7 @@
 //! binary would carry two GL function tables. ADR-052 records the comparison.
 //!
 //! What is left is the part that actually differs between backends: turning egui's
-//! [`epaint::Mesh`] into triangles the renderer can submit. `sdl2::render`'s
+//! `epaint::Mesh` into triangles the renderer can submit. `sdl2::render`'s
 //! `render_geometry` is exactly that, and it is the same call the 2D batch already uses
 //! for its own geometry runs (`ADR-043`).
 //!

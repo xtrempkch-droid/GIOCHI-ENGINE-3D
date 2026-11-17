@@ -1,7 +1,10 @@
 [package]
 name = "giochi-editor"
 description = "Visual scene editor for GIOCHI-ENGINE (Salto B, phases 30-40)"
-version = "0.1.0"
+# The editor is part of the same release as the engine: one product, one version.
+# A separate 0.1.0 made `giochi-editor --version` disagree with the engine it ships
+# and gave the package folder a version no other artefact had.
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -12,11 +15,11 @@ repository.workspace = true
 # The editor consumes the engine; it never forks it. `devtools` brings the egui
 # backend and the in-game console, `hot_reload` is what makes editing shaders and
 # textures bearable (phase 19 / R8 of the plan).
-giochi-engine = { path = "../giochi-engine", features = ["devtools", "hot_reload"] }
+giochi-engine = { path = "../giochi-engine", version = "0.5.1", features = ["devtools", "hot_reload"] }
 # Phase 31. The viewport needs the scene format and the 3D math (`Camera3D`); it does
 # not need the GL renderer, which is why the crate is a dependency and not a second
 # window (ADR-064).
-giochi-engine-3d = { path = "../giochi-engine-3d", default-features = false }
+giochi-engine-3d = { path = "../giochi-engine-3d", version = "0.5.1", default-features = false }
 # Matrix and vector math for the viewport camera. The same `glam` version the 3D crate
 # uses, reached directly so the editor does not depend on how the 3D crate wraps it.
 glam = { workspace = true }

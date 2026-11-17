@@ -30,7 +30,6 @@ tobj = { workspace = true }
 gltf = { workspace = true }
 base64 = { workspace = true }
 glam = { workspace = true }
-anyhow = { workspace = true }
 thiserror = { workspace = true }
 # Phase 26.5/27. The scene format is data, not rendering: it is compiled in
 # unconditionally so that the editor, the racer and a C consumer all read the same

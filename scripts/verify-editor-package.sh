@@ -2,7 +2,7 @@
 # Check that a packaged editor is complete and actually runs.
 #
 # Usage:
-#   scripts/verify-editor-package.sh dist/giochi-editor-0.1.0-x86_64-unknown-linux-gnu
+#   scripts/verify-editor-package.sh dist/giochi-editor-<version>-x86_64-unknown-linux-gnu
 #   scripts/verify-editor-package.sh            # the newest folder under dist/
 #
 # The point is to catch the two ways a package goes wrong and neither build nor tests can:

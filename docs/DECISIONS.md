@@ -1602,6 +1602,11 @@ enables the engine's own hot reload sees one number, not two.
 `hot_reload` feature). Deleting a script does **not** restart — there is nothing to run —
 and the generation is deliberately not advanced in that case.
 
+> **ADR-051 is a gap in the log, recorded here so nobody hunts for a lost decision.** The
+> sequence goes 050 → 052, no file in the repository cites ADR-051, and resequencing 052–079
+> would rewrite every code comment that names them. Nothing was deleted to create the gap: the
+> number was never used.
+
 ## ADR-052 — egui 0.32 with a hand-written SDL2 backend, not `egui-sdl2`
 
 **Context.** Phase 20's console needs a text editor inside the game, and phase 21 needs
@@ -2060,6 +2065,9 @@ fails as soon as a second machine, or the console, tries to load it.
   `(no loader)`, and dropping one reports by name that the loader belongs to the pending
   Production Pack (ADR-063) and that `.obj` is what works. Hiding them would look like a
   failed import; doing nothing would be worse than saying so.
+  *Superseded by ADR-073*: the loader exists since phase 26.6, the `(no loader)` marker is
+  gone, and a glTF instantiates like an OBJ. What survives from this bullet is the principle:
+  a format the loader cannot read is refused **by name**, never hidden.
 - `toml` 0.8 (MSRV 1.65) is the only new dependency, and it reuses the `serde` derive the
   scene format already has.
 
@@ -2346,6 +2354,8 @@ rejected for the Mali drivers this project targets.
 - **Unsupported nodes are reported, not hidden**: a `.gltf` (no loader, ADR-063) or an `.obj`
   that is not on disk lands in `PlayPlan::unsupported` and the status bar says how many. A
   silent hole in the scene reads as an editor bug.
+  *Partly superseded by ADR-073*: a `.gltf` is no longer unsupported by definition — only one
+  the loader refuses (Draco/meshopt) or whose file is missing. The rest of the rule stands.
 - **Physics and gameplay are not here.** "Play" renders the scene as it is, with an orbit
   camera the user can drive (right-drag, wheel). Movement, physics and game logic belong to
   the game (phases 41–45), which consumes `PlayPlan` — the plan did not ask the editor to
@@ -2518,7 +2528,7 @@ are a top-down racer, a platformer and a tile map, whose level data is already a
 
 **Consequences.** A racer can route an AI car around a track and a platformer can route an
 enemy along a floor, with one implementation and no dependency. A navmesh would still be the
-right answer for arbitrary 3D geometry; nothing here promises it. Verified by 17 tests,
+right answer for arbitrary 3D geometry; nothing here promises it. Verified by 16 tests,
 including the corner-cut shape, determinism across eight runs, the expansion cap and the
 "path never repeats a cell" walk over a maze.
 
@@ -2552,7 +2562,7 @@ follows the player, one that reacts to an impact, and one that shows a scripted 
   driver.
 
 **Consequences.** Phase 41's chase camera and phase 44's impact feedback are `CameraDirector`
-calls. Verified by 16 tests: convergence without overshoot, 60-vs-240 fps agreement, the
+calls. Verified by 18 tests: convergence without overshoot, 60-vs-240 fps agreement, the
 look-ahead direction, every easing's endpoints and monotonicity, trauma clamping, decay,
 determinism, cutscene interpolation and handing back to the follow camera.
 
@@ -2620,3 +2630,39 @@ a save a human can read.
 
 **Consequences.** A game ships `assets/i18n/*.txt` and calls `Translator::format`. Verified by
 12 unit tests and 5 on the shipped catalogue.
+
+---
+
+## ADR-079 — Audio buses are a multiplier on the master, applied after `SDL_mixer` allocates the channel
+
+**Context.** "Audio buses" is on the Production Pack list because a pause menu needs to stop
+the engine without stopping the music, and a settings screen needs a music slider that is not
+also a sound-effects slider. `SDL_mixer` has no mixer groups: it has `Mix_VolumeChunk` and
+`Mix_VolumeMusic`, both a single number per channel.
+
+**Decision.** Four buses — `Master`, `Sfx`, `Music`, `Ui` — numbered 0–3 and pinned in
+`docs/C_ABI_CONTRACT.md` §5.6, because the C ABI passes them as integers. The bus is recorded
+**per channel** in `AudioSystem`, and its volume is written with `Mix_Volume(channel, …)` right
+after the channel exists.
+
+- **A bus multiplies the master, it does not replace it.** A channel on bus `b` is set to
+  `master · b / 128`, so master at 0 still mutes everything. The alternative — a bus that wins
+  over the master — turns the mute button into a suggestion.
+- **The bus lives in the engine, not in the game.** A game that reimplemented this would keep a
+  second table of channel volumes and drift from the engine's, and `stop_bus` could not leave
+  the other buses alone.
+- **Volume is applied to the SDL channel, not to the sample.** Changing the music bus affects
+  sounds already playing, which is what a settings slider is for; scaling the bytes at load
+  time would need a reload per slider drag.
+- `stop_bus` halts the buses it names and nothing else, and `play_sound_on` is the only way to
+  place a sound on a bus — `play_sound` keeps meaning `Bus::Sfx`, so existing code did not move.
+- The C ABI grew `giochi_audio_set_bus_volume` / `giochi_audio_bus_volume`, and the header is
+  generated (`scripts/gen-header.sh`), not hand-edited.
+
+**Consequences.** Settings persist a `[u8; 4]` and call four setters; a game never touches
+`Mix_Volume` itself. Effects (filters, reverb, ducking) are **not** here and remain in
+`IDEAS.md` — the bus is a volume routing, not a signal graph. Verified by 11 unit tests on
+the mixer (clamping, the master multiplier, `stop_bus` on a silent system) plus the FFI
+round-trip in `rust_ffi.rs`, which sets and reads a bus through a running engine and refuses
+the three out-of-range numbers. `play_sound_on` needs a real device, so the `§4` example is
+illustrative rather than compiled.

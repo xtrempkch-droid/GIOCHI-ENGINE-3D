@@ -24,7 +24,7 @@ documentation_length = "full"
 usize_is_size_t = true
 
 header = """/*
- * GIOCHI-ENGINE C ABI, version 6.
+ * GIOCHI-ENGINE C ABI, version 7.
  *
  * Link against libgiochi.so (or libgiochi.a) and call giochi_engine_init() before
  * anything else. Every fallible function returns 0 on success and a negative code
@@ -55,6 +55,10 @@ header = """/*
  * (giochi_animator_*), the in-game console (giochi_console_*) and hot reload
  * (giochi_hot_reload_*), sections 21-24. Still additive, so accept
  * giochi_abi_version() >= the part you use, not == 6.
+ *
+ * Version 7 adds the audio buses: giochi_audio_set_bus_volume and
+ * giochi_audio_bus_volume, section 5.6. Two new symbols inside part I; nothing
+ * elsewhere in the header changed.
  *
  * giochi_console_* and giochi_hot_reload_* exist in every build. A library compiled
  * without the `devtools`/`hot_reload` feature returns GIOCHI_ERROR_UNSUPPORTED from them

@@ -261,7 +261,7 @@ into the engine's lifecycle functions.
 
 Everything above describes part I and is unchanged. Part II adds a 3D renderer on the
 same library and the same header; `giochi_abi_version()` returns `2` for a part II
-consumer (the current value is `4`, after parts III and IV), and a part I program
+consumer (the current value is `7`, after parts III–IX), and a part I program
 written against `1` keeps working unchanged.
 
 The difference that matters in practice: **the 3D engine is a pointer the caller owns**,

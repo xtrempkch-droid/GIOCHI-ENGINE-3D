@@ -118,7 +118,7 @@ pub struct DevFlags {
 ///
 /// The engine owns one behind the `devtools` feature. A host that drives a
 /// [`RenderContext`] itself can own one too and call [`DevTools::handle_event`],
-/// [`DevTools::draw`] and [`DevTools::expanded_overlay`] in its own loop.
+/// [`DevTools::draw`] and [`DevTools::overlay_extra`] in its own loop.
 ///
 /// # C ABI
 ///

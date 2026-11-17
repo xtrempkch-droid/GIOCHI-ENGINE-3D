@@ -44,7 +44,6 @@ repository = "https://github.com/xtrempkch-droid/GIOCHI-SYSTEM"
 # continua sendo `bundled`, então quem não pede nada não muda de comportamento.
 sdl2 = { version = "0.38", default-features = false, features = ["image", "mixer", "ttf", "unsafe_textures"] }
 glam = "0.34"
-anyhow = "1.0"
 thiserror = "2.0"
 log = "0.4"
 env_logger = "0.11"
@@ -63,7 +62,8 @@ base64 = "0.22"
 # reuses the `serde` derive already in the tree.
 toml = "0.8"
 mlua = { version = "0.12", features = ["lua54", "vendored"] }
-cbindgen = "0.27"
+# `cbindgen` is not a build dependency: `scripts/gen-header.sh` runs the CLI, and CI
+# installs it. Declaring it here made cargo warn about an unused workspace dependency.
 # Phase 16: statistical benchmarks. The `html_reports` feature is what phase 18's
 # performance CI uses to compare a branch against `main`.
 criterion = { version = "0.8", features = ["html_reports"] }

@@ -269,11 +269,10 @@ consomem `specular`/`shininess` (ADR-063).
 
 ### O que o plano pedia e o que foi entregue
 
-O plano pedia "drag-and-drop de glTF pro viewport instancia na cena". Não há loader glTF
-neste repositório (ADR-063), por isso o `.gltf`/`.glb` é **reconhecido e marcado**
-`(no loader)`, e o drop diz porquê e sugere `.obj`; o `.obj` instancia de facto, no chão sob
-o cursor. Esconder o formato pareceria uma importação falhada. A zona de drop de textura no
-material do inspector foi entregue como pedido.
+O plano pedia "drag-and-drop de glTF pro viewport instancia na cena". Na 34 o `.gltf`/`.glb`
+era **reconhecido e marcado `(no loader)`** (ADR-063) porque o loader ainda não existia; a
+Fase 26.6 acrescentou-o (ADR-073), e hoje `.obj` e `.gltf`/`.glb` instanciam ambos, no chão
+sob o cursor. A zona de drop de textura no material do inspector foi entregue como pedido.
 
 O plano também pedia uma "árvore de diretórios"; a listagem é plana, com o caminho relativo
 em cada linha e filtros por tipo. Uma árvore expansível para `assets/` de um jogo é
@@ -635,7 +634,8 @@ radeonsi responde `GL_INVALID_OPERATION`: o frame não desenha e a única pista 
 O editor está completo para o que o plano pede: janela, viewport com câmara, hierarquia,
 inspector, projeto e assets, gizmos de translação/rotação/escala, criação/remoção/duplicação/
 reparenting, undo/redo, recentes, autosave e recuperação, preview com o renderer 3D real, e um
-pacote que corre fora do repositório. 1216 testes no workspace, todos os gates verdes.
+pacote que corre fora do repositório. Com a Production Pack fechada, são **1316 testes** no
+workspace e todos os gates verdes.
 
 **Production Pack completa.** Todos os itens que o plano assumia prontos (glTF/GLB, materiais
 PBR-lite, save/load com slots, câmaras de jogo, A*, buses de áudio, i18n) estão implementados e
@@ -644,8 +644,9 @@ testados. Nada bloqueia as Fases 41–45.
 ### Próxima fase
 
 **Fase 41 — GIOCHI RACER: fundação**: crate `giochi-racer`, pista a partir de `.scene`, carro
-controlável e câmara de perseguição — a primeira coisa a decidir é o formato dos modelos do
-carro (o `.obj` funciona hoje; o glTF continua sem loader).
+controlável e câmara de perseguição. O carro pode vir de `.obj` ou de `.gltf`/`.glb` (o loader
+existe desde a Fase 26.6, ADR-073) e a câmara de perseguição já está no motor
+(`camera::FollowCamera`, ADR-076).
 
 ## Growth Pack (Fases 19–24)
 

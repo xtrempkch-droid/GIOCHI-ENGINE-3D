@@ -4,6 +4,18 @@
 > Ele assume zero contexto sobre a sessão que o produziu.
 >
 > Versão: 2026-11-11, sobre `893d154`.
+>
+> ⚠️ **Documento histórico, não estado atual.** É a fotografia do dia em que foi
+> escrito. O que já não é verdade hoje:
+>
+> * **A ABI C existe.** `giochi-engine-capi` publica-a (hoje na versão 7, com cabeçalho
+>   gerado e `docs/C_ABI_CONTRACT.md` como contrato), e as funções de rede estão lá.
+> * O relatório de rede autoritativo é [REDE.md](REDE.md), e o estado do plano é
+>   [PROGRESS.md](../PROGRESS.md) — não este ficheiro.
+> * A versão do projeto já não é a de novembro: ver `Cargo.toml` (hoje 0.5.1).
+>
+> O que continua útil aqui são as **armadilhas de ambiente** da §2 e as medições
+> da §3, que nenhum outro documento repete.
 
 ---
 
