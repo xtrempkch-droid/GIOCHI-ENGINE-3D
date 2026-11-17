@@ -199,8 +199,8 @@ hierarchy + viewport selection (click, Ctrl+click, double-click to frame), an in
 edits Transform, Mesh, Material, Light and Camera in place, and projects (`project.toml`
 with `assets/` and `scenes/`), asset import and drag-to-viewport instantiation, and move and
 rotate and scale gizmos (`Q`/`W`/`E`/`R`, drag a handle; scale handles follow the node's own
-axes) with the selection's bounding box drawn dashed — enough to build a scene, edit it and
-reopen it:
+axes) with the selection's bounding box drawn dashed, and a hierarchy that creates, deletes,
+duplicates and re-parents nodes — enough to build a scene, edit it and reopen it:
 
 ```bash
 cargo run -p giochi-editor                      # opens the editor

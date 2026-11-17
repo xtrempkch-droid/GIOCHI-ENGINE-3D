@@ -108,6 +108,12 @@ impl EditorMode {
     }
 }
 
+/// How far a duplicate is offset from its original, in its parent's space.
+///
+/// One unit along X and Z: far enough to see two objects rather than one, small enough that
+/// the copy is still next to the original in a scene of a few metres.
+const DUPLICATE_OFFSET: [f32; 3] = [1.0, 0.0, 1.0];
+
 /// Which of the panels are visible.
 ///
 /// The `View` menu toggles these. A closed panel is not drawn at all rather than drawn
@@ -429,6 +435,116 @@ impl EditorState {
         }
     }
 
+    /// Creates a node of `kind` and selects it, as a child of the selection when exactly one
+    /// node is selected.
+    ///
+    /// A child is created at its parent's origin: the world position of a new object under
+    /// a group is the group's, and putting it at the kind's default would place it at those
+    /// coordinates *inside* the group, which is almost never where it was wanted.
+    pub fn create_node(&mut self, kind: crate::editor::node_edit::NewNodeKind) {
+        let parent = if self.selected.len() == 1 {
+            self.primary()
+        } else {
+            None
+        };
+        let position = if parent.is_some() {
+            Some([0.0, 0.0, 0.0])
+        } else {
+            None
+        };
+        let Some(scene) = self.scene.as_mut() else {
+            self.report(Status::warning("No scene open"));
+            return;
+        };
+        match crate::editor::node_edit::create(scene, kind, parent, position) {
+            Ok(node) => {
+                let id = node.id;
+                let name = node.name;
+                self.select(Some(id));
+                self.mark_dirty();
+                self.status = Status::info(format!("Added {name}"));
+            }
+            Err(error) => self.report(Status::warning(format!(
+                "Could not add {}: {error}",
+                kind.label()
+            ))),
+        }
+    }
+
+    /// Deletes every selected node and its subtree.
+    pub fn delete_selected(&mut self) {
+        if self.selected.is_empty() {
+            return;
+        }
+        let Some(scene) = self.scene.as_mut() else {
+            return;
+        };
+        let removed = crate::editor::node_edit::delete(scene, &self.selected);
+        if removed == 0 {
+            self.report(Status::warning("Nothing to delete"));
+            return;
+        }
+        self.clear_selection();
+        self.mark_dirty();
+        self.status = Status::info(format!("Deleted {removed} node(s)"));
+    }
+
+    /// Duplicates every selected node, selecting the copies.
+    ///
+    /// A node whose ancestor is also selected is skipped: duplicating a group and its child
+    /// separately would produce the child twice, once inside the copied group and once as
+    /// its own copy.
+    pub fn duplicate_selected(&mut self) {
+        let selected = self.selected.clone();
+        let Some(scene) = self.scene.as_mut() else {
+            return;
+        };
+        let roots: Vec<EntityId> = selected
+            .iter()
+            .copied()
+            .filter(|id| scene.node(*id).is_some())
+            .filter(|id| {
+                !selected
+                    .iter()
+                    .any(|other| other != id && scene.subtree(*other).contains(id))
+            })
+            .collect();
+        if roots.is_empty() {
+            return;
+        }
+        let mut copies = Vec::new();
+        for id in roots {
+            copies.extend(crate::editor::node_edit::duplicate(
+                scene,
+                id,
+                DUPLICATE_OFFSET,
+            ));
+        }
+        let created = copies.len();
+        if created > 0 {
+            self.selected = copies;
+            self.mark_dirty();
+            self.status = Status::info(format!("Duplicated {created} node(s)"));
+        }
+    }
+
+    /// Moves `id` under `new_parent`, reporting a refusal instead of panicking.
+    pub fn reparent(&mut self, id: EntityId, new_parent: Option<EntityId>) {
+        let Some(scene) = self.scene.as_mut() else {
+            return;
+        };
+        match crate::editor::node_edit::reparent(scene, id, new_parent) {
+            Ok(()) => {
+                self.mark_dirty();
+                self.status = Status::info(match new_parent {
+                    Some(parent) => format!("Moved {id} under {parent}"),
+                    None => format!("Moved {id} to the root"),
+                });
+            }
+            Err(error) => self.report(Status::warning(error)),
+        }
+    }
+
     /// Arms `mode`, cancelling a drag that belonged to the old one.
     pub fn set_mode(&mut self, mode: EditorMode) {
         if self.mode != mode {
@@ -698,6 +814,118 @@ mod tests {
         state.mark_dirty();
         assert!(state.window_title().ends_with('*'));
         let _ = std::fs::remove_file(&path);
+    }
+
+    fn state_with_scene() -> EditorState {
+        let mut state = EditorState::new();
+        state.new_scene();
+        state
+    }
+
+    #[test]
+    fn creating_a_node_adds_selects_and_dirties() {
+        let mut state = state_with_scene();
+        let before = state.scene.as_ref().expect("scene").nodes.len();
+        state.create_node(crate::editor::node_edit::NewNodeKind::Sphere);
+        let scene = state.scene.as_ref().expect("scene");
+        assert_eq!(scene.nodes.len(), before + 1);
+        let new_node = scene.nodes.last().expect("new");
+        assert_eq!(new_node.name, "Sphere");
+        assert_eq!(state.primary(), Some(new_node.id));
+        assert!(state.dirty);
+        assert!(
+            state.status.text.contains("Sphere"),
+            "{}",
+            state.status.text
+        );
+    }
+
+    #[test]
+    fn a_second_node_of_the_same_kind_gets_a_numbered_name() {
+        let mut state = state_with_scene();
+        state.create_node(crate::editor::node_edit::NewNodeKind::Cube);
+        state.create_node(crate::editor::node_edit::NewNodeKind::Cube);
+        let scene = state.scene.as_ref().expect("scene");
+        let names: Vec<&str> = scene
+            .nodes
+            .iter()
+            .filter(|node| node.name.starts_with("Cube"))
+            .map(|node| node.name.as_str())
+            .collect();
+        assert_eq!(names, ["Cube", "Cube 2", "Cube 3"]);
+    }
+
+    #[test]
+    fn creating_with_one_node_selected_nests_under_it() {
+        let mut state = state_with_scene();
+        state.select(Some(EntityId(2)));
+        state.create_node(crate::editor::node_edit::NewNodeKind::Group);
+        let scene = state.scene.as_ref().expect("scene");
+        let new_node = scene.nodes.last().expect("new");
+        assert_eq!(new_node.parent, Some(EntityId(2)));
+        assert_eq!(new_node.transform.position, [0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn deleting_the_selection_removes_it_and_clears_it() {
+        let mut state = state_with_scene();
+        state.select(Some(EntityId(2)));
+        state.delete_selected();
+        let scene = state.scene.as_ref().expect("scene");
+        assert!(scene.node(EntityId(2)).is_none());
+        assert!(state.selected.is_empty());
+        assert!(state.dirty);
+        assert!(
+            state.status.text.contains("Deleted"),
+            "{}",
+            state.status.text
+        );
+    }
+
+    #[test]
+    fn duplicating_selects_the_copies_and_not_the_originals() {
+        let mut state = state_with_scene();
+        state.select(Some(EntityId(1)));
+        state.duplicate_selected();
+        let scene = state.scene.as_ref().expect("scene");
+        assert_eq!(scene.nodes.len(), 4);
+        assert_eq!(state.selected.len(), 1);
+        let copy = state.selected[0];
+        assert_ne!(copy, EntityId(1));
+        let node = scene.node(copy).expect("copy");
+        assert_eq!(node.name, "Cube 2");
+        assert_eq!(node.mesh, scene.node(EntityId(1)).expect("original").mesh);
+    }
+
+    #[test]
+    fn duplicating_a_parent_and_its_child_copies_the_tree_once() {
+        let mut state = state_with_scene();
+        state.selected = vec![EntityId(2), EntityId(3)];
+        state.duplicate_selected();
+        let scene = state.scene.as_ref().expect("scene");
+        // Two originals + two copies: the light and camera were not part of the selection.
+        assert_eq!(scene.nodes.len(), 5);
+        assert_eq!(
+            state.selected.len(),
+            2,
+            "the copies of the parent and of its child, in one drag"
+        );
+    }
+
+    #[test]
+    fn reparenting_with_a_cycle_is_refused_with_a_warning() {
+        let mut state = state_with_scene();
+        // The Sun becomes a child of the Camera, then the Camera is asked to become a child
+        // of the Sun.
+        state.reparent(EntityId(3), Some(EntityId(2)));
+        state.reparent(EntityId(2), Some(EntityId(3)));
+        let scene = state.scene.as_ref().expect("scene");
+        assert_eq!(
+            scene.node(EntityId(3)).expect("sun").parent,
+            Some(EntityId(2))
+        );
+        assert_eq!(scene.node(EntityId(2)).expect("camera").parent, None);
+        assert_eq!(state.status.kind, StatusKind::Warning);
     }
 
     #[test]

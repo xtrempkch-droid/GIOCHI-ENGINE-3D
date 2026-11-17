@@ -15,7 +15,7 @@ ADR-061). O Salto B começou em **2026-11-17**.
 | 34 — Asset browser | **concluída** (2026-11-17) | 127 testes de unidade no editor + 5 de integração do fluxo de projeto; `editor_project_demo` imprime `project=ok`; editor aberto com `--project … --scene …` a 90 frames |
 | 35a — Gizmos (translate + rotate) | **concluída** (2026-11-17) | 167 testes de unidade no editor + teste de **pixels** `the_gizmo_reaches_the_framebuffer`; arrasto medido em teste (`dragging_a_move_arrow_moves_the_node_by_the_dragged_distance`) |
 | 35b — Gizmos (scale + AABB) | **concluída** (2026-11-17) | 183 testes de unidade no editor + teste de **pixels** `the_scale_gizmo_and_the_selection_box_reach_the_framebuffer`; arrasto por eixo e uniforme medidos em teste |
-| 36 — Hierarquia (create/delete/duplicate) | pendente | — |
+| 36 — Hierarquia (create/delete/duplicate/reparent) | **concluída** (2026-11-17) | 209 testes de unidade no editor + 4 de integração (`tests/node_editing.rs`: construir → editar → gravar → reabrir, ids não reutilizados, cópia independente, todos os tipos criados e apagados) |
 | 37 — Undo/redo | pendente | — |
 | 38 — Save/load + project | pendente | — |
 | 39 — Play-in-editor | pendente | — |
@@ -355,10 +355,43 @@ de expansão para manter — e a Fase 40 pode trocá-la sem tocar no `Project`.
 - Não há espelhamento por arrasto (fator mínimo 0.01). Um `scale` negativo escrito no
   inspector mantém-se e é multiplicado por um arrasto uniforme.
 
+### Gates da Fase 36
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — exit 0
+- [x] `cargo test --workspace` — **1146 testes**, 0 falhas; o `giochi-editor` passou a
+      **209** de unidade + 4 de integração
+- [x] `cargo doc --workspace --no-deps --document-private-items`
+- [x] `scripts/gates.sh` completo — "All gates passed"
+- [x] `cargo run -p giochi-editor -- --scene giochi-editor/assets/scenes/default.scene --frames 60` (x11)
+- [x] `cargo check -p giochi-editor --target aarch64-unknown-linux-gnu`
+
+### Entregue na Fase 36
+
+| Ficheiro | O que faz |
+|---|---|
+| `editor/node_edit.rs` | `NewNodeKind` (cube/sphere/plane/group/light/camera), `unique_name`, `create`, `duplicate` (subárvore, ids novos), `delete`, `reparent` com guarda de ciclos, `can_parent`, `depth` |
+| `editor/editor_state.rs` | `create_node`, `delete_selected`, `duplicate_selected`, `reparent`, `DUPLICATE_OFFSET` |
+| `panels/hierarchy.rs` | botão `+` no cabeçalho do painel, menu de contexto por linha, arrastar para mudar de pai com contorno verde/vermelho, drop no vazio para a raiz |
+| `editor/layout.rs` | `Edit > Create` (submenu), `Duplicate` e `Delete` ativos conforme a seleção |
+| `lib.rs` | `Del`/`Backspace` e `Ctrl+D` |
+| `tests/node_editing.rs` | aceitação sem SDL: construir a árvore, editar, gravar, reabrir e validar |
+
+### Desvios e notas da Fase 36
+
+- O plano pedia "duplicar" sem dizer o que fazer com filhos. A cópia é **da subárvore** e a
+  seleção que contém pai e filho duplica só o pai (ADR-068): duplicar ambos produziria o
+  filho duas vezes.
+- **Mudar de pai preserva os números locais** em vez de preservar a posição no mundo. É o que
+  faz "filho" significar alguma coisa, e evita reescrever o que o utilizador escreveu no
+  inspector.
+- Ainda **não há undo** (R6, Fase 37): apagar é definitivo, e é por isso que o `*` do título
+  já existia desde a Fase 31.
+
 ### Próxima fase
 
-**Fase 36 — Hierarquia (create/delete/duplicate/reparent)**: criar mesh/luz/câmara/grupo,
-`Delete`, `Ctrl+D` e arrastar na árvore para mudar o pai.
+**Fase 37 — Undo/redo**: `trait Command` + `CommandStack`, e refatorar o inspector e os
+arrastos dos gizmos para passarem por comandos (um arrasto = um comando, R6).
 
 ## Growth Pack (Fases 19–24)
 

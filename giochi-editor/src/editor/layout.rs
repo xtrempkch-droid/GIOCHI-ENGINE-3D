@@ -273,9 +273,29 @@ fn menu_bar(ctx: &egui::Context, state: &mut EditorState, theme: &EditorTheme) {
                 planned(ui, "Undo", "Ctrl+Z", 37);
                 planned(ui, "Redo", "Ctrl+Y", 37);
                 ui.separator();
-                planned(ui, "Create", "", 36);
-                planned(ui, "Duplicate", "Ctrl+D", 36);
-                planned(ui, "Delete", "Del", 36);
+                ui.menu_button("Create", |ui| {
+                    for kind in crate::editor::node_edit::NEW_NODE_KINDS {
+                        if ui.button(kind.label()).clicked() {
+                            state.create_node(kind);
+                            ui.close();
+                        }
+                    }
+                });
+                let has_selection = !state.selected.is_empty();
+                if ui
+                    .add_enabled(has_selection, egui::Button::new("Duplicate  Ctrl+D"))
+                    .clicked()
+                {
+                    state.duplicate_selected();
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(has_selection, egui::Button::new("Delete  Del"))
+                    .clicked()
+                {
+                    state.delete_selected();
+                    ui.close();
+                }
                 ui.separator();
                 planned(ui, "Preferences…", "", 40);
             });

@@ -495,6 +495,16 @@ fn handle_shortcuts(ctx: &egui::Context, state: &mut editor::EditorState, wants_
         new = input.consume_key(modifiers, egui::Key::N);
         import = input.consume_key(modifiers, egui::Key::I);
     });
+    // Node editing. `Delete` and `Backspace` both delete: the first is what a keyboard
+    // says, the second is what a laptop user's fingers do.
+    let mut delete = false;
+    let mut duplicate = false;
+    ctx.input_mut(|input| {
+        delete = input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
+            || input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace);
+        duplicate = input.consume_key(modifiers, egui::Key::D);
+    });
+
     // Bare letters, no modifiers: the tool keys are the only unmodified shortcuts, so
     // there is no ambiguity with the Ctrl combinations above.
     let mut tool = None;
@@ -511,7 +521,11 @@ fn handle_shortcuts(ctx: &egui::Context, state: &mut editor::EditorState, wants_
         }
     });
 
-    if save_as {
+    if delete {
+        state.delete_selected();
+    } else if duplicate {
+        state.duplicate_selected();
+    } else if save_as {
         state.save_dialog();
     } else if save {
         state.save_or_ask();
@@ -689,16 +703,62 @@ mod tests {
     }
 
     fn press_key(state: &mut editor::EditorState, key: egui::Key) {
+        press_key_with(state, key, egui::Modifiers::NONE);
+    }
+
+    fn press_key_with(state: &mut editor::EditorState, key: egui::Key, modifiers: egui::Modifiers) {
         let ctx = egui::Context::default();
-        let mut raw = egui::RawInput::default();
+        let mut raw = egui::RawInput {
+            modifiers,
+            ..egui::RawInput::default()
+        };
         raw.events.push(egui::Event::Key {
             key,
             physical_key: None,
             pressed: true,
             repeat: false,
-            modifiers: egui::Modifiers::NONE,
+            modifiers,
         });
         let _ = ctx.run(raw, |ctx| handle_shortcuts(ctx, state, false));
+    }
+
+    #[test]
+    fn delete_and_ctrl_d_edit_the_selection() {
+        let mut state = state_with_default_scene();
+        state.select(Some(editor::EntityId(2)));
+        press_key(&mut state, egui::Key::Delete);
+        assert!(
+            state
+                .scene
+                .as_ref()
+                .expect("scene")
+                .node(editor::EntityId(2))
+                .is_none(),
+            "Delete removed the light"
+        );
+
+        state.select(Some(editor::EntityId(1)));
+        press_key_with(&mut state, egui::Key::D, egui::Modifiers::COMMAND);
+        assert_eq!(
+            state.scene.as_ref().expect("scene").nodes.len(),
+            3,
+            "the cube was duplicated, so two cubes plus the camera"
+        );
+        assert_eq!(state.selected.len(), 1);
+        assert_ne!(state.primary(), Some(editor::EntityId(1)));
+    }
+
+    #[test]
+    fn backspace_deletes_like_delete_does() {
+        let mut state = state_with_default_scene();
+        state.select(Some(editor::EntityId(3)));
+        press_key(&mut state, egui::Key::Backspace);
+        assert!(state
+            .scene
+            .as_ref()
+            .expect("scene")
+            .node(editor::EntityId(3))
+            .is_none());
     }
 
     #[test]

@@ -103,10 +103,12 @@ Substituir uma cena com alterações por gravar é recusado: grave primeiro.
 | `Ctrl+N` / `Ctrl+O` / `Ctrl+S` / `Ctrl+Shift+S` | nova, abrir, gravar, gravar como |
 | `Esc` | Sair — exceto quando a consola, um diálogo ou um campo de texto tem o foco |
 | `Ctrl+I` | Importar um asset para o projeto |
+| `Q` / `W` / `E` / `R` | select / translate / rotate / scale |
+| `Ctrl+D` | duplicar a seleção |
+| `Del` / `Backspace` | apagar a seleção |
 | `F2` | Abrir/fechar a consola in-game do `giochi-engine` |
 
-`Q`/`W`/`E`/`R` (select/translate/rotate/scale) chegam com os gizmos, nas Fases 35a/35b;
-`Ctrl+Z`/`Ctrl+Y` chegam na Fase 37. O estado `EditorMode` já existe para os receber.
+`Ctrl+Z`/`Ctrl+Y` chegam na Fase 37.
 
 ---
 
@@ -129,6 +131,31 @@ se vê. O mais próximo ao longo do raio ganha. A seleção é guardada por id e
 (`SceneNodeId`), o mesmo id que o ficheiro da cena usa.
 
 `View > Frame Scene` enquadra a cena inteira; o duplo-click enquadra um objeto.
+
+### Editar a árvore (Fase 36)
+
+| Ação | Como |
+|---|---|
+| criar | o botão `+` no topo do painel, ou `Edit > Create` |
+| duplicar | `Ctrl+D`, `Edit > Duplicate`, ou o menu de contexto da linha |
+| apagar | `Del`/`Backspace`, `Edit > Delete`, ou o menu de contexto |
+| mudar de pai | arrastar uma linha para cima de outra; largar no espaço vazio move para a raiz |
+| desfazer | ainda não — Fase 37 |
+
+Regras que valem a pena saber:
+
+- criar com **um** objeto selecionado torna o novo objeto **filho** dele; com zero ou vários,
+  o objeto nasce na raiz;
+- os nomes são únicos (`Cube`, `Cube 2`, …): duas linhas iguais na árvore seriam
+  indistinguíveis para quem clica;
+- **duplicar copia a subárvore inteira** (um carro sem as rodas não serve) com ids novos,
+  deslocada uma unidade em X e Z para não ficar escondida atrás do original; se a seleção
+  tiver um pai e um filho, só o pai é duplicado — o filho vem dentro da cópia;
+- **ids nunca são reaproveitados**: apagar e criar não devolve o id do objeto apagado;
+- **mudar de pai não move o objeto**: os números locais ficam como estão e o objeto passa a
+  acompanhar o novo pai, que é o que "ser filho" significa;
+- arrastar para dentro de si próprio ou de um descendente é recusado — a linha fica vermelha
+  durante o arrasto e a barra de estado diz porquê.
 
 ## 3.2 Viewport
 

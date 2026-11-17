@@ -2167,3 +2167,51 @@ Verified by `gizmos::scale` unit tests (linear factor, the clamp, one component 
 negative components preserved, rotated geometry pointing at node axes, centre-first picking),
 the drag tests in `lib.rs` (per-axis and uniform, position untouched) and the pixel test
 `the_scale_gizmo_and_the_selection_box_reach_the_framebuffer`.
+
+---
+
+## ADR-068 — Node editing is a set of scene functions, and a reparent keeps the local numbers
+
+**Context.** Phase 36 adds create, delete, duplicate and reparent. Two of those are the kind
+of operation that looks trivial and is not: a duplicate that reuses an id overwrites a node
+without any error, and a reparent that allows a cycle produces a scene the editor can render
+(because the tree walk stops at the visited set) but the format refuses to load. Both fail
+silently, days after the mistake.
+
+**Decision.**
+
+- The four operations live in `editor/node_edit.rs` as **functions of `&mut Scene`**, not
+  methods on `EditorState`. `EditorState` wraps them only to select the result and set the
+  status line. The rules are therefore testable without a renderer, a window or an egui
+  context, which is where every rule below is actually checked.
+- **Names are made unique** (`Cube`, `Cube 2`, …). The format allows duplicates and only
+  warns; two identical rows in the hierarchy are indistinguishable to the person clicking
+  them.
+- **Duplicates copy the whole subtree**, with fresh ids and the internal parent links
+  preserved, inserted as a *sibling* of the original and offset by one unit in X and Z.
+  Copying one node of a wheeled car produces two objects that look broken together. A
+  selection that contains both a parent and its child duplicates only the parent: doing both
+  would produce the child twice.
+- **Ids are never reused.** `delete` removes the subtree; `Scene::add_node` takes
+  `next_id`, which only grows. A scene file that referenced the deleted id now references
+  nothing, which is the honest outcome.
+- **Reparent keeps the local transform.** The node's numbers are its own; moving it under a
+  parent that has a transform makes it move *with* the parent, which is what a child is. The
+  alternative — preserving the world position by rewriting the local numbers — silently
+  rewrites the data the user typed into the inspector.
+- **Reparent refuses cycles** (into itself, into its own descendant) with an error the
+  status bar shows, and the hierarchy panel greys the row before the drop is attempted by
+  checking the snapshot. The panel's check is an affordance; the scene's check is the
+  guarantee.
+- Duplicating and deleting are per-node actions **from the row that was right-clicked**, not
+  from the whole selection: the menu said "Delete" next to *this* row. The keyboard shortcuts
+  act on the selection, which is what a shortcut means.
+- `editor/tests/node_editing.rs` is the acceptance: build a tree, edit it, save it, reload it
+  and check `validate()` reports nothing. Everything the editor can build has to be a scene
+  the format accepts.
+
+**Consequences.** Phase 37 can wrap these four functions in `Command`s without touching the
+rules, and the reparent/duplicate paths already have their failure modes spelled out.
+Verified by 14 unit tests in `node_edit`, 8 in `EditorState`/`hierarchy` and 4 integration
+tests in `tests/node_editing.rs` (save/reload round trip, ids not reused, duplicate
+independence, every kind created and deleted).

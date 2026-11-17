@@ -8,6 +8,7 @@ pub mod dialog;
 pub mod editor_state;
 pub mod icons;
 pub mod layout;
+pub mod node_edit;
 pub mod orbit_camera;
 pub mod theme;
 pub mod viewport;
