@@ -15,6 +15,11 @@ run() {
     "$@"
 }
 
+# `sdl2-sys` needs `deps/` to exist before its build script runs, and cargo 1.100 stopped
+# creating it. Without this the first `cargo build` in a cold target directory dies with
+# "Failed to copy SDL2 dynamic library"; see the header of the script.
+run scripts/create-cargo-deps-dirs.sh
+
 run cargo fmt --all --check
 run cargo clippy --workspace --all-targets -- -D warnings
 run cargo build --workspace --target x86_64-unknown-linux-gnu

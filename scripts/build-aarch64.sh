@@ -39,6 +39,9 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+# `sdl2-sys` needs `deps/` to exist before its build script runs; see that script.
+"$repo_root/scripts/create-cargo-deps-dirs.sh" >/dev/null
+
 target=aarch64-unknown-linux-gnu
 
 # Code generation for the console CPU. `native` cannot work in a cross build: the

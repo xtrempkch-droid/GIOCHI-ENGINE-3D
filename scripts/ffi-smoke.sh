@@ -13,6 +13,9 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+# `sdl2-sys` needs `deps/` to exist before its build script runs; see that script.
+"$repo_root/scripts/create-cargo-deps-dirs.sh" >/dev/null
+
 profile="debug"
 cargo_flags=()
 if [[ "${1:-}" == "--release" ]]; then

@@ -82,6 +82,25 @@ uses the pkg-config SDL2, so `IMG_*` and `Mix_*` are undefined. Cargo has no way
 Spell the features out instead — `scripts/gates.sh` and CI do exactly that — and keep
 `--all-features` to crates where it is meaningful (`giochi-net`).
 
+### A cold build needs the cargo `deps` directories
+
+If `cargo build` dies in a fresh target directory with
+
+```
+Failed to copy SDL2 dynamic library from .../out/lib/libSDL2_test.a
+                                     to .../release/deps/libSDL2_test.a
+```
+
+run `scripts/create-cargo-deps-dirs.sh` and build again. It is not a code bug: `sdl2-sys`
+copies the SDL2 it just compiled into `deps/` and assumes the directory exists, and cargo
+1.100 stopped creating it before running build scripts. Everything that builds here goes
+through `sdl2-bundled` for the core library, so every cold build hits it.
+
+The script is already called by `scripts/gates.sh`, `scripts/check-aarch64.sh`,
+`scripts/build-aarch64.sh`, `scripts/ffi-smoke.sh` and all four workflows, so the documented
+paths are covered; this is only needed for a bare `cargo build` in a new target directory.
+`docs/DECISIONS.md` ADR-060 has the reproduction and the removal criterion.
+
 The same gates run in GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)),
 plus a `smoke` job that executes the demo, every example and the Lua reference game
 headlessly (`SDL_VIDEODRIVER=dummy`), and an `ffi` job that compiles `c_smoke.c` against

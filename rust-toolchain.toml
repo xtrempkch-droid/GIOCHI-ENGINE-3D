@@ -1,3 +1,6 @@
+# `sdl2-sys` needs the cargo `deps` directories to exist before its build script runs;
+# see `scripts/create-cargo-deps-dirs.sh`. The workflows run `rustup show`, so this file
+# is the one place the channel and the components live.
 [toolchain]
 channel = "stable"
 profile = "minimal"

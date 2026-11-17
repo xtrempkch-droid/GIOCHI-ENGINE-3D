@@ -22,10 +22,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Create cargo deps directories
+        # `sdl2-sys` copies the SDL2 it compiled into `deps/` and assumes the directory
+        # exists. Cargo 1.100 stopped creating it eagerly, so on a cold target directory
+        # the build script panics before anything here is compiled. See the header of
+        # the script.
+        run: ./scripts/create-cargo-deps-dirs.sh
+
       - name: Install Rust
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          rustup show
 
       - name: Install build dependencies
         run: sudo ./scripts/install-deps.sh
@@ -87,10 +93,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Create cargo deps directories
+        # `sdl2-sys` copies the SDL2 it compiled into `deps/` and assumes the directory
+        # exists. Cargo 1.100 stopped creating it eagerly, so on a cold target directory
+        # the build script panics before anything here is compiled. See the header of
+        # the script.
+        run: ./scripts/create-cargo-deps-dirs.sh
+
       - name: Install Rust
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          rustup show
           rustup target add aarch64-unknown-linux-gnu
 
       - name: Install ARM64 SDL2 libraries
@@ -141,6 +153,13 @@ jobs:
       # That went unnoticed until 0.2.0 because the step was added after the previous
       # tag had already been released.
       - uses: actions/checkout@v7
+
+      - name: Create cargo deps directories
+        # `sdl2-sys` copies the SDL2 it compiled into `deps/` and assumes the directory
+        # exists. Cargo 1.100 stopped creating it eagerly, so on a cold target directory
+        # the build script panics before anything here is compiled. See the header of
+        # the script.
+        run: ./scripts/create-cargo-deps-dirs.sh
 
       - name: Install runtime dependencies
         # The verification below compiles and *runs* the archive's C consumer, so the

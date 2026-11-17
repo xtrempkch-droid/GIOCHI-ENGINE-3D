@@ -17,6 +17,9 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+# `cargo check` runs build scripts too, so it hits the same missing-`deps` panic.
+"$repo_root/scripts/create-cargo-deps-dirs.sh" >/dev/null
+
 if ! rustup target list --installed | grep -qx 'aarch64-unknown-linux-gnu'; then
     echo "error: aarch64-unknown-linux-gnu target is not installed." >&2
     echo "       run: rustup target add aarch64-unknown-linux-gnu" >&2

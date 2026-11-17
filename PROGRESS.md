@@ -14,6 +14,53 @@ Fases 0–18 concluídas. O Growth Pack começou em 2026-11-14.
 | 24 — Physics + C ABI | **concluída** (2026-11-14) | 9 testes de unidade em `physics` 2D + 9 em 3D, 5 de integração (`tests/physics_2d.rs`), `physics_2d_demo` 1800 frames com a torre a `0.000` de velocidade, `physics_3d_demo` 420 frames com o jogador bloqueado pela parede e apoiado no chão, `mini_fps --physics` e `platformer_2d` a chegar ao alvo; C ABI **v6** com `giochi_physics_*`, `giochi_particles_*`, `giochi_animator_*`, `giochi_console_*` e `giochi_hot_reload_*`, com testes C + Python nos dois perfis de features |
 | 25 — Release 0.5.0 | **concluída** (2026-11-14) | `check-version.sh` consistente em 0.5.0 (7 referências), `cargo build --release --workspace --examples`, artefacto empacotado e `verify-release-artifact.sh` verde: binários, `giochi.h` e `libgiochi` concordam em 0.5.0, `c_smoke` reporta `abi 6, engine 0.5.0`, demo + `mini_game.lua` correm com e sem PNGs |
 | 26 — Issue #8 (wire v2) | **concluída** (2026-11-15) | 43 testes do `giochi-net` (53 com `--all-features`), protocolo v2, gates completos verdes, release 0.5.1; custo medido em `docs/PERF_LOG.md` (163 ns a codificar 13 inimigos, 191 B por snapshot, `libgiochi.so` −176 B por A/B contra `f12c09b`) |
+| 27 — CI de release (deps do cargo) | **concluída** (2026-11-17) | Falha reproduzida localmente com cargo 1.100.0 e corrigida por medição; build frio de release e `check-aarch64` verdes com 1.100; `gates.sh` e `ffi-smoke.sh` verdes; 11 jobs de build cobertos |
+
+### Release 0.5.0/0.5.1 nunca publicou — `sdl2-sys` no CI (2026-11-17)
+
+As tags foram enviadas e as quatro execuções do workflow de release falharam no passo de
+build, as duas de hoje e as duas de 15/11, sempre com a mesma mensagem:
+
+```
+thread 'main' panicked at sdl2-sys-0.38.0/build.rs:478:13:
+Failed to copy SDL2 dynamic library from .../out/lib/libSDL2_test.a
+                                     to .../release/deps/libSDL2_test.a
+```
+
+O destino é a pista: a cópia para o diretório pai tinha acabado de ter sucesso, e só a de
+`deps/` falha. O build script do `sdl2-sys` copia cada biblioteca que compilou para dois
+sítios e **assume que `deps/` existe**; o `fs::copy` para um diretório inexistente falha
+com ENOENT, que o script reporta como se fosse problema de biblioteca.
+
+**Reproduzido e diagnosticado por A/B**, não por leitura:
+
+| Passo | Resultado |
+|---|---|
+| `cargo +1.100.0 build --release --workspace` num `CARGO_TARGET_DIR` vazio | **exit 101**, a mensagem acima |
+| o mesmo comando depois de `mkdir -p .../release/deps` | **exit 0** |
+| `cargo +1.99.1` (o toolchain desta máquina) no mesmo cenário | exit 0 — a diferença é o cargo, não o código |
+
+O cargo 1.99 criava `target/<triple>/<profile>/deps/` antecipadamente; o 1.100 deixou de o
+fazer. Como todos os crates aqui ligam `sdl2-bundled` para a biblioteca core, **todo o build
+num target dir frio morre** — o que um `Cargo.lock` alterado ou um runner novo produz.
+
+O repositório já tinha metade do diagnóstico: `ci.yml` tinha um passo a criar esses
+diretórios, escrito em português, com a nota de que o destino no panic é sempre o de
+`deps/`. Faltava no `release.yml`, `cross-compile.yml` e `perf.yml` — exactamente os jobs
+que falharam, o que explica porque é que os PRs passavam e a release não.
+
+**Corrigido com uma definição só**, em vez da terceira cópia das mesmas linhas:
+`scripts/create-cargo-deps-dirs.sh` (honra `CARGO_TARGET_DIR`) é chamado por
+`gates.sh`, `check-aarch64.sh`, `build-aarch64.sh`, `ffi-smoke.sh` e pelos quatro
+workflows — 11 jobs de build, verificados um a um. `rust-toolchain.toml` continua em
+`stable` (fixar um compilador antigo esconderia a armadilha de quem está no actual) e os
+workflows passaram a instalar por `rustup show`, que aplica o ficheiro: verificado que
+instala componentes e targets em falta. ADR-060 tem a reprodução e o critério de remoção.
+
+**Verificado depois da correção**, tudo com cargo **1.100.0** e target dir vazio:
+`cargo build --release --workspace` (2m04), `--workspace --examples` (1m39),
+`giochi-demo --verify`, `mini_game.lua --auto --frames 60`, e `check-aarch64.sh`. Com o
+toolchain normal: `gates.sh` exit 0 e `ffi-smoke.sh` com `abi 6, engine 0.5.1`.
 
 ### Issue #8 — snapshot do `giochi-net` (2026-11-15)
 

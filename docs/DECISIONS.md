@@ -1837,3 +1837,39 @@ table is `pub(crate)` and keyed on `sdl2::Event`, which the 3D examples do read;
 into a shared crate is the right move when a caller needs to click something, and inventing
 a second translation table now would be two things to keep in step. Until then `--hud` shows
 numbers, which is what the phase-21 criterion asked for.
+
+## ADR-060 — Every build creates the cargo `deps` directories first
+
+**Context.** `sdl2-sys` 0.38.0 compiles SDL2 from source (the `bundled` feature, which every
+crate here enables for the core library) and its build script then copies each library it
+produced into the profile directory *and* into that directory's `deps/`. It assumes `deps/`
+exists, and `fs::copy` into a missing directory fails with `ENOENT`, which the script reports
+as a panic:
+
+```
+Failed to copy SDL2 dynamic library from .../out/lib/libSDL2_test.a
+                                     to .../release/deps/libSDL2_test.a
+```
+
+The copy to the parent directory has just succeeded at that moment, so the destination in the
+message is the clue: it is always the `deps/` one.
+
+Cargo up to 1.99 created `target/<triple>/<profile>/deps/` eagerly. Cargo 1.100 stopped doing
+it, so on a cold target directory — which is what a changed `Cargo.lock` or a fresh runner
+produces — the build dies before compiling a single crate of this workspace. Reproduced on
+cargo 1.100.0 with an empty `CARGO_TARGET_DIR`: exit 101 with the message above; creating the
+directory and re-running the identical command: exit 0.
+
+**Decision.** `scripts/create-cargo-deps-dirs.sh` creates the directories for both profiles
+and both triples, honouring `CARGO_TARGET_DIR`. It runs from every entry point that builds:
+`scripts/gates.sh`, `scripts/check-aarch64.sh`, `scripts/build-aarch64.sh`,
+`scripts/ffi-smoke.sh`, and all four workflows. `rust-toolchain.toml` keeps tracking `stable`
+— pinning an older compiler would make the symptom disappear while leaving the trap in place
+for anyone on a current one — and the workflows install it with `rustup show`, so the file is
+the single source of truth for the channel and the components.
+
+**Consequences.** One definition instead of the three lines that had been copied into
+`ci.yml` alone, which is exactly why the pull-request jobs passed while the release workflow
+died on all four attempts. The cost is one small step and one shell script. The removal
+criterion is stated in the script: when `cargo +stable build` succeeds in an empty target
+directory, delete the script, its eight callers and the note in CONTRIBUTING.md.

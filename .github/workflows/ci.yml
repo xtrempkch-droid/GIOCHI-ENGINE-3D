@@ -41,26 +41,15 @@ jobs:
           echo "depois:"; df -h /
 
       - name: Create cargo deps directories
-        # O build script do `sdl2-sys` copia as bibliotecas que compilou para
-        # `deps/` e ASSUME que o diretorio existe. Num target dir frio -- que e o
-        # que acontece quando qualquer mudanca em `Cargo.lock` invalida o cache --
-        # ele ainda nao existe, e o `fs::copy` falha com um errno que o script
-        # descarta: a mensagem sai so como "Failed to copy SDL2 dynamic library",
-        # que parece bug de codigo e nao e.
-        #
-        # Medido: a execucao com cache passou; as sem cache falharam no mesmo
-        # commit base, e o destino que aparece no panic e o de `deps/` (a copia
-        # para o diretorio pai tinha acabado de dar certo).
-        run: |
-          mkdir -p target/debug/deps target/release/deps
-          for triple in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
-            mkdir -p "target/$triple/debug/deps" "target/$triple/release/deps"
-          done
+        # One script, because the same three lines were needed in every job that
+        # builds and were present in only this one -- which is why the release
+        # workflow died on this and not the pull-request one. See the header of the
+        # script for the reproduction.
+        run: ./scripts/create-cargo-deps-dirs.sh
 
       - name: Install Rust
         run: |
-          rustup toolchain install stable --profile minimal --component rustfmt,clippy
-          rustup default stable
+          rustup show
           rustc --version
 
       - name: Install build dependencies
@@ -194,26 +183,15 @@ jobs:
           echo "depois:"; df -h /
 
       - name: Create cargo deps directories
-        # O build script do `sdl2-sys` copia as bibliotecas que compilou para
-        # `deps/` e ASSUME que o diretorio existe. Num target dir frio -- que e o
-        # que acontece quando qualquer mudanca em `Cargo.lock` invalida o cache --
-        # ele ainda nao existe, e o `fs::copy` falha com um errno que o script
-        # descarta: a mensagem sai so como "Failed to copy SDL2 dynamic library",
-        # que parece bug de codigo e nao e.
-        #
-        # Medido: a execucao com cache passou; as sem cache falharam no mesmo
-        # commit base, e o destino que aparece no panic e o de `deps/` (a copia
-        # para o diretorio pai tinha acabado de dar certo).
-        run: |
-          mkdir -p target/debug/deps target/release/deps
-          for triple in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
-            mkdir -p "target/$triple/debug/deps" "target/$triple/release/deps"
-          done
+        # One script, because the same three lines were needed in every job that
+        # builds and were present in only two of them -- which is why the release
+        # workflow died on this and the pull-request ones did not. See the header of
+        # the script for the reproduction.
+        run: ./scripts/create-cargo-deps-dirs.sh
 
       - name: Install Rust
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          rustup show
 
       - name: Install build dependencies
         run: sudo ./scripts/install-deps.sh
@@ -256,26 +234,15 @@ jobs:
           echo "depois:"; df -h /
 
       - name: Create cargo deps directories
-        # O build script do `sdl2-sys` copia as bibliotecas que compilou para
-        # `deps/` e ASSUME que o diretorio existe. Num target dir frio -- que e o
-        # que acontece quando qualquer mudanca em `Cargo.lock` invalida o cache --
-        # ele ainda nao existe, e o `fs::copy` falha com um errno que o script
-        # descarta: a mensagem sai so como "Failed to copy SDL2 dynamic library",
-        # que parece bug de codigo e nao e.
-        #
-        # Medido: a execucao com cache passou; as sem cache falharam no mesmo
-        # commit base, e o destino que aparece no panic e o de `deps/` (a copia
-        # para o diretorio pai tinha acabado de dar certo).
-        run: |
-          mkdir -p target/debug/deps target/release/deps
-          for triple in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
-            mkdir -p "target/$triple/debug/deps" "target/$triple/release/deps"
-          done
+        # One script, because the same three lines were needed in every job that
+        # builds and were present in only two of them -- which is why the release
+        # workflow died on this and the pull-request ones did not. See the header of
+        # the script for the reproduction.
+        run: ./scripts/create-cargo-deps-dirs.sh
 
       - name: Install Rust and the ARM64 cross toolchain
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          rustup show
           rustup target add aarch64-unknown-linux-gnu
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -315,26 +282,15 @@ jobs:
           echo "depois:"; df -h /
 
       - name: Create cargo deps directories
-        # O build script do `sdl2-sys` copia as bibliotecas que compilou para
-        # `deps/` e ASSUME que o diretorio existe. Num target dir frio -- que e o
-        # que acontece quando qualquer mudanca em `Cargo.lock` invalida o cache --
-        # ele ainda nao existe, e o `fs::copy` falha com um errno que o script
-        # descarta: a mensagem sai so como "Failed to copy SDL2 dynamic library",
-        # que parece bug de codigo e nao e.
-        #
-        # Medido: a execucao com cache passou; as sem cache falharam no mesmo
-        # commit base, e o destino que aparece no panic e o de `deps/` (a copia
-        # para o diretorio pai tinha acabado de dar certo).
-        run: |
-          mkdir -p target/debug/deps target/release/deps
-          for triple in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
-            mkdir -p "target/$triple/debug/deps" "target/$triple/release/deps"
-          done
+        # One script, because the same three lines were needed in every job that
+        # builds and were present in only two of them -- which is why the release
+        # workflow died on this and the pull-request ones did not. See the header of
+        # the script for the reproduction.
+        run: ./scripts/create-cargo-deps-dirs.sh
 
       - name: Install Rust
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+          rustup show
 
       - name: Install build dependencies
         run: sudo ./scripts/install-deps.sh
