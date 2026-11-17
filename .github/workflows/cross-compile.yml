@@ -60,16 +60,6 @@ jobs:
         # the script.
         run: ./scripts/create-cargo-deps-dirs.sh
 
-      - name: Create cargo deps directories
-        # Ver a nota equivalente em `ci.yml`: o build script do `sdl2-sys` copia
-        # para `deps/` e assume que o diretorio existe. Num target dir frio ele
-        # nao existe, e a copia falha com um errno que o script descarta.
-        # Aqui e o target do APARELHO, que e outro diretorio.
-        run: |
-          mkdir -p target/aarch64-unknown-linux-gnu/debug/deps
-          mkdir -p target/aarch64-unknown-linux-gnu/release/deps
-          mkdir -p target/debug/deps target/release/deps
-
       - name: Install Rust and the ARM64 cross toolchain
         run: |
           rustup show
@@ -101,16 +91,6 @@ jobs:
         # the build script panics before anything here is compiled. See the header of
         # the script.
         run: ./scripts/create-cargo-deps-dirs.sh
-
-      - name: Create cargo deps directories
-        # Ver a nota equivalente em `ci.yml`: o build script do `sdl2-sys` copia
-        # para `deps/` e assume que o diretorio existe. Num target dir frio ele
-        # nao existe, e a copia falha com um errno que o script descarta.
-        # Aqui e o target do APARELHO, que e outro diretorio.
-        run: |
-          mkdir -p target/aarch64-unknown-linux-gnu/debug/deps
-          mkdir -p target/aarch64-unknown-linux-gnu/release/deps
-          mkdir -p target/debug/deps target/release/deps
 
       - name: Install Rust
         run: |
