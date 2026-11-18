@@ -89,6 +89,39 @@ The engine and the editor are **not modified** by this crate (master plan, R2). 
 piece of the engine did not fit, the game has its own: the chase camera (the engine's
 `FollowCamera` trails along world `+Z`, not along a heading) and the HUD layout.
 
+## Tested on the console
+
+Measured on 2026-11-18 on the **R35S** (Rockchip RK3326, Cortex-A35, Mali-G31 with
+Panfrost, Buildroot 2025.02, glibc 2.41, 640×480 DSI panel, 964 MB) over SSH, with the
+game on the real display through KMSDRM:
+
+| | |
+|---|---|
+| GL context | `GLES 2 on Mali-G31 (Panfrost) (Mesa)`, 128 extensions, instancing `ext` |
+| 600 frames | 10.12 s — **59.3 fps**, vblank-locked |
+| 1800 frames (30 s) | 30.13 s — **59.7 fps**, clean exit |
+| CPU per frame | **5.9 ms** of a 16.7 ms budget — about 65 % headroom for phase 45 |
+| Gamepad | `r36s_Gamepad` detected; left untouched, the car stays on the line at 0 km/h |
+| Capture | 640×480, verified: sky 35 %, road, red car, HUD text in both corners |
+
+KMSDRM ignores `--size` and uses the panel's own mode, which is why every run is 640×480.
+
+Run it yourself:
+
+```bash
+giochi-racer/scripts/device-run.sh --binary path/to/giochi-racer --frames 600
+```
+
+The script releases the console (the device's launcher holds DRM master), runs the game,
+pulls the frame back, and **restores the screen** from a trap *on the device*, so a dropped
+SSH connection cannot leave it black.
+
+> **Building for this device is not `scripts/build-aarch64.sh` alone.** This host's glibc is
+> newer than the console's, and the linker records the host's symbol versions: the binary
+> then dies with `version 'GLIBC_2.43' not found`. Build inside a container at the device's
+> glibc (Debian 13, glibc 2.41); the one-command recipe is in
+> [docs/CROSS_COMPILE.md §The host's glibc is the ceiling](../docs/CROSS_COMPILE.md).
+
 ## Tracks
 
 Tracks are `.scene` files, and the naming convention that turns one into a circuit is in

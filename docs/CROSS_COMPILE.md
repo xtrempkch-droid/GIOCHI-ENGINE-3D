@@ -376,6 +376,81 @@ The consequence for deployment: the target root filesystem must provide
 (`libSDL2_mixer-2.0.so.0`, `libSDL2_image-2.0.so.0`, `libSDL2_ttf-2.0.so.0`) and
 their own dependencies. See [KMSDRM.md](KMSDRM.md) for the deployment checklist.
 
+## The host's glibc is the ceiling, not the device's
+
+A sysroot built from the device carries the device's *SDL2*, not the device's *libc*. When
+the linker runs on the host it resolves `acosf`, `fstat64`, `dlsym` and the rest against the
+host's `libc.so` and `libm.so`, and **records the host's symbol versions**. The binary then
+demands that glibc revision on a device that has an older one, and refuses to start:
+
+```text
+/opt/racer/giochi-racer: /lib64/libm.so.6: version `GLIBC_2.43' not found
+```
+
+Measured on 2026-11-18: this host (Ubuntu 25.10) has **glibc 2.43**, and the R35S
+(Buildroot 2025.02) has **2.41**. A `scripts/build-aarch64.sh --features sdl2-system` build
+against the device sysroot linked cleanly, produced a correct AArch64 ELF and could not
+run. `cargo check` and the cross-compile CI job cannot see this — they never link against
+the console's libc, and the job does not deploy.
+
+**Check it before deploying**, in one line:
+
+```bash
+aarch64-linux-gnu-readelf -sW --dyn-syms target/aarch64-unknown-linux-gnu/release/BIN \
+    | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1
+ssh root@console 'ldd --version | head -1'
+```
+
+The first number must be **≤** the second. It is a floor, not an equality: a binary needing
+2.35 runs on 2.41.
+
+### What worked: build inside a container at the device's glibc
+
+The fix that needed no toolchain archaeology was to run the same build in a distribution
+whose glibc matches the device's. Debian 13 (trixie) ships glibc **2.41**, the same as this
+image, and its `gcc-aarch64-linux-gnu` is 14.2:
+
+```bash
+# One command, no image to maintain. The repository, a copy of the cargo registry and
+# an output directory are mounted; the toolchain comes from the host's rustup.
+docker run --rm \
+  -v "$PWD:/work:ro" \
+  -v /path/to/arm64-sysroot:/sysroot:ro \
+  -v "$PWD/../arm64-build:/out" \
+  -v "$HOME/.rustup:/rustup:ro" \
+  -e CARGO_HOME=/out/cargo-home -e RUSTUP_HOME=/rustup \
+  -e PATH=/rustup/toolchains/1.100.0-x86_64-unknown-linux-gnu/bin:/usr/bin:/bin \
+  -e CARGO_TARGET_DIR=/out/target -e CARGO_NET_OFFLINE=true \
+  -e PKG_CONFIG_ALLOW_CROSS=1 \
+  -e PKG_CONFIG_SYSROOT_DIR=/sysroot \
+  -e PKG_CONFIG_LIBDIR=/sysroot/usr/lib/pkgconfig \
+  -e RUSTFLAGS="-C target-cpu=cortex-a35 -C target-feature=+crc,+aes,+sha2 \
+                -Lnative=/sysroot/usr/lib/aarch64-linux-gnu" \
+  debian:13-slim bash -c '
+    apt-get update -qq &&
+    apt-get install -y -qq gcc g++ gcc-aarch64-linux-gnu libc6-dev-arm64-cross \
+        pkg-config file &&
+    cd /work && cargo build --locked --release -p giochi-racer \
+        --target aarch64-unknown-linux-gnu \
+        --no-default-features --features sdl2-system'
+```
+
+Measured result: the same source linked there needs at most **`GLIBC_2.35`** and runs on the
+2.41 image. `gcc` and `g++` matter — a container without them fails the host-side build
+scripts with `linker 'cc' not found`.
+
+Two details worth copying:
+
+- **a writable `CARGO_HOME`**. The registry is mounted as a *copy* (hardlinks are enough:
+  `cp -al ~/.cargo/registry /out/cargo-home/registry`), because cargo writes its package
+  cache lock there and a read-only home fails the build.
+- **`--locked`**, so a build in a different cargo version cannot quietly update the lock.
+
+`cross` is not an alternative here: its `0.2.5` images are older than the toolchain, and
+their glibc cannot run the host build scripts
+(`weak version 'GLIBC_2.39' not found ... required by libc`'s build script). Bump the image
+in `Cross.toml` before reaching for it again.
+
 ## `cross`, as an alternative
 
 `Cross.toml` configures [`cross`](https://github.com/cross-rs/cross) for the same

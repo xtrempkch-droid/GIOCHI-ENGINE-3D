@@ -83,9 +83,15 @@ else
 fi
 
 # CI calls these scripts rather than reimplementing them, so a broken script fails
-# every job at once. Linting them here catches that before the push.
+# every job at once. Linting them here catches that before the push. The glob covers
+# every crate's own scripts too (`giochi-racer/scripts/device-run.sh`), which are run by
+# hand against real hardware where a typo costs a console session.
 if command -v shellcheck >/dev/null 2>&1; then
-    run shellcheck scripts/*.sh
+    shellcheck_targets=(scripts/*.sh)
+    while IFS= read -r script; do
+        shellcheck_targets+=("$script")
+    done < <(find . -mindepth 3 -maxdepth 3 -path './*/scripts/*.sh' -not -path './target/*' | sort)
+    run shellcheck "${shellcheck_targets[@]}"
 else
     echo
     echo "==> shellcheck SKIPPED (not installed)"

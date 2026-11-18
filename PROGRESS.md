@@ -677,6 +677,8 @@ contra a versão 0.5.1 do workspace.
       trava, faz a volta — medido em `tests/physics_track.rs`, não só olhado
 - [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-racer --test hud_pixels` — o HUD
       desenha texto e as quatro esquinas caem onde devem
+- [x] **ARM64 no hardware real**: 600 e 1800 frames a ~59,5 fps no R35S (KMSDRM, Mali-G31),
+      gamepad detetado, captura verificada, ecrã restaurado — ver a tabela acima
 
 ### Entregue na Fase 41
 
@@ -697,6 +699,35 @@ Crate novo `giochi-racer` (bin + lib), membro do workspace, versão herdada:
 | `assets/tracks/track_easy.scene` | oval de 200 m, 10 m de largura, 4 checkpoints, barreiras seladas |
 | `docs/TRACK_SPECS.md` | a convenção de nomes e as medidas da pista, para se construir outra no editor |
 | `tests/physics_track.rs`, `tests/track_specs.rs`, `tests/hud_pixels.rs` | a pista e o carro medidos, não assumidos |
+
+### Corrida no hardware real (`r35sv`, 2026-11-18)
+
+O jogo foi construído para ARM64 e corrido no R35S, com o ecrã a sério (KMSDRM), não no
+`dummy`:
+
+| Medição | Resultado |
+|---|---|
+| Compilação | `giochi-racer` + dependências, `--features sdl2-system` contra o SDL2 do próprio aparelho |
+| Contexto GL | `GLES 2 on Mali-G31 (Panfrost) (Mesa)`, 128 extensões, instancing `ext` |
+| Gamepad | `r36s_Gamepad` detetado pelo motor; com o comando em repouso o carro fica **parado** na linha (0 km/h durante 4 s) — a zona morta de 10 % funciona no hardware |
+| 600 frames | 10,12 s → **59,3 fps** (travado ao vblank de 60 Hz; KMSDRM ignora o `--size` e usa o modo do painel) |
+| 1800 frames (30 s) | 30,13 s → **59,7 fps**, exit 0, sem crash |
+| Custo de CPU | 600 frames: 2,49 s user + 1,05 s sys = **5,9 ms por frame** de um orçamento de 16,7 ms → **~65 % de folga** para a Fase 45 |
+| Captura | 640×480, `check-frame.py` verde (159–169 cores amostradas), mesma assinatura do frame de x86_64: céu 35 %, estrada, carro vermelho, HUD nas duas esquinas |
+| Ecrã devolvido | `giochi-launcher` volta a ter DRM master a cada corrida (trap remoto no dispositivo, sobrevive a uma queda de SSH) |
+
+O teste foi feito com `giochi-racer/scripts/device-run.sh`, que liberta o console (o
+launcher detém o DRM master), corre o jogo, trás a captura e **restaura o ecrã** — a mesma
+sequência do `scripts/hardware-check.sh`, com o restauro dentro de um `trap` remoto.
+
+**Achado que vai morder a Fase 46:** o binário produzido pelo `scripts/build-aarch64.sh`
+normal **não corre no aparelho**. O host tem glibc 2.43 e o R35S 2.41; o linker regista as
+versões da libc *do host* e o jogo morre com
+`/lib64/libm.so.6: version 'GLIBC_2.43' not found`. `cargo check` e o job de cross-compile
+do CI não veem isto porque não ligam contra a libc do console nem implantam. A solução — e
+o procedimento completo — ficou em `docs/CROSS_COMPILE.md` §"The host's glibc is the
+ceiling": construir dentro de `debian:13-slim` (glibc 2.41), que produz um binário que pede
+no máximo `GLIBC_2.35`.
 
 ### O que a fase decidiu (e porquê)
 
@@ -737,9 +768,9 @@ desenharam fora dela; o teste `hud_pixels` media isto a cada passo e fica como g
 
 ### Bloqueios / pendências
 
-- **Teste em hardware ARM64**: não feito (não há GIOCHI-OS nesta máquina). O cross-check
-  `cargo check --target aarch64-unknown-linux-gnu` passa; o binário e o teste real são da
-  Fase 46.
+- ~~Teste em hardware ARM64~~ — **feito em 2026-11-18** no `r35sv` (R35S, RK3326,
+  Cortex-A35, Mali-G31/Panfrost, Buildroot 2025.02, glibc 2.41, ecrã DSI 640×480). Ver a
+  tabela abaixo.
 - **`giochi-editor` não encaminha `sdl2-system`** (não tem secção `[features]`). Passa no
   `check-aarch64.sh` porque este compila com `bundled`; para o pacote ARM64 da Fase 46 vai
   precisar da feature, e essa é uma alteração ao editor que fica para então.

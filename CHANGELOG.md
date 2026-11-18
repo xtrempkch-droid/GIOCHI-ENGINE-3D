@@ -59,6 +59,12 @@ a ABI C avança só de 6 para 7.
   verdade em `tests/physics_track.rs`.
 - `scripts/check-version.sh` e `scripts/check-features.sh` passaram a cobrir o crate novo;
   `ci.yml` corre o jogo headless, verifica a captura e os testes por frame.
+- **Corrido no hardware real** (R35S, Mali-G31/Panfrost, KMSDRM 640×480): ~59,5 fps em 600 e
+  1800 frames, 5,9 ms de CPU por frame, gamepad detetado, ecrã restaurado por
+  `giochi-racer/scripts/device-run.sh`. Achado de build documentado em
+  `docs/CROSS_COMPILE.md`: um binário do `build-aarch64.sh` exige a glibc *do host* e não
+  arranca num console mais antigo; a construção passou a ser feita num contentor com a glibc
+  do alvo.
 
 ### Adicionado — ABI C v7
 
