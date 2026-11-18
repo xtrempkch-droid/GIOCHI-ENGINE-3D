@@ -91,20 +91,30 @@ piece of the engine did not fit, the game has its own: the chase camera (the eng
 
 ## Tested on the console
 
-Measured on 2026-11-18 on the **R35S** (Rockchip RK3326, Cortex-A35, Mali-G31 with
-Panfrost, Buildroot 2025.02, glibc 2.41, 640×480 DSI panel, 964 MB) over SSH, with the
-game on the real display through KMSDRM:
+Measured on 2026-11-18 on **two consoles**, with **the same binary** (built once for
+`cortex-a35`; the A55 decodes everything the A35 emits), on the real display through
+KMSDRM:
 
-| | |
-|---|---|
-| GL context | `GLES 2 on Mali-G31 (Panfrost) (Mesa)`, 128 extensions, instancing `ext` |
-| 600 frames | 10.12 s — **59.3 fps**, vblank-locked |
-| 1800 frames (30 s) | 30.13 s — **59.7 fps**, clean exit |
-| CPU per frame | **5.9 ms** of a 16.7 ms budget — about 65 % headroom for phase 45 |
-| Gamepad | `r36s_Gamepad` detected; left untouched, the car stays on the line at 0 km/h |
-| Capture | 640×480, verified: sky 35 %, road, red car, HUD text in both corners |
+| | R35S (RK3326) | x55 (RK3566) |
+|---|---|---|
+| GPU | Mali-G31 (Panfrost) | Mali-G52 r1 (Panfrost) |
+| Panel | 640×480 landscape | 720×1280 **portrait** (`fbcon=rotate:3`) |
+| Memory | 964 MB | 1 967 MB |
+| Gamepad | `r36s_Gamepad` | `Giochi Gamepad` |
+| 600 frames | 10.12 s — **59.3 fps** | **58.2 fps** (300 frames) |
+| 1800 frames (30 s) | 30.13 s — **59.7 fps** | 30.19 s — **59.6 fps** |
+| CPU per frame | **5.9 ms** of 16.7 ms | **4.7 ms** |
+| HUD | top-left + bottom-right of a 4:3 frame | same corners of a **portrait** frame, no code change |
+| Capture | 640×480, verified | 720×1280, verified |
 
-KMSDRM ignores `--size` and uses the panel's own mode, which is why every run is 640×480.
+KMSDRM ignores `--size` and uses the panel's own mode, which is why the sizes above are the
+panels' and not 1280×720.
+
+> **The x55 picture is 90° off on the physical screen.** Its panel is portrait and the
+> console mounts it rotated; `fbcon=rotate:3` turns the *console text*, not an
+> application's output, and the engine has no rotation pass. The launcher rotates its own
+> drawing by reading `/sys/class/graphics/fbcon/rotate`; this engine does not yet. It is a
+> platform-layer gap, not a game one — see [docs/KMSDRM.md §9](../docs/KMSDRM.md).
 
 Run it yourself:
 

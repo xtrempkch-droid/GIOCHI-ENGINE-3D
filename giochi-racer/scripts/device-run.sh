@@ -20,6 +20,18 @@
 #   * restoring means re-enabling the launcher and waiting for the supervisor's own
 #     poll to bring the UI back, nudging `giochi-init` only if 35 s go by.
 #
+# Two states it honours instead of fighting:
+#
+#   * `/run/giochi/dev-free-console` — while that file exists the supervisor parks the
+#     launcher on purpose, so the console is *already* free and has to stay that way.
+#     Re-enabling the launcher there would bring a UI up in the middle of somebody
+#     else's session; the script reports and leaves it alone.
+#   * a **different unit on the same address**. The USB gadget serves one console at a
+#     time and every reflash makes a new host key, so `known_hosts` reports a "man in
+#     the middle" that is really just the other handheld. `--refresh-host-key` says
+#     "I know, it is my console"; without it the script explains that instead of
+#     dumping the SSH banner.
+#
 # Usage:
 #   giochi-racer/scripts/device-run.sh                      # 600 frames, scripted driver
 #   giochi-racer/scripts/device-run.sh --frames 120
@@ -29,6 +41,7 @@
 #   giochi-racer/scripts/device-run.sh --size 320x240       # window size passed to the game
 #   giochi-racer/scripts/device-run.sh --laps 1
 #   giochi-racer/scripts/device-run.sh --keyboard --log debug   # pad-driven, verbose
+#   giochi-racer/scripts/device-run.sh --refresh-host-key      # another unit on the IP
 #
 # The frame is copied back to /tmp/racer-frame.bmp and checked with check-frame.py.
 set -euo pipefail
@@ -45,11 +58,33 @@ log_level=""
 binary="target/aarch64-unknown-linux-gnu/release/giochi-racer"
 skip_deploy=0
 auto=1
+refresh_host_key=0
 launcher="/opt/giochi/apps/launcher/bin/giochi-launcher"
 local_frame="/tmp/racer-frame.bmp"
 
 usage() {
-    sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    cat <<'USAGE'
+Deploy the racer to a console over SSH, run it on the real display, and hand the
+screen back exactly as it was found.
+
+  --host USER@HOST     SSH destination (default root@10.55.0.2)
+  --dest DIR           deployment directory on the device (default /opt/racer)
+  --frames N           frames to run (default 600)
+  --size WxH           window size passed to the game (KMSDRM uses the panel's mode)
+  --laps N             laps in the race
+  --log LEVEL          RUST_LOG level (default info)
+  --binary PATH        ARM64 binary to deploy
+  --launcher PATH      the console's launcher, the process holding DRM master
+  --skip-deploy        reuse the binary already on the device
+  --keyboard           do not script the driver: read the pad (or the keyboard)
+  --refresh-host-key   forget the host key; a different unit answers on that IP
+  -h, --help           this text
+
+The script releases DRM master, runs the game, pulls the capture back, checks it and
+restores the console from a trap *on the device*, so a dropped SSH connection cannot
+leave it black. It leaves a console that was freed with /run/giochi/dev-free-console
+alone, and it refuses to deploy a binary whose glibc floor is above the device's.
+USAGE
 }
 
 while [[ $# -gt 0 ]]; do
@@ -64,10 +99,41 @@ while [[ $# -gt 0 ]]; do
         --launcher) launcher="$2"; shift 2;;
         --skip-deploy) skip_deploy=1; shift;;
         --keyboard) auto=0; shift;;
+        --refresh-host-key) refresh_host_key=1; shift;;
         -h|--help) usage; exit 0;;
         *) echo "unknown argument '$1'; --help" >&2; exit 2;;
     esac
 done
+
+hostname_only="${host#*@}"
+ssh_opts=(-o BatchMode=yes -o ConnectTimeout=10)
+
+if [[ "$refresh_host_key" == "1" ]]; then
+    echo "==> forgetting the host key for $hostname_only (a different unit answers there)"
+    ssh-keygen -R "$hostname_only" >/dev/null 2>&1 || true
+fi
+
+# A reflashed console is a new host key at the same address. Turning that into one
+# sentence and a command is the difference between "the tool is broken" and "plugged in
+# the other handheld".
+if ! probe="$(ssh "${ssh_opts[@]}" -o ConnectTimeout=8 "$host" true 2>&1)"; then
+    if grep -q "HOST IDENTIFICATION HAS CHANGED" <<<"$probe"; then
+        cat >&2 <<'EOF'
+error: the host key changed. The gadget carries one console at a time and every image
+       reflash generates a new key, so this is almost always the other unit rather than
+       an attack. If the console now plugged in is the one you meant, rerun with:
+           --refresh-host-key
+EOF
+    else
+        cat >&2 <<'EOF'
+error: cannot log in. A reflashed image loses /root/.ssh/authorized_keys, so the key
+       has to be installed again with the device password (giochi-dev on the dev image):
+           ssh root@HOST   # password, then append ~/.ssh/id_ed25519.pub
+EOF
+        echo "  ssh said: $probe" >&2
+    fi
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Deploy
@@ -82,8 +148,28 @@ if [[ "$skip_deploy" == "0" ]]; then
         echo "error: $binary is not an AArch64 executable" >&2
         exit 1
     }
+    # The host's glibc is newer than the consoles'. A binary linked here demands the
+    # host's symbol versions and dies on the device with `version 'GLIBC_x' not found`,
+    # which neither `cargo check` nor the cross-compile CI job can see (they never link
+    # against the console's libc). Refuse to deploy one.
+    floor="$(aarch64-linux-gnu-readelf -sW --dyn-syms "$binary" 2>/dev/null |
+        grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu | tail -1 || true)"
+    device_glibc="$(ssh "${ssh_opts[@]}" "$host" 'ldd --version 2>/dev/null | head -1' |
+        grep -oE '[0-9]+\.[0-9]+$' || true)"
+    if [[ -n "$floor" && -n "$device_glibc" ]]; then
+        echo "==> glibc: binary needs ${floor#GLIBC_}, device has $device_glibc"
+        if [[ "$(printf '%s\n%s\n' "${floor#GLIBC_}" "$device_glibc" | sort -V | tail -1)" != "$device_glibc" ]]; then
+            echo "error: $binary needs glibc ${floor#GLIBC_}, the device has $device_glibc." >&2
+            echo "       Build it in a container at the device's glibc -- docs/CROSS_COMPILE.md" >&2
+            echo "       section \"The host's glibc is the ceiling, not the device's\"." >&2
+            exit 1
+        fi
+    fi
+
     echo "==> deploying to $host:$dest"
-    ssh -o BatchMode=yes "$host" "mkdir -p '$dest/assets'"
+    # The path is expanded here on purpose: it is this side's idea of the destination.
+    # shellcheck disable=SC2029
+    ssh "${ssh_opts[@]}" "$host" "mkdir -p '$dest/assets'"
     scp -q -o BatchMode=yes "$binary" "$host:$dest/giochi-racer"
     scp -q -o BatchMode=yes -r giochi-racer/assets/. "$host:$dest/assets/"
 fi
@@ -106,11 +192,19 @@ extra=""
 [ "$size" != "-" ] && extra="$extra --size $size"
 [ "$laps" != "-" ] && extra="$extra --laps $laps"
 
-echo "==> device: $(uname -m) $(uname -r), $(nproc) cores, $(awk '/MemTotal/{printf "%d MB", $2/1024}' /proc/meminfo)"
+DEV_FREE=/run/giochi/dev-free-console
+# While this file exists the supervisor parks the launcher on purpose: the console is
+# free because somebody made it free, not because something is wrong.
+dev_free() { [ -e "$DEV_FREE" ]; }
 
-# Every process holding a /dev/dri node. `card0` is the one that matters for DRM
-# master; renderD128 is holding the render node open and does not block a KMS surface
-# but is reported, because a launcher that kept it would be a leak.
+panel="$(head -1 /sys/class/drm/card0-*/modes 2>/dev/null || true)"
+rotate="$(cat /sys/class/graphics/fbcon/rotate 2>/dev/null || echo '?')"
+echo "==> device: $(hostname), $(nproc) cores, $(awk '/MemTotal/{printf "%d MB", $2/1024}' /proc/meminfo)"
+echo "  $(uname -m) kernel $(uname -r), panel ${panel:-unknown}, fbcon rotate $rotate"
+echo "  $(ldd --version 2>/dev/null | head -1)"
+
+# Every process holding card0. renderD128 is not reported: the render node does not
+# block a KMS surface, and a launcher that opened it once is not worth failing over.
 drm_holders() {
     for p in /proc/[0-9]*; do
         for f in "$p"/fd/*; do
@@ -129,6 +223,11 @@ restore() {
         restored=1
         echo
         echo "==> restoring the console"
+        if dev_free; then
+            # Bringing the launcher back here would interrupt whoever freed the console.
+            echo "  $DEV_FREE is present: left free, launcher still parked"
+            exit "$status"
+        fi
         if [ -e "$launcher" ]; then
             chmod 0755 "$launcher" || true
         fi
@@ -169,7 +268,9 @@ restore() {
 trap restore EXIT INT TERM
 
 echo "==> releasing the console"
-if [ -e "$launcher" ]; then
+if dev_free; then
+    echo "  already free ($DEV_FREE)"
+elif [ -e "$launcher" ]; then
     chmod 0644 "$launcher" || true
     if [ -x "$launcher" ]; then
         echo "  could not clear the execute bit on $launcher" >&2
@@ -182,7 +283,8 @@ kill_holders() {
     for pid in $(drm_holders); do
         comm=$(cat "/proc/$pid/comm" 2>/dev/null)
         case "$comm" in
-            giochi-launcher|giochi-racer) kill "-$signal" "$pid" 2>/dev/null || true;;
+            giochi-launcher|giochi-racer|giochi-gamepad) kill "-$signal" "$pid" 2>/dev/null || true;;
+            *) echo "  leaving '$comm' ($pid) alone: not ours to kill" >&2;;
         esac
     done
 }

@@ -677,8 +677,9 @@ contra a versão 0.5.1 do workspace.
       trava, faz a volta — medido em `tests/physics_track.rs`, não só olhado
 - [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-racer --test hud_pixels` — o HUD
       desenha texto e as quatro esquinas caem onde devem
-- [x] **ARM64 no hardware real**: 600 e 1800 frames a ~59,5 fps no R35S (KMSDRM, Mali-G31),
-      gamepad detetado, captura verificada, ecrã restaurado — ver a tabela acima
+- [x] **ARM64 no hardware real, dois SoCs**: R35S (Mali-G31, 640×480) e x55 (Mali-G52,
+      720×1280 retrato), ambos a ~59,5 fps por KMSDRM com o **mesmo binário**, gamepad
+      detetado nos dois, capturas verificadas, ecrã restaurado — ver as duas tabelas acima
 
 ### Entregue na Fase 41
 
@@ -729,6 +730,63 @@ o procedimento completo — ficou em `docs/CROSS_COMPILE.md` §"The host's glibc
 ceiling": construir dentro de `debian:13-slim` (glibc 2.41), que produz um binário que pede
 no máximo `GLIBC_2.35`.
 
+### Segunda validação em hardware **diferente**: Powkiddy x55 (Mali-G52, 2026-11-18)
+
+O aparelho ligado em `10.55.0.2` passou a ser um **x55** (host key nova, imagem nova), não
+o R35S. O `giochi-racer` foi corrido nele com **o mesmo binário**, compilado uma vez para
+`cortex-a35` — o A55 descodifica tudo o que o A35 emite.
+
+| | R35S (RK3326) | **x55 (RK3566)** |
+|---|---|---|
+| CPU | Cortex-A35 (part `0xd04`) | **Cortex-A55 (part `0xd05`)** |
+| GPU | Mali-G31 (Panfrost) | **Mali-G52 r1 (Panfrost)** |
+| Memória | 964 MB | **1 967 MB** |
+| Painel | 640×480 paisagem | **720×1280 retrato** (`fbcon=rotate:3`) |
+| Gamepad | `r36s_Gamepad` | **`Giochi Gamepad`** |
+| 600 frames | 59,3 fps | **58,2 fps** (300 frames) |
+| 1800 frames (30 s) | 59,7 fps | **59,6 fps**, saída 0 |
+| CPU por frame | 5,9 ms | **4,7 ms** (6,19+2,31 s / 1800) |
+| Captura | 640×480, 159–169 cores | **720×1280, 157–171 cores** |
+
+O `check-frame.py` passou nos dois, e o HUD caiu nos cantos certos **de um ecrã retrato**
+(as duas linhas de texto em `x ≈ 18`, a velocidade em `y ≈ 1200` de 1280) sem uma linha de
+código por aparelho: o layout é em percentagem da altura/largura, e a câmara deriva o
+`aspect` do drawable real (ADR-035).
+
+**Bloqueio encontrado no x55, e é do motor, não do jogo:** o painel é retrato e a consola
+usa-o rodado (`fbcon=rotate:3`). O `fbcon` roda o *texto da consola*, não a saída de uma
+aplicação. O launcher do GIOCHI-OS roda o próprio desenho lendo
+`/sys/class/graphics/fbcon/rotate`; este motor não tem esse passo, por isso um jogo direto
+por KMSDRM no x55 corre depressa e **aparece a 90°**. O `giochi-racer` não pode resolver
+isto sem tocar no motor (R2) e não deve aprender nomes de aparelho; a correção é em
+`giochi_engine::platform` e está descrita, com as duas opções, em
+`docs/KMSDRM.md` §9. Fica como pendência para a Fase 45/46.
+
+Nota operacional que o R35S já tinha ensinado: a imagem não sobrevive a um corte de
+energia — a `authorized_keys` desaparece. Reinstalada por password (`giochi-dev`, o mesmo
+procedimento das sessões anteriores) e a chave pública ficou outra vez no aparelho.
+
+### O `device-run.sh` endurecido pelo que a bancada mostrou
+
+Três falhas reais do script, encontradas a correr nos dois aparelhos e nos dois estados do
+console — não por leitura:
+
+| O que aconteceu | O que o script fazia | O que passou a fazer |
+|---|---|---|
+| Trocar de aparelho no mesmo `10.55.0.2` (o gadget serve um de cada vez, e cada reflash muda a host key) | despejava o banner de *man in the middle* e o utilizador ficava a olhar para 30 linhas de SSH | **deteta** a mudança de chave e diz numa frase que é a outra unidade, com `--refresh-host-key` na linha seguinte |
+| Aparelho com `/run/giochi/dev-free-console` (o supervisor deixa o launcher parado de propósito) | "restaurava" o ecrã, **re-ligando o launcher no meio de uma sessão que não era dele** | deteta o marcador, reporta `already free` e não lhe toca |
+| Binário ligado no host (glibc 2.43) num console com 2.41 | implantava e o jogo morria com `version 'GLIBC_2.43' not found` | lê o piso de glibc do ELF, compara com o do aparelho e **recusa** antes de copiar |
+
+Mais: `giochi-gamepad` passou a ser reconhecido como possível detentor do `card0` (estava
+a ser ignorado), e qualquer outro processo que segure o `card0` é **reportado e não
+morto** — o script só mata o que é dele.
+
+**Bancada indisponível no fecho desta fase.** O utilizador retirou os aparelhos ("sem
+equipamento disponível, só depois de correções do sistema"), com o R35S a responder na
+última corrida. O que ficou feito e verificado está medido acima; o que depende de
+hardware — a correção da rotação do x55, e o teste de instalação da Fase 46 — fica à
+espera do equipamento.
+
 ### O que a fase decidiu (e porquê)
 
 **O carro não é um corpo rígido a sério.** Um carro em Rapier precisa de raios de suspensão,
@@ -771,6 +829,10 @@ desenharam fora dela; o teste `hud_pixels` media isto a cada passo e fica como g
 - ~~Teste em hardware ARM64~~ — **feito em 2026-11-18** no `r35sv` (R35S, RK3326,
   Cortex-A35, Mali-G31/Panfrost, Buildroot 2025.02, glibc 2.41, ecrã DSI 640×480). Ver a
   tabela abaixo.
+- **Rotação de painel (`x55`)**: o motor não tem passo de rotação e o painel desse aparelho
+  é retrato com a consola rodada. Corre a ~59,6 fps mas aparece a 90°. Correção em
+  `giochi_engine::platform`, descrita em `docs/KMSDRM.md` §9; entra na Fase 45/46 porque
+  toca no motor, e a Fase 41 proíbe-o (R2).
 - **`giochi-editor` não encaminha `sdl2-system`** (não tem secção `[features]`). Passa no
   `check-aarch64.sh` porque este compila com `bundled`; para o pacote ARM64 da Fase 46 vai
   precisar da feature, e essa é uma alteração ao editor que fica para então.

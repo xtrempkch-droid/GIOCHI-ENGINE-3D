@@ -59,9 +59,14 @@ a ABI C avança só de 6 para 7.
   verdade em `tests/physics_track.rs`.
 - `scripts/check-version.sh` e `scripts/check-features.sh` passaram a cobrir o crate novo;
   `ci.yml` corre o jogo headless, verifica a captura e os testes por frame.
-- **Corrido no hardware real** (R35S, Mali-G31/Panfrost, KMSDRM 640×480): ~59,5 fps em 600 e
-  1800 frames, 5,9 ms de CPU por frame, gamepad detetado, ecrã restaurado por
-  `giochi-racer/scripts/device-run.sh`. Achado de build documentado em
+- **Corrido no hardware real em dois SoCs** com o mesmo binário: R35S (Mali-G31, 640×480) e
+  x55 (Mali-G52, 720×1280 retrato), ambos a ~59,5 fps por KMSDRM, 5,9 ms e 4,7 ms de CPU por
+  frame, gamepad detetado nos dois, ecrã restaurado por
+  `giochi-racer/scripts/device-run.sh`. No x55 o HUD cai nos cantos de um ecrã retrato sem
+  uma linha de código por aparelho.
+- Aberto em `docs/KMSDRM.md` §9: o painel do x55 é retrato e a consola roda-o
+  (`fbcon=rotate:3`), mas o motor não tem passo de rotação, por isso um jogo por KMSDRM
+  nesse aparelho aparece a 90°. É do `giochi_engine::platform`, não do jogo. Achado de build documentado em
   `docs/CROSS_COMPILE.md`: um binário do `build-aarch64.sh` exige a glibc *do host* e não
   arranca num console mais antigo; a construção passou a ser feita num contentor com a glibc
   do alvo.

@@ -437,3 +437,47 @@ Two things this confirms that a desktop cannot:
 An operational note: this unit's rootfs does not survive a power cut. After the battery
 died, `/opt/giochi` was empty and the SSH `authorized_keys` were gone, so the deploy has
 to be rebuilt after every reset.
+
+---
+
+## 9. A portrait panel that the user reads landscape: the x55
+
+Measured on 2026-11-18 on a **Powkiddy x55** (RK3566, Cortex-A55, Mali-G52 r1/Panfrost,
+Buildroot 2025.02, glibc 2.41, 1 967 MB).
+
+Its panel's native mode is **720×1280 portrait**, and the console is used landscape:
+
+```text
+$ head -1 /sys/class/drm/card0-DSI-1/modes
+720x1280
+$ cat /sys/class/graphics/fbcon/rotate
+3
+$ cat /proc/cmdline
+... fbcon=rotate:3
+```
+
+`fbcon=rotate:3` turns the *console text*; it does not turn an application's output. A
+KMS/GBM app that draws an upright image into the 720×1280 buffer therefore appears
+**rotated on the physical screen**, because the panel is mounted turned.
+
+The launcher solves this by rotating its own drawing and taking the angle from the system
+rather than from a device name (`GIOCHI-APP/app/launcher-star-dust/crates/ui-sdl/src/draw.rs`:
+"a app que carrega *o X55 precisa de anti-horário* fica errado na primeira revisão de
+hardware"). Any GIOCHI app on this unit has to do the same.
+
+**What this engine does today: nothing.** `giochi-engine`/`giochi-engine-3d` render into
+the drawable in its own orientation, so a game on the x55 is 90° off. The engine's 3D path
+does handle the *aspect* correctly — `720×1280` produces a tall, narrow view and the 3D HUD
+lays itself out in the portrait corners — so the picture is internally consistent; it is
+the whole picture that is turned.
+
+The fix belongs in `giochi_engine::platform`, next to the driver selection, and not in a
+game: read `/sys/class/graphics/fbcon/rotate` (0–3), expose it, and either
+
+1. let `RenderContext3D` render into a rotated target and blit it turned (one extra pass,
+   the infrastructure already exists in `render3d::upscale`), or
+2. if the primary plane advertises `rotation`, set it — hardware rotation costs nothing,
+   but not every DSI panel supports it, which is why option 1 has to exist too.
+
+Until then, a game run directly on the x55 by KMSDRM is playable and fast but sideways.
+Everything else measured fine — see `PROGRESS.md` §"Salto C", the second-SoC table.
