@@ -59,7 +59,8 @@ is authoritative.
 | [`giochi-engine-lua`](giochi-engine-lua/) | lib | Reference binding — Lua 5.4 via mLua, no `unsafe` |
 | [`giochi-engine-3d`](giochi-engine-3d/) | lib | 3D: GLES 2.0 over EGL, meshes, **textures**, shaders, lighting, camera |
 | [`giochi-net`](giochi-net/) | lib | Networking: host-authoritative UDP, interest management, optional `laminar`/`mdns` |
-| [`giochi-editor`](giochi-editor/) | bin | Visual scene editor (Salto B, phase 30): egui panels over the engine's renderer |
+| [`giochi-editor`](giochi-editor/) | bin | Visual scene editor (Salto B, phases 30–40): egui panels over the engine's renderer |
+| [`giochi-racer`](giochi-racer/) | bin | GIOCHI RACER (Salto C, phase 41): an arcade racer on a track built in the editor |
 | [`giochi-demo`](giochi-demo/) | bin | The demo; `--frames`, `--verify`, `lua <script>` |
 
 ## Build
@@ -233,6 +234,35 @@ stack (ADR-069), plus a persisted recent list, a 60-second autosave to a separat
 in its own OpenGL window — through the scene→renderer conversion in `giochi-editor/src/play/`,
 which is the piece the racer will consume (ADR-071). It ships as a self-contained folder whose
 assets are resolved relative to the binary (ADR-072).
+
+### GIOCHI RACER
+
+The first game built **with** the editor rather than alongside it
+(`giochi-racer`, Salto C phases 41–46). Phase 41 is the foundation: one 200 m oval read from
+a `.scene`, an arcade car with a Rapier body whose rotations are locked, a chase camera, lap
+counting over four checkpoints and an egui HUD.
+
+```bash
+cargo run -p giochi-racer --release                 # opens the game
+cargo run -p giochi-racer -- --frames 600 --auto    # headless: scripted driver, 10 s of race
+cargo run -p giochi-racer -- --track giochi-racer/assets/tracks/track_easy.scene
+```
+
+The game consumes the engine and the editor and modifies neither (R2). Two things it needed
+that the engine does not have, and why:
+
+- **a heading-aware chase camera** — `giochi_engine_3d::camera::FollowCamera` trails along
+  world `+Z`, which is a side camera for a car that can face any way;
+- **a HUD offset from a measured layout** — the readouts are painted at absolute positions,
+  because an `Area` measures against the screen and a corner anchor then lands outside it.
+
+Tracks are data, not code: the naming convention (`Start`, `Checkpoint 1`…) is in
+[giochi-racer/docs/TRACK_SPECS.md](giochi-racer/docs/TRACK_SPECS.md), and
+`giochi-racer/tests/track_specs.rs` measures the shipped file against the numbers written
+there on every `cargo test`. The car's handling is a pure `ArcadeModel` (no GL, no Rapier) so
+it is unit-tested, and `tests/physics_track.rs` drives the real car on the real track:
+it cannot fall through the floor, cannot tunnel through a barrier, stays upright, and
+completes a lap.
 
 ### Game systems
 

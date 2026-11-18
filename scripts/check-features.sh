@@ -26,7 +26,7 @@ cd "$repo_root"
 # but the defect is "internal dependency without `default-features = false`", which is
 # not specific to it: capi is what ships to the console, and lua/demo forward to the
 # same graph.
-crates=(giochi-engine giochi-engine-3d giochi-engine-capi giochi-engine-lua giochi-demo)
+crates=(giochi-engine giochi-engine-3d giochi-engine-capi giochi-engine-lua giochi-demo giochi-racer)
 
 fail=0
 

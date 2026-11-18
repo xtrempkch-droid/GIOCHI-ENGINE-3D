@@ -8,6 +8,7 @@ members = [
     "giochi-engine-3d",
     "giochi-net",
     "giochi-editor",
+    "giochi-racer",
 ]
 
 [workspace.package]
@@ -44,6 +45,10 @@ repository = "https://github.com/xtrempkch-droid/GIOCHI-SYSTEM"
 # continua sendo `bundled`, então quem não pede nada não muda de comportamento.
 sdl2 = { version = "0.38", default-features = false, features = ["image", "mixer", "ttf", "unsafe_textures"] }
 glam = "0.34"
+# Salto C: the game binary, not the engine. `anyhow` was removed as dead in the 0.5.1
+# audit because nothing in the workspace used it; `giochi-racer` is a consumer whose
+# `main` and systems want `?` over mixed error types, which is what it is for.
+anyhow = "1.0"
 thiserror = "2.0"
 log = "0.4"
 env_logger = "0.11"

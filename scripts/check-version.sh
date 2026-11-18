@@ -53,10 +53,11 @@ expect() {
 # published crate cannot resolve to a version that was never released. A member may
 # either inherit (`version.workspace = true`) or restate the literal.
 # Every member of the workspace. `giochi-editor` was missing from this list and shipped
-# 0.1.0 for two releases while the engine it embeds said 0.5.1.
+# 0.1.0 for two releases while the engine it embeds said 0.5.1, which is why the list is
+# now written out in full and checked against the workspace below.
 members=(
     giochi-engine giochi-engine-capi giochi-engine-lua giochi-demo
-    giochi-engine-3d giochi-net giochi-editor
+    giochi-engine-3d giochi-net giochi-editor giochi-racer
 )
 for crate in "${members[@]}"; do
     file="$crate/Cargo.toml"

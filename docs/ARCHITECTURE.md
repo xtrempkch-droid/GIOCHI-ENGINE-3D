@@ -18,6 +18,8 @@ giochi-engine-capi    rlib +    #[no_mangle] extern "C", panics caught, generate
                       staticlib
 giochi-engine-lua     lib       reference binding (Lua 5.4 via mLua, no unsafe)
 giochi-net            lib       host-authoritative UDP, zero-dependency by default
+giochi-editor         bin+lib   the visual scene editor (Salto B, ADR-062-072)
+giochi-racer          bin+lib   GIOCHI RACER, the first game built with the editor (Salto C)
 giochi-demo           bin       the demo, --frames/--verify, and the `lua` subcommand
 ```
 
@@ -27,7 +29,10 @@ That direction is what lets a 2D game ignore GLES entirely, and it is why the 3D
 and the 3D HUD live in the 3D crate rather than in `giochi-engine` (ADR-057, ADR-059).
 
 The core crate never depends on the FFI crate, the FFI crate never depends on Lua,
-and the demo is the only place that assembles a runnable application. Adding a
+and the three application crates — the demo, the editor and the racer — are the only
+places that assemble a runnable application. Neither the editor nor the racer is allowed
+to change the engine (master plan, R2): when one of them needs something the engine does
+not have, the piece lives in the application. Adding a
 binding therefore never changes the engine.
 
 ---

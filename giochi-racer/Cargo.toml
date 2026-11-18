@@ -1,0 +1,38 @@
+[package]
+name = "giochi-racer"
+description = "GIOCHI RACER: arcade racing built with the GIOCHI editor (Salto C, phases 41-46)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+# The game consumes the engine; it never forks it (master plan, R2). `default-features =
+# false` is what makes `--features sdl2-system` reachable from here, exactly as in every
+# other consumer crate (`scripts/check-features.sh`).
+giochi-engine = { path = "../giochi-engine", version = "0.5.1", default-features = false }
+# `physics-3d` is the car's collider and the track's walls; `hud` is the egui painter
+# over GLES, which is the only text path a KMSDRM console has.
+giochi-engine-3d = { path = "../giochi-engine-3d", version = "0.5.1", default-features = false, features = ["physics-3d", "hud"] }
+# The HUD closure receives an `&egui::Context`, so the game names egui types. Same
+# workspace pin as the engine's, so the graph keeps one egui (ADR-061).
+egui = { workspace = true }
+glam = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+
+[[bin]]
+name = "giochi-racer"
+path = "src/main.rs"
+
+[features]
+default = ["sdl2-bundled"]
+sdl2-bundled = ["giochi-engine/sdl2-bundled", "giochi-engine-3d/sdl2-bundled"]
+sdl2-system = ["giochi-engine/sdl2-system", "giochi-engine-3d/sdl2-system"]
+# Phase 45 reads the frame counters; forwarding it now means the overlay can be enabled
+# with `--features profiling` without touching a manifest.
+profiling = ["giochi-engine/profiling", "giochi-engine-3d/profiling"]

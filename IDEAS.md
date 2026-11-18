@@ -87,3 +87,29 @@ deliberately out of scope:
   already a dependency, so the work is moving the code and not adding a dependency.
 - **A clipboard on KMSDRM.** egui asks for copy/paste; the platform has no clipboard, and
   the request is logged rather than served.
+
+## Apareceram durante o Salto C (fases 41–46)
+
+A lista que o plano do jogo manda manter separada. Nenhuma destas ideias é necessária para
+as fases 41–46; todas são o que um jogo de corrida pede *depois* de ser um jogo de corrida.
+
+- [ ] **Drift com pontuação** — o travão de mão já desliza (Fase 41), mas não há sistema de
+      pontos nem combo.
+- [ ] **Tuning do carro** (suspensão, motor, pneus) — hoje `CarConfig` é um `struct` no
+      código; um menu de tuning é Fase 44+ no mínimo.
+- [ ] **Carreira com progressão** — troféus, desbloqueios, campeonatos.
+- [ ] **Multiplayer split-screen** — precisa de duas vistas no mesmo frame, que o
+      `RenderContext3D` não tem (um viewport por frame).
+- [ ] **Multiplayer online** — `giochi-net` existe; um jogo de corrida autoritativo é outro
+      projecto.
+- [ ] **Dano visual e mecânico**.
+- [ ] **Replay e ghost da melhor volta** — o `CarState` por frame é determinístico o
+      suficiente para um replay, mas não há gravação.
+- [ ] **Clima dinâmico** (chuva, noite) — o renderer não tem sombras nem pós-processamento.
+- [ ] **Mais pistas e mais carros** — as Fases 42–43 entregam três e um.
+- [ ] **VR**.
+- [ ] **Time trial como modo explícito** — hoje é implícito: uma corrida sem IA é uma volta
+      cronometrada.
+- [ ] **Navmesh em vez de grelha** para a IA, se as pistas deixarem de ser corredores.
+- [ ] **Física de carro a sério** (raios de suspensão, curvas de pneu): foi deliberadamente
+      recusada em `giochi-racer/src/vehicle/car.rs` — o modelo arcade é o produto.

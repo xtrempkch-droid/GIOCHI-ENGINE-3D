@@ -375,6 +375,19 @@ jobs:
           cargo run -q -p giochi-engine-3d --example gltf_viewer -- \
             assets/models/car.gltf --frames 3
 
+      - name: GIOCHI RACER (GL)
+        # Salto C phase 41. The racer needs a real EGL context (it renders with GLES), so
+        # this runs under `offscreen` like the engine's own 3D tests. The scripted driver
+        # exercises the car model, the physics world, the lap tracker and the HUD, and the
+        # capture is read back and checked, so a frame that silently failed to draw still
+        # fails here.
+        env:
+          SDL_VIDEODRIVER: offscreen
+        run: |
+          cargo run -q -p giochi-racer -- --frames 180 --auto --quadro /tmp/race.bmp
+          python3 giochi-racer/scripts/check-frame.py /tmp/race.bmp
+          cargo test -q -p giochi-racer
+
       - name: Examples
         env:
           SDL_VIDEODRIVER: dummy

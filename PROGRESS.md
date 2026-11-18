@@ -1,5 +1,9 @@
 # Estado — GIOCHI-ENGINE
 
+**Estado corrente: Salto C, Fase 41 concluída** — ver a secção
+[Salto C — GIOCHI RACER](#salto-c--giochi-racer-fases-4146) mais abaixo. O Salto B está
+fechado e fica registado na íntegra.
+
 ## Salto B — Editor Visual (Fases 30–40)
 
 **Pré-requisito do plano verificado:** Fases 0–29 concluídas (tabela do Growth Pack abaixo;
@@ -643,10 +647,103 @@ testados. Nada bloqueia as Fases 41–45.
 
 ### Próxima fase
 
-**Fase 41 — GIOCHI RACER: fundação**: crate `giochi-racer`, pista a partir de `.scene`, carro
-controlável e câmara de perseguição. O carro pode vir de `.obj` ou de `.gltf`/`.glb` (o loader
-existe desde a Fase 26.6, ADR-073) e a câmara de perseguição já está no motor
-(`camera::FollowCamera`, ADR-076).
+O Salto B está fechado; a Fase 41 abriu o **Salto C** e está abaixo.
+
+## Salto C — GIOCHI RACER (Fases 41–46)
+
+**Pré-requisito verificado:** Fases 0–40 concluídas. O Salto C começou em **2026-11-18**,
+contra a versão 0.5.1 do workspace.
+
+| Fase | Estado | Verificado |
+|---|---|---|
+| 41 — Fundação: carro, pista, câmara, HUD | **concluída** (2026-11-18) | 143 testes no crate (114 de unidade + 8 do `main`, 10 de física na pista real, 9 de especificação das pistas, 2 de pixels do HUD); corrida headless de 600 frames com captura verificada; a volta completa é feita **pelo carro físico** num teste; gates completos verdes |
+| 42 — 3 pistas + checkpoints + voltas | pendente | — |
+| 43 — IA oponente | pendente | — |
+| 44 — Menus + persistência + polimento | pendente | — |
+| 45 — DRS + modos Quality/Performance | pendente | — |
+| 46 — Build ARM64 + GIOCHI-OS + release | pendente | — |
+
+### Gates da Fase 41
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — exit 0
+- [x] `SDL_VIDEODRIVER=offscreen cargo test --workspace` — **1474 testes**, 0 falhas
+- [x] `cargo doc --workspace --no-deps --document-private-items` — 0 avisos
+- [x] `scripts/gates.sh` completo — "All gates passed"
+- [x] `cargo run -p giochi-racer -- --frames 600 --auto --quadro /tmp/race.bmp` sob
+      `SDL_VIDEODRIVER=offscreen` — 600 frames, 10 s de tempo de corrida,
+      `check-frame.py` verde (196 cores amostradas)
+- [x] Teste manual (headless, mas com o jogo a jogar-se): o carro arranca na linha, acelera,
+      trava, faz a volta — medido em `tests/physics_track.rs`, não só olhado
+- [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-racer --test hud_pixels` — o HUD
+      desenha texto e as quatro esquinas caem onde devem
+
+### Entregue na Fase 41
+
+Crate novo `giochi-racer` (bin + lib), membro do workspace, versão herdada:
+
+| Ficheiro | O que faz |
+|---|---|
+| `src/main.rs` | janela, ciclo a 60 Hz, linha de comando (`--track`, `--laps`, `--frames`, `--auto`, `--quadro`, `--size`) |
+| `src/game.rs` | `RaceGame`: pista + carro + câmara + volta + HUD, na ordem de um frame; `physics_world(&Track)` para o teste sem GL |
+| `src/track/loading.rs` | `.scene` → `Track`: transformações de mundo, malhas, colisores, marcadores por nome |
+| `src/track/lap.rs` | `LapTracker`: portões em ordem, volta invalidada por corte, tempos |
+| `src/vehicle/car.rs` | `ArcadeModel` puro (sem GL, sem Rapier) + `Car` com corpo Rapier de rotações travadas |
+| `src/vehicle/input.rs` | gamepad primeiro, teclado como recurso, zona morta de 10 % |
+| `src/vehicle/camera.rs` | `ChaseCamera` dependente do rumo, com look-ahead e recuo com a velocidade |
+| `src/vehicle/hud.rs` | HUD por `GlesHud`: volta, tempos, melhor volta, velocidade, mudança |
+| `src/utils/procedural_car.rs` | carro low-poly gerado (caixa + cabine + 4 cilindros), sem asset |
+| `src/screenshot.rs` | BMP da captura, sem dependências |
+| `assets/tracks/track_easy.scene` | oval de 200 m, 10 m de largura, 4 checkpoints, barreiras seladas |
+| `docs/TRACK_SPECS.md` | a convenção de nomes e as medidas da pista, para se construir outra no editor |
+| `tests/physics_track.rs`, `tests/track_specs.rs`, `tests/hud_pixels.rs` | a pista e o carro medidos, não assumidos |
+
+### O que a fase decidiu (e porquê)
+
+**O carro não é um corpo rígido a sério.** Um carro em Rapier precisa de raios de suspensão,
+curvas de atrito e um centro de massa abaixo dos eixos; nada disso é o escopo de um arcade
+low-poly. A condução é um modelo determinístico (`ArcadeModel`) e o Rapier faz o que faz bem:
+manter o carro fora das paredes e no chão. As rotações do corpo estão **travadas** — é a
+versão forte do "downforce para não capotar" que o plano pedia: não capota, a nenhuma
+velocidade, em nenhum lancil.
+
+**O colisor do carro não tem atrito.** O modelo é dono de cada metro por segundo. Com atrito
+0,2 contra uma estrada de 0,6 havia uma segunda travagem invisível de ~5 m/s²: irrelevante
+sob os 14 m/s² de aceleração e fatal sob os 7 m/s² de marcha-atrás — o carro chegava aos
+120 km/h em frente e não saía do sítio a recuar. Medido com um traço do modelo, não suposto.
+
+**A câmara é do jogo, não do motor.** O `FollowCamera` do motor coloca a lente atrás do alvo
+em `+Z` **do mundo**; para um carro que pode apontar para qualquer lado isso é uma câmara
+lateral. A `ChaseCamera` usa o rumo, o `blend_factor` do motor e o resto é aritmética.
+
+**As pistas são dados.** `track_easy.scene` é um ficheiro do formato do editor, aberto pelo
+editor como qualquer outro. A IA que escreveu o ficheiro não conduz o GUI; as medidas estão
+em `docs/TRACK_SPECS.md` e o utilizador pode abri-lo, mexer e gravar, com os testes a medir
+a pista outra vez.
+
+**O HUD é pintado, não "layoutado".** Cada número vai para uma posição absoluta com
+`Painter::text`. Duas versões com `Area`+`Layout` mediram-se contra a tela inteira e
+desenharam fora dela; o teste `hud_pixels` media isto a cada passo e fica como gate.
+
+### Desvios ao prompt mestre (registados)
+
+| O prompt pedia | O que foi feito, e porquê |
+|---|---|
+| `rust-version = "1.75"`, `edition = "2021"` | edition 2021 ✓, mas `rust-version` herdada (1.88): o crate depende de `giochi-engine`, cujo piso é 1.86, e o workspace inteiro tem um só número |
+| `version = "0.1.0"` | `version.workspace = true` (0.5.1). `scripts/check-version.sh` exige que todos os membros herdem; um 0.1.0 foi exactamente o bug corrigido na auditoria. A release do jogo é o **tag** da Fase 46 |
+| `glam = "0.29"`, `glow = "0.14"`, `sdl2` directo | versões do workspace (`glam` 0.34) e sem `glow` nem `sdl2` directos: o motor já os expõe e o `check-features.sh` verifica o encaminhamento |
+| `anyhow` no `main` | sim, `anyhow` 1.0 de volta ao workspace — agora com um consumidor real |
+| Pistas construídas no editor | ver acima: os ficheiros são dados do formato do editor, medidos por testes |
+
+### Bloqueios / pendências
+
+- **Teste em hardware ARM64**: não feito (não há GIOCHI-OS nesta máquina). O cross-check
+  `cargo check --target aarch64-unknown-linux-gnu` passa; o binário e o teste real são da
+  Fase 46.
+- **`giochi-editor` não encaminha `sdl2-system`** (não tem secção `[features]`). Passa no
+  `check-aarch64.sh` porque este compila com `bundled`; para o pacote ARM64 da Fase 46 vai
+  precisar da feature, e essa é uma alteração ao editor que fica para então.
+- **Três pistas, IA, menus, DRS e pacote** são as Fases 42–46, por definição.
 
 ## Growth Pack (Fases 19–24)
 

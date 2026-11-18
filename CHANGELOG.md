@@ -46,6 +46,20 @@ a ABI C avança só de 6 para 7.
 - **i18n** (`giochi_engine::i18n`, ADR-078): catálogos `key = value`, substituição de uma só
   passagem, cadeia de fallback e deteção de placeholders divergentes entre línguas.
 
+### Adicionado — `giochi-racer`, o jogo (Salto C, fase 41)
+
+- Crate novo, binário + biblioteca: uma pista lida de um `.scene` do editor, um carro
+  arcade com corpo Rapier de rotações travadas, câmara de perseguição, contagem de voltas
+  por portões em ordem e HUD por `GlesHud`.
+- **A pista é dados** (`assets/tracks/track_easy.scene`, oval de 200 m): a convenção de
+  nomes (`Start`, `Checkpoint 1`…) está em `giochi-racer/docs/TRACK_SPECS.md` e é medida
+  por `tests/track_specs.rs` a cada `cargo test`.
+- O carro é gerado (caixa, cabine e quatro cilindros), sem asset externo, e o seu modelo de
+  condução não precisa de GL nem de Rapier — é testado à parte, e a pista é conduzida de
+  verdade em `tests/physics_track.rs`.
+- `scripts/check-version.sh` e `scripts/check-features.sh` passaram a cobrir o crate novo;
+  `ci.yml` corre o jogo headless, verifica a captura e os testes por frame.
+
 ### Adicionado — ABI C v7
 
 - `giochi_audio_set_bus_volume(int32_t bus, int32_t v)` e

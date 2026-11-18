@@ -1,0 +1,1120 @@
+{
+  "format": "giochi-scene",
+  "version": 1,
+  "name": "OVAL EASY",
+  "next_id": 24,
+  "nodes": [
+    {
+      "id": 1,
+      "name": "Road South",
+      "parent": null,
+      "transform": {
+        "position": [
+          0.0,
+          -0.2,
+          -15.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          80.0,
+          0.4,
+          10.0
+        ]
+      },
+      "mesh": {
+        "primitive": {
+          "kind": "cube",
+          "size": 1.0
+        }
+      },
+      "material": {
+        "base_color": [
+          0.17,
+          0.18,
+          0.2,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.18,
+        "shininess": 24.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 0.86,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 2,
+      "name": "Road North",
+      "parent": null,
+      "transform": {
+        "position": [
+          0.0,
+          -0.2,
+          15.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          80.0,
+          0.4,
+          10.0
+        ]
+      },
+      "mesh": {
+        "primitive": {
+          "kind": "cube",
+          "size": 1.0
+        }
+      },
+      "material": {
+        "base_color": [
+          0.17,
+          0.18,
+          0.2,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.18,
+        "shininess": 24.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 0.86,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 3,
+      "name": "Road East",
+      "parent": null,
+      "transform": {
+        "position": [
+          35.0,
+          -0.2,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          10.0,
+          0.4,
+          20.0
+        ]
+      },
+      "mesh": {
+        "primitive": {
+          "kind": "cube",
+          "size": 1.0
+        }
+      },
+      "material": {
+        "base_color": [
+          0.17,
+          0.18,
+          0.2,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.18,
+        "shininess": 24.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 0.86,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 4,
+      "name": "Road West",
+      "parent": null,
+      "transform": {
+        "position": [
+          -35.0,
+          -0.2,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          10.0,
+          0.4,
+          20.0
+        ]
+      },
+      "mesh": {
+        "primitive": {
+          "kind": "cube",
+          "size": 1.0
+        }
+      },
+      "material": {
+        "base_color": [
+          0.17,
+          0.18,
+          0.2,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.18,
+        "shininess": 24.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 0.86,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 5,
+      "name": "Infield",
+      "parent": null,
+      "transform": {
+        "position": [
+          0.0,
+          -0.2,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          58.8,
+          0.4,
+          18.8
+        ]
+      },
+      "mesh": {
+        "primitive": {
+          "kind": "cube",
+          "size": 1.0
+        }
+      },
+      "material": {
+        "base_color": [
+          0.26,
+          0.4,
+          0.24,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.0,
+        "shininess": 8.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 1.0,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 6,
+      "name": "Outfield North",
+      "parent": null,
+      "transform": {
+        "position": [
+          0.0,
+          -0.2,
+          45.6
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          140.0,
+          0.4,
+          50.0
+        ]
+      },
+      "mesh": {
+        "primitive": {
+          "kind": "cube",
+          "size": 1.0
+        }
+      },
+      "material": {
+        "base_color": [
+          0.26,
+          0.4,
+          0.24,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.0,
+        "shininess": 8.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 1.0,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 7,
+      "name": "Outfield South",
+      "parent": null,
+      "transform": {
+        "position": [
+          0.0,
+          -0.2,
+          -45.6
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          140.0,
+          0.4,
+          50.0
+        ]
+      },
+      "mesh": {
+        "primitive": {
+          "kind": "cube",
+          "size": 1.0
+        }
+      },
+      "material": {
+        "base_color": [
+          0.26,
+          0.4,
+          0.24,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.0,
+        "shininess": 8.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 1.0,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 8,
+      "name": "Outfield East",
+      "parent": null,
+      "transform": {
+        "position": [
+          55.6,
+          -0.2,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          30.0,
+          0.4,
+          41.2
+        ]
+      },
+      "mesh": {
+        "primitive": {
+          "kind": "cube",
+          "size": 1.0
+        }
+      },
+      "material": {
+        "base_color": [
+          0.26,
+          0.4,
+          0.24,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.0,
+        "shininess": 8.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 1.0,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 9,
+      "name": "Outfield West",
+      "parent": null,
+      "transform": {
+        "position": [
+          -55.6,
+          -0.2,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          30.0,
+          0.4,
+          41.2
+        ]
+      },
+      "mesh": {
+        "primitive": {
+          "kind": "cube",
+          "size": 1.0
+        }
+      },
+      "material": {
+        "base_color": [
+          0.26,
+          0.4,
+          0.24,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.0,
+        "shininess": 8.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 1.0,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 10,
+      "name": "Barrier Outer North",
+      "parent": null,
+      "transform": {
+        "position": [
+          0.0,
+          0.6,
+          20.3
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          81.2,
+          1.2,
+          0.6
+        ]
+      },
+      "mesh": {
+        "primitive": {
+          "kind": "cube",
+          "size": 1.0
+        }
+      },
+      "material": {
+        "base_color": [
+          0.82,
+          0.16,
+          0.13,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.25,
+        "shininess": 32.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 0.7,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 11,
+      "name": "Barrier Outer South",
+      "parent": null,
+      "transform": {
+        "position": [
+          0.0,
+          0.6,
+          -20.3
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          81.2,
+          1.2,
+          0.6
+        ]
+      },
+      "mesh": {
+        "primitive": {
+          "kind": "cube",
+          "size": 1.0
+        }
+      },
+      "material": {
+        "base_color": [
+          0.82,
+          0.16,
+          0.13,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.25,
+        "shininess": 32.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 0.7,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 12,
+      "name": "Barrier Outer East",
+      "parent": null,
+      "transform": {
+        "position": [
+          40.3,
+          0.6,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          0.6,
+          1.2,
+          41.2
+        ]
+      },
+      "mesh": {
+        "primitive": {
+          "kind": "cube",
+          "size": 1.0
+        }
+      },
+      "material": {
+        "base_color": [
+          0.82,
+          0.16,
+          0.13,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.25,
+        "shininess": 32.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 0.7,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 13,
+      "name": "Barrier Outer West",
+      "parent": null,
+      "transform": {
+        "position": [
+          -40.3,
+          0.6,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          0.6,
+          1.2,
+          41.2
+        ]
+      },
+      "mesh": {
+        "primitive": {
+          "kind": "cube",
+          "size": 1.0
+        }
+      },
+      "material": {
+        "base_color": [
+          0.82,
+          0.16,
+          0.13,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.25,
+        "shininess": 32.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 0.7,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 14,
+      "name": "Barrier Inner North",
+      "parent": null,
+      "transform": {
+        "position": [
+          0.0,
+          0.6,
+          9.7
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          60.0,
+          1.2,
+          0.6
+        ]
+      },
+      "mesh": {
+        "primitive": {
+          "kind": "cube",
+          "size": 1.0
+        }
+      },
+      "material": {
+        "base_color": [
+          0.9,
+          0.9,
+          0.92,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.25,
+        "shininess": 32.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 0.7,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 15,
+      "name": "Barrier Inner South",
+      "parent": null,
+      "transform": {
+        "position": [
+          0.0,
+          0.6,
+          -9.7
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          60.0,
+          1.2,
+          0.6
+        ]
+      },
+      "mesh": {
+        "primitive": {
+          "kind": "cube",
+          "size": 1.0
+        }
+      },
+      "material": {
+        "base_color": [
+          0.9,
+          0.9,
+          0.92,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.25,
+        "shininess": 32.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 0.7,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 16,
+      "name": "Barrier Inner East",
+      "parent": null,
+      "transform": {
+        "position": [
+          29.7,
+          0.6,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          0.6,
+          1.2,
+          20.0
+        ]
+      },
+      "mesh": {
+        "primitive": {
+          "kind": "cube",
+          "size": 1.0
+        }
+      },
+      "material": {
+        "base_color": [
+          0.9,
+          0.9,
+          0.92,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.25,
+        "shininess": 32.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 0.7,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 17,
+      "name": "Barrier Inner West",
+      "parent": null,
+      "transform": {
+        "position": [
+          -29.7,
+          0.6,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          0.6,
+          1.2,
+          20.0
+        ]
+      },
+      "mesh": {
+        "primitive": {
+          "kind": "cube",
+          "size": 1.0
+        }
+      },
+      "material": {
+        "base_color": [
+          0.9,
+          0.9,
+          0.92,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.25,
+        "shininess": 32.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 0.7,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 18,
+      "name": "Start",
+      "parent": null,
+      "transform": {
+        "position": [
+          0.0,
+          0.5,
+          -15.0
+        ],
+        "rotation": [
+          0.0,
+          0.707107,
+          0.0,
+          0.707107
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "mesh": null,
+      "material": {
+        "base_color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.0,
+        "shininess": 16.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 1.0,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 19,
+      "name": "Checkpoint 1",
+      "parent": null,
+      "transform": {
+        "position": [
+          35.0,
+          0.5,
+          -15.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "mesh": null,
+      "material": {
+        "base_color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.0,
+        "shininess": 16.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 1.0,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 20,
+      "name": "Checkpoint 2",
+      "parent": null,
+      "transform": {
+        "position": [
+          35.0,
+          0.5,
+          15.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "mesh": null,
+      "material": {
+        "base_color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.0,
+        "shininess": 16.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 1.0,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 21,
+      "name": "Checkpoint 3",
+      "parent": null,
+      "transform": {
+        "position": [
+          -35.0,
+          0.5,
+          15.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "mesh": null,
+      "material": {
+        "base_color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.0,
+        "shininess": 16.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 1.0,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 22,
+      "name": "Checkpoint 4",
+      "parent": null,
+      "transform": {
+        "position": [
+          -35.0,
+          0.5,
+          -15.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "mesh": null,
+      "material": {
+        "base_color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.0,
+        "shininess": 16.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 1.0,
+        "metallic": 0.0
+      },
+      "light": null,
+      "camera": null
+    },
+    {
+      "id": 23,
+      "name": "Sun",
+      "parent": null,
+      "transform": {
+        "position": [
+          0.0,
+          20.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "mesh": null,
+      "material": {
+        "base_color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "texture": null,
+        "specular": 0.0,
+        "shininess": 16.0,
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "roughness": 1.0,
+        "metallic": 0.0
+      },
+      "light": {
+        "direction": [
+          -0.45,
+          -1.0,
+          -0.35
+        ],
+        "color": [
+          1.0,
+          0.98,
+          0.94,
+          1.0
+        ],
+        "ambient": 0.32,
+        "specular": 0.35,
+        "shininess": 40.0
+      },
+      "camera": null
+    }
+  ]
+}
