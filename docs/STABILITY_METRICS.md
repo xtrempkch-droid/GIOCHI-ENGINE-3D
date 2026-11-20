@@ -127,11 +127,40 @@ lost to f32 residue in `144 × (1/144) = 0.99999994`.
 The estimate is `Σ(texture w×h×4) + Σ(vertices×32 + indices×4)` for the objects the cycle
 owns: four meshes (cube, cube, sphere, plane) and three 32×32 textures.
 
-## S2 — to be filled
+## S2 — physics determinism (2026-11-20)
 
-Columns to add when S2 closes: deviation at 144 fps after the residue fix, step count at
-every framerate, `physics_3d_demo` fps against the S1 baseline (the acceptance allows
-−5 %), and `mini_fps` fps against the S1 baseline.
+### The fix, in one number
+
+`ACCUMULATOR_EPSILON = 1e-4` (relative to the step) makes the accumulator run a step when it
+is within 0.01 % of one. Measured residue to absorb at 144 fps: **9.8e-8 s**, about 5.7e-6
+of a step. The tolerance can pull at most `1e-4` of a step (1.7 µs of simulated time) early,
+and the leftover is clamped to zero so it cannot become a debt.
+
+### Step count and deviation, after the fix
+
+| fps | Frames for 1 s | Steps at 1 s | Deviation at 1 s | Frames for 10 s | Steps at 10 s | Deviation at 10 s |
+|---:|---:|---:|---:|---:|---:|---:|
+| 30 | 30 | 60 | 0.0 | 300 | 600 | 0.0 |
+| 60 | 60 | 60 | reference | 600 | 600 | reference |
+| 120 | 120 | 60 | 0.0 | 1200 | 600 | 0.0 |
+| 144 | 144 | **60** | **0.0** | 1440 | **600** | **0.0** |
+| 240 | 240 | 60 | 0.0 | 2400 | 600 | 0.0 |
+
+Before the fix the 144 fps row read **59 / 0.164 m** at 1 s and **599** at 10 s. 100 runs at
+60 fps remain bit-for-bit identical.
+
+### Regression against the S1 baseline
+
+| Scenario | S1 | S2 | Δ |
+|---|---:|---:|---:|
+| `physics_3d_demo`, 300 frames | 60.0 fps, player `(5.18, 0.91, -0.18)`, wall-blocked, floor-supported | same | **0 %** |
+| `giochi-racer`, 600 frames on `track_easy` | 10.000 s of race time, 196 sampled colours | 10.000 s, **196** colours | **0 %** |
+| `mini_fps`, 600 frames | 4 draw calls, 10 448.6 fps | unchanged (no renderer change) | 0 % |
+| Physics unit suite | 9 tests | **11** (two new accumulator tests) | +2 |
+
+The Racer's frame signature is identical, which matters more than the fps number: the fix
+changed *when* a step runs by at most 1.7 µs, and the deterministic scripted driver lands on
+the same frame of the same lap.
 
 ## S3 — to be filled
 

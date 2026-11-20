@@ -1,6 +1,6 @@
 //! Transform ↔ physics synchronisation, in the frame it happens (DOD criteria 8 and 9).
 //!
-//! **Ativado na Fase S2.**
+//! Active since **S2** (2026-11-20).
 //!
 //! # The two directions, and why order matters
 //!
@@ -45,7 +45,6 @@ fn at(x: f32, y: f32, z: f32) -> BodyTransform {
 }
 
 #[test]
-#[ignore = "Ativado na Fase S2"]
 fn a_scene_edit_is_visible_to_physics_in_the_same_frame() {
     let mut world = world();
     let body = world
@@ -79,7 +78,6 @@ fn a_scene_edit_is_visible_to_physics_in_the_same_frame() {
 }
 
 #[test]
-#[ignore = "Ativado na Fase S2"]
 fn physics_reaches_the_scene_after_the_step_without_a_second_frame() {
     let mut world = world();
     let body = world
@@ -112,7 +110,6 @@ fn physics_reaches_the_scene_after_the_step_without_a_second_frame() {
 }
 
 #[test]
-#[ignore = "Ativado na Fase S2"]
 fn only_the_bodies_the_scene_answers_for_are_moved() {
     let mut world = world();
     let moved = world
@@ -158,7 +155,6 @@ fn camera_steps(fps: u32, frames: usize) -> Vec<f32> {
 }
 
 #[test]
-#[ignore = "Ativado na Fase S2"]
 fn the_chase_camera_converges_without_oscillating_at_thirty_and_sixty_fps() {
     for fps in [30, 60] {
         let steps = camera_steps(fps, 90);
@@ -178,7 +174,6 @@ fn the_chase_camera_converges_without_oscillating_at_thirty_and_sixty_fps() {
 }
 
 #[test]
-#[ignore = "Ativado na Fase S2"]
 fn the_camera_moves_the_same_distance_per_second_at_thirty_and_sixty_fps() {
     // Framerate independence for the *camera*, which is what "sem jitter" means when a
     // frame hitches: after the same simulated time, the eye must be in the same place.

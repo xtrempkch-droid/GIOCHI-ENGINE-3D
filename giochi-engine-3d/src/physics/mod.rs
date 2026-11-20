@@ -58,6 +58,20 @@ pub const FIXED_TIMESTEP: f32 = 1.0 / 60.0;
 pub const MAX_SUBSTEPS: u32 = 4;
 /// Largest delta accepted by [`PhysicsWorld3D::step`], in seconds.
 pub const MAX_FRAME_DELTA: f32 = 0.25;
+
+/// How close the accumulator must be to a whole step before that step runs.
+///
+/// A render loop hands `step` any `delta`, and `1/144` is not representable in f32: 144 of
+/// them sum to `0.99999994`, not `1.0`. Without a tolerance the accumulator never reaches
+/// the 60th step over one second of frames, so a run at 144 fps integrates 599 steps where
+/// 30/60/120 fps integrate 600 — a 0.16 m difference mid-fall, and a replay that depends
+/// on the monitor.
+///
+/// The tolerance is **relative to the step** and its error is bounded by it: at most
+/// `1e-4` of one step (1.7 µs of simulated time at 60 Hz) can be attributed early, and
+/// anything left over is clamped to zero rather than carried as a negative residue.
+/// Measured residue to absorb: 9.5e-8 s, about 5.7e-6 of a step.
+pub const ACCUMULATOR_EPSILON: f32 = 1e-4;
 /// Largest number of bodies one world may hold.
 pub const MAX_BODIES: usize = 65_536;
 

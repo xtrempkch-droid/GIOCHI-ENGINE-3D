@@ -1,6 +1,6 @@
 # Estado — GIOCHI-ENGINE
 
-**Estado corrente: Stability Pack, S1 concluída** — a régua está em
+**Estado corrente: Stability Pack, S2 concluída** — a régua está em
 [docs/STABILITY_DOD.md](docs/STABILITY_DOD.md) e o estado em
 [Status Stability Pack](#status-stability-pack-s1s5). Depois disso, Salto C: Fase 41
 concluída — ver a secção [Salto C — GIOCHI RACER](#salto-c--giochi-racer-fases-4146). O
@@ -556,7 +556,7 @@ com comando e número), o porquê em
 | Fase | Estado | Verificado |
 |---|---|---|
 | S1 — DOD + infraestrutura de teste | **concluída** (2026-11-20) | 20 critérios com comando; 7 ficheiros de teste novos (26 testes, todos `#[ignore]` com a fase que os ativa); `stability.yml` com 15 passos; baseline medido em `mini_fps`, `physics_3d_demo`, `ball_balance` e no Play do editor; **zero alterações de produção** |
-| S2 — física determinística + transform sync | pendente | S1 mediu: **30/60/120 fps bit-idênticos, 100/100 corridas iguais**; falta o resíduo de f32 a **144 fps** (599 passos em vez de 600, 0,164 m de diferença a meio da queda) |
+| S2 — física determinística + transform sync | **concluída** (2026-11-20) | `ACCUMULATOR_EPSILON` absorve o resíduo de f32 do `1/144`: **30/60/120/144/240 fps correm 600 passos em 10 s e 60 em 1 s, com desvio 0,0 a 1 s e a 10 s**, em debug e release, 100/100 corridas iguais. Testes de determinismo e de sync ativos (9 testes, já não `#[ignore]`), 2 testes de unidade novos no acumulador; Racer com a mesma assinatura de frame (10,000 s de corrida, 196 cores) |
 | S3 — contrato de material + mesh collider | pendente | — |
 | S4 — hot reload seguro + ciclo de vida | pendente | S1 mediu: 100 ciclos load/unload com **0 %** de delta e registos exatos; reload de shader inválido já é recusado |
 | S5 — sync da C ABI + renderer (data-driven) | pendente | — |
@@ -576,6 +576,20 @@ com comando e número), o porquê em
       `material_contract`/`mesh_collider`/`renderer_state` (`todo!("S3")`/`todo!("S5")`)
 - [x] `.github/workflows/stability.yml` — parse YAML válido; os passos verdes foram
       corridos à mão neste host (ver abaixo)
+- [x] `scripts/gates.sh` completo — "All gates passed"
+
+### Gates da S2
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — exit 0
+- [x] `SDL_VIDEODRIVER=offscreen cargo test --workspace` — 0 falhas
+- [x] `SDL_VIDEODRIVER=offscreen cargo test --workspace --release` — 0 falhas
+- [x] `cargo test --release -p giochi-engine-3d --features physics-3d --test physics_determinism`
+      — 4/4, incluindo `the_accumulator_does_not_lose_a_step_to_float_residue`
+- [x] `cargo test -p giochi-engine-3d --features physics-3d --test transform_sync` — 5/5
+- [x] `cargo test -p giochi-engine-3d --features physics-3d --lib physics::` — 11/11
+- [x] Regressão R7: `giochi-racer` (19 testes + 600 frames com `check-frame.py`), `mini_fps`,
+      `physics_3d_demo` (posição do jogador idêntica), `ball_balance`, Play do editor
 - [x] `scripts/gates.sh` completo — "All gates passed"
 
 ### O que a S1 mediu, e não só definiu

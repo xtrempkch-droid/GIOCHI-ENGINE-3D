@@ -1,8 +1,8 @@
 //! Framerate independence of the fixed-step world (DOD criterion 2).
 //!
-//! **Ativado na Fase S2.** While `#[ignore]`d this file is a compile-checked contract:
-//! if someone changes the physics API in a way that makes the property untestable, the
-//! build fails here instead of the property being quietly lost.
+//! Active since **S2** (2026-11-20). The properties below are the acceptance criteria of
+//! the phase, and they run in the workspace suite in debug and in the Stability workflow
+//! in release.
 //!
 //! # What is actually being asserted
 //!
@@ -15,8 +15,12 @@
 //!
 //! So each run is driven for an exact multiple of the fixed step (10 s = 600 steps at
 //! 60 Hz), and the assertion is on the **final position** with the documented tolerance
-//! from `docs/STABILITY_DOD.md` (1e-4). `docs/STABILITY_DECISIONS.md` records the
-//! measured remainder and why the tolerance is what it is.
+//! from `docs/STABILITY_DOD.md` (1e-4). `docs/STABILITY_DECISIONS.md` records why the
+//! tolerance is what it is.
+//!
+//! S2 fixed the one place where chunking did change the step count: `ACCUMULATOR_EPSILON`
+//! absorbs the f32 residue of `1/144`, so 144 fps now runs 600 steps like 30/60/120 and
+//! the measured deviation is **0.0**, mid-flight included.
 
 use giochi_engine_3d::math3d::Vec3;
 use giochi_engine_3d::physics::{BodyDesc, ColliderShape, PhysicsWorld3D};
@@ -94,7 +98,6 @@ fn simulate(fps: u32) -> (Vec3, Vec3, u32) {
 const TOLERANCE: f32 = 1e-4;
 
 #[test]
-#[ignore = "Ativado na Fase S2"]
 fn the_same_scene_lands_in_the_same_place_at_every_framerate() {
     let reference = simulate(60);
     for fps in [30, 120, 144] {
@@ -115,7 +118,6 @@ fn the_same_scene_lands_in_the_same_place_at_every_framerate() {
 }
 
 #[test]
-#[ignore = "Ativado na Fase S2"]
 fn a_hundred_runs_of_the_same_scene_agree_with_each_other() {
     // Determinism is a property of the solver, not of one golden value: 100 runs of the
     // identical scene must be bit-for-bit equal, or a replay cannot be trusted.
@@ -127,7 +129,6 @@ fn a_hundred_runs_of_the_same_scene_agree_with_each_other() {
 }
 
 #[test]
-#[ignore = "Ativado na Fase S2"]
 fn one_long_frame_is_not_the_same_as_many_short_ones_but_must_not_explode() {
     // The spiral-of-death guard: a 1 s hitch is clamped, the world keeps a finite state,
     // and the next frames recover. This is a stability assertion, not a determinism one.
@@ -152,7 +153,6 @@ fn one_long_frame_is_not_the_same_as_many_short_ones_but_must_not_explode() {
 }
 
 #[test]
-#[ignore = "Ativado na Fase S2"]
 fn the_accumulator_does_not_lose_a_step_to_float_residue() {
     // Measured on 2026-11-20 while writing this skeleton, and the reason S2 has real
     // work even though the final positions already agree:

@@ -149,17 +149,111 @@ test honours `SDL_VIDEODRIVER` if it is already set — `tests/common/mod.rs`).
 
 ---
 
-## S2 — to be filled (physics determinism + transform sync)
+## S2 — physics determinism (2026-11-20)
 
-Questions this phase must answer, written here so it does not improvise them:
+### 1. Epsilon in the accumulator, not integer nanoseconds
 
-- Epsilon in the accumulator, or integer nanoseconds? (§S1.4)
-- `max_substeps`: keep 4, or raise to 8? (§S1.5) The criterion is a 200 ms hitch.
-- Does the interpolated render position need a `previous_position` per body, or is the
-  existing `BodyTransform` enough? If it needs storage, that is a `BodySlot` change and
-  therefore a C ABI question — see S5a.
-- Order of `sync_from_transforms` → `step` → `sync_to_transforms` is fixed; document it
-  once in this file and keep the tests as the enforcement.
+§S1.4 left two candidates. Epsilon was chosen:
+
+| Candidate | Verdict |
+|---|---|
+| **Epsilon relative to the step** (`ACCUMULATOR_EPSILON = 1e-4`) | **chosen** — one comparison, no new state, error bounded by 1e-4 of a step (1.7 µs of simulated time), and the residue to absorb is 5.7e-6 of a step, 17× inside the tolerance |
+| Integer nanoseconds | exact, but it means changing the accumulator's type, converting every `delta`, and keeping a second representation of the step that has to agree with `IntegrationParameters::dt`; the property is already reached without it |
+
+The decisive argument was the measurement: the residue is a *rounding* of `1/144`, so
+accumulating the same f32 deltas more precisely (f64 or nanoseconds) does **not** help —
+`144 × f32(1/144)` is `0.99999994` no matter how you store the sum. Only a tolerance (or a
+delta that is not f32) changes the outcome. Nanoseconds would only help if the *frame
+delta* were computed in nanoseconds upstream, which is a renderer change this phase does
+not need.
+
+A second risk was checked before committing: a tolerance can run a step too early. The
+guard is bounded and tested — `the_tolerance_never_adds_a_step_when_the_time_is_genuinely_short`
+asserts that a delta two tolerances short of a step runs **zero** steps.
+
+The leftover after subtraction is clamped with `.max(0.0)`. Without it the tolerance leaves
+a negative accumulator (≈ −1e-7), which is a small debt against the next step; clamping
+keeps the accumulator a measure of "time owed" rather than "time borrowed".
+
+### 2. `max_substeps` stays 4
+
+§S1.5 allowed raising it to 8. It was not raised:
+
+- The existing hitch guard is a documented behaviour (`MAX_SUBSTEPS` is public, and
+  `the_accumulator_caps_the_steps_a_stall_can_run` asserts it). Raising it changes how much
+  simulated time a 0.25 s frame can catch up on, from 4 to 8 steps (66 ms → 133 ms).
+- Nothing measured asks for it. The DOD's criterion is "a 200 ms hitch does not explode",
+  and the existing test proves recovery with 4. If a real editor recompile or asset load
+  produces a 200 ms frame on the handheld, that is a measurement for S5/phase 46, not a
+  guess now.
+
+The DOD keeps the assertion at `steps <= 8` so the constant can move without the ruler
+breaking; the constant itself is 4 and is documented as such.
+
+### 3. No `physics/fixed_timestep.rs` type — a deliberate deviation from the phase list
+
+The master prompt lists a `FixedTimestep` struct with `accumulator`, `max_substeps` and a
+`step(dt, world) -> StepStats` signature, plus `interpolation_alpha`. It was **not** added:
+
+- `PhysicsWorld3D` already owns the accumulator, the step clamp, the substep cap and the
+  post-hitch discard. Extracting them into a second type would either duplicate the state
+  (two accumulators that must agree) or move five private fields and change no observable
+  behaviour.
+- R1/R8 are explicit: no refactor that a measurement did not ask for. The property
+  (determinism, DOD #2) is now met and tested; the file layout gains nothing.
+- `StepStats` as a return type would be a public API change for a value no caller uses
+  today (`step` already returns the substep count).
+
+The extraction is recorded in `IDEAS_STABILITY.md` as a refactor, not silently dropped.
+
+### 4. Interpolated rendering was not added, and why that is honest
+
+The phase list also asks for `previous_position`/`current_position` per body and a
+`draw_scene(alpha)` that renders between them. Not implemented:
+
+- **No DOD criterion measures judder.** Criterion 9 measures the *camera*, which
+  interpolates its own position and passes at 30 and 60 fps. Interpolating rigid bodies is
+  a smoother animation, i.e. a feature.
+- It changes `BodySlot` (per-body storage), which is exactly the kind of change that
+  propagates to the C ABI (R6) and to the Racer's car. Doing it because a phase list said so
+  — with no criterion and no measurement — is the scope creep R1 exists to stop.
+- The trigger to revisit is written down in `IDEAS_STABILITY.md`: a frame-time or
+  positional measurement showing visible judder when the render rate is below the physics
+  rate (the handheld at 30 fps with 60 Hz physics). That is a phase-45 measurement, not an
+  S2 one.
+
+### 5. The order is `sync_from_transforms` → `step` → `sync_to_transforms`
+
+Fixed here, enforced by `tests/transform_sync.rs`:
+
+1. **Scene → physics** before the step, so an editor drag or a respawn enters the solver in
+   the same frame instead of a frame late.
+2. **Step**, which consumes that state.
+3. **Physics → scene** after the step, so the renderer sees the result the solver just
+   produced rather than the previous frame's.
+
+**Both are needed in the same frame**: doing only the second is a one-frame lag the editor
+shows as an object passing through a wall before the collider catches up; doing only the
+first makes the renderer a frame stale. The tests assert the value read back, not just that
+the callback ran.
+
+### 6. What changed in production code, and what was left alone
+
+Two files changed: `physics/mod.rs` (the constant and its documentation) and
+`physics/world.rs` (the comparison, the clamp, plus two unit tests). No struct layout
+changed, so **the C ABI does not move** (R6) — `cargo test -p giochi-engine-3d --test abi_layout_3d`
+and the capi suite are unchanged and green.
+
+`MAX_FRAME_DELTA` (0.25 s), `FIXED_TIMESTEP` (1/60) and the 4-substep cap are untouched:
+the phase is about the *comparison*, and widening the envelope would be a second,
+unmeasured change.
+
+### 7. The Racer was the regression test that mattered
+
+A change to when a step runs could move the car. Measured after the fix: `giochi-racer
+--frames 600 --auto` produces the same 10.000 s of race time and the **same 196 sampled
+colours** in the frame capture, and the crate's 19 physics/spec tests are green. That is a
+stronger signal than the fps number, which is noise at 5 900 fps on this GPU.
 
 ## S3 — to be filled (material contract + mesh collider)
 

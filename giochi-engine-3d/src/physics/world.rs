@@ -17,7 +17,10 @@ use crate::math3d::{Quat as EngineQuat, Vec3};
 
 use super::body::{BodyDesc, BodyKind, BodyTransform};
 use super::collider::ColliderShape;
-use super::{BodyHandle, PhysicsError, FIXED_TIMESTEP, MAX_BODIES, MAX_FRAME_DELTA, MAX_SUBSTEPS};
+use super::{
+    BodyHandle, PhysicsError, ACCUMULATOR_EPSILON, FIXED_TIMESTEP, MAX_BODIES, MAX_FRAME_DELTA,
+    MAX_SUBSTEPS,
+};
 
 /// Whether two bodies started or stopped touching.
 #[repr(C)]
@@ -278,8 +281,14 @@ impl PhysicsWorld3D {
         self.queries_dirty = false;
 
         let mut steps = 0;
-        while self.accumulator >= self.timestep && steps < MAX_SUBSTEPS {
-            self.accumulator -= self.timestep;
+        // Compare against a threshold slightly below the step: `1/144` is not exact in
+        // f32, so 144 frames sum to just under one second and the last step would never
+        // run. See `ACCUMULATOR_EPSILON` for the measurement and the bound on the error.
+        let threshold = self.timestep * (1.0 - ACCUMULATOR_EPSILON);
+        while self.accumulator >= threshold && steps < MAX_SUBSTEPS {
+            // `max(0.0)` because the tolerance can take the residue just below zero; a
+            // negative accumulator would delay the next step by the same amount.
+            self.accumulator = (self.accumulator - self.timestep).max(0.0);
             self.world.step_with_events(&(), &self.sink);
             steps += 1;
         }
@@ -800,6 +809,35 @@ mod tests {
         assert_eq!(world.step(0.0).expect("step"), 0);
         assert_eq!(world.step(2.0).expect("step"), MAX_SUBSTEPS);
         assert_eq!(world.step(0.0).expect("step"), 0);
+    }
+
+    #[test]
+    fn the_accumulator_runs_every_step_when_the_frame_delta_does_not_divide_exactly() {
+        // `1/144` is not representable in f32: 144 of them sum to 0.99999994, so a
+        // strict `>=` comparison loses the 60th step of every second at 144 fps. Found
+        // by the Stability Pack ruler (S1) and fixed in S2; this is the unit-level
+        // regression so the integration test does not have to be the only witness.
+        for fps in [30u32, 60, 120, 144, 240] {
+            let mut world = world();
+            let mut steps = 0;
+            for _ in 0..fps {
+                steps += world.step(1.0 / fps as f32).expect("step");
+            }
+            assert_eq!(
+                steps,
+                (1.0 / FIXED_TIMESTEP).round() as u32,
+                "{fps} fps ran {steps} steps over one second"
+            );
+        }
+    }
+
+    #[test]
+    fn the_tolerance_never_adds_a_step_when_the_time_is_genuinely_short() {
+        // One step's worth of accumulated error is the bound. A delta a tenth of a step
+        // short must not run a step, or the tolerance would be a slow-motion bug.
+        let mut world = world();
+        let almost = world.timestep() * (1.0 - 2.0 * ACCUMULATOR_EPSILON);
+        assert_eq!(world.step(almost).expect("step"), 0);
     }
 
     #[test]

@@ -63,26 +63,23 @@ jobs:
 
       - name: DOD 2 — physics is deterministic at 30, 60, 120 and 144 fps
         # Release on purpose: debug carries overflow checks and different float code.
-        # `-- --ignored` runs the contract tests S1 committed; the 144 fps residue test is
-        # expected to fail until S2, and the step is marked `continue-on-error` until then
-        # so the rest of the pack can be measured meanwhile.
-        continue-on-error: true
+        # Active (not `--ignored`) since S2 fixed the accumulator residue.
         run: |
           cargo test --release -p giochi-engine-3d --features physics-3d \
-            --test physics_determinism -- --ignored
+            --test physics_determinism
 
       - name: DOD 8, 9 — transform ↔ physics sync and camera convergence
         run: |
           cargo test --release -p giochi-engine-3d --features physics-3d \
-            --test transform_sync -- --ignored
+            --test transform_sync
 
-      - name: DOD 1, 4 — asset lifecycle and scene rejection
+      - name: DOD 1, 3, 4 — asset lifecycle and reload safety
         run: |
           cargo test --release -p giochi-engine-3d --test scene_load_unload_loop -- --ignored
           cargo test --release -p giochi-engine-3d --test hot_reload_safety \
             -- --ignored --skip a_corrupted_texture --skip ten_consecutive
 
-      - name: DOD 3, 10, 11, 5 — contracts that are not implemented yet
+      - name: DOD 10, 11, 5 — contracts that S3/S5 have not implemented yet
         # These fail with `todo!("S3")` / `todo!("S5")` until their phase lands. They are
         # listed so the status is visible, and allowed to fail until then.
         continue-on-error: true

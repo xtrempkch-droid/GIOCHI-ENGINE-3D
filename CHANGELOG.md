@@ -71,6 +71,26 @@ a ABI C avança só de 6 para 7.
   arranca num console mais antigo; a construção passou a ser feita num contentor com a glibc
   do alvo.
 
+### Corrigido — Stability Pack, fase S2 (a física perdia um passo conforme o framerate)
+
+- **`ACCUMULATOR_EPSILON`** (`giochi-engine-3d/src/physics/mod.rs`): o acumulador compara
+  com `timestep × (1 − 1e-4)` em vez de exigir um passo inteiro. `1/144` não é
+  representável em f32 — 144 deles somam `0.99999994` — por isso um segundo a 144 fps
+  integrava 599 passos em vez de 600. Em repouso a diferença era zero; a meio da queda,
+  **0,164 m**. Depois da correção, 30/60/120/144/240 fps correm 600 passos em 10 s e 60 em
+  1 s, com desvio **0,0** a 1 s e a 10 s, em debug e release.
+- O resíduo sobrante é limitado com `.max(0.0)`, para a tolerância não deixar dívida
+  negativa; e um teste fixa o limite no outro sentido
+  (`the_tolerance_never_adds_a_step_when_the_time_is_genuinely_short`).
+- **Nenhuma mudança de layout** de struct, portanto a C ABI não se move (R6).
+- `tests/physics_determinism.rs` e `tests/transform_sync.rs` passam a correr na suite (9
+  testes deixam de estar `#[ignore]`), e o Racer mantém a assinatura de frame: 10,000 s de
+  corrida e as mesmas 196 cores na captura.
+- Deliberadamente **não** feito nesta fase, com o motivo em `docs/STABILITY_DECISIONS.md`:
+  extrair um `FixedTimestep` separado (duplicaria estado existente) e interpolar a posição
+  dos corpos no render (é uma feature, nenhum critério da DOD a mede; a condição de
+  revisita ficou em `IDEAS_STABILITY.md`).
+
 ### Adicionado — Stability Pack, fase S1 (régua + infraestrutura de teste)
 
 - `docs/STABILITY_DOD.md`: **20 critérios objetivos** de "estável", cada um com o comando

@@ -18,7 +18,7 @@ and game bugs at the same time.
 | ⬜ | Not yet measured; the phase that will is named |
 | ⏳ | Needs hardware or a destructive action; manual, with the procedure recorded |
 
-Status column reflects **2026-11-20**, the day S1 closed. The machine is x86_64 with an
+Status column reflects **2026-11-20**: S1 closed, S2 closed. The machine is x86_64 with an
 AMD Radeon RX 580 (radeonsi) for GL, which is a desktop GPU and not the Racer's target —
 so frame-time criteria are recorded here and re-measured on the handheld in phase 46.
 
@@ -39,14 +39,18 @@ so frame-time criteria are recorded here and re-measured on the handheld in phas
 
 ### 2. Physics is deterministic across framerates
 
-- **Command:** `SDL_VIDEODRIVER=offscreen cargo test --release -p giochi-engine-3d --features physics-3d --test physics_determinism -- --ignored`
+- **Command:** `SDL_VIDEODRIVER=offscreen cargo test --release -p giochi-engine-3d --features physics-3d --test physics_determinism`
 - **Threshold:** final position within **1e-4** at 30, 60, 120 and 144 fps, over 10 s of
   simulated time; 100 identical runs bit-for-bit equal.
-- **Status:** 🟡 — measured 2026-11-20: **30/60/120 fps are bit-identical (0.0 deviation),
-  100/100 runs identical**, in debug and release. **144 fps loses one fixed step** to f32
-  residue (`144 × 1/144 = 0.99999994`): 599 steps instead of 600. At rest the difference is
-  zero; one second after the drop it is **0.164 m**. S2 closes this; the acceptance test
-  `the_accumulator_does_not_lose_a_step_to_float_residue` fails today by design.
+- **Status:** ✅ **closed in S2** (2026-11-20). Before S2: 30/60/120 fps were bit-identical
+  but 144 fps lost one fixed step to f32 residue (`144 × 1/144 = 0.99999994`), which is a
+  0.164 m difference one second after the drop. `ACCUMULATOR_EPSILON`
+  (`giochi-engine-3d/src/physics/mod.rs`) absorbs the residue; after the fix all four
+  framerates and 240 fps run **600 steps over 10 s and 60 over 1 s**, with **0.0
+  deviation** at both horizons, in debug and release, and 100/100 runs identical.
+  `the_accumulator_does_not_lose_a_step_to_float_residue` is active (not ignored) and is
+  the acceptance test; `the_tolerance_never_adds_a_step_when_the_time_is_genuinely_short`
+  is the guard against over-correcting.
 
 ### 3. A shader with a syntax error leaves the previous shader active
 
@@ -97,10 +101,10 @@ so frame-time criteria are recorded here and re-measured on the handheld in phas
 
 ### 8. An editor edit reaches physics in the same frame, and physics reaches the scene
 
-- **Command:** `SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --features physics-3d --test transform_sync -- --ignored`
+- **Command:** `SDL_VIDEODRIVER=offscreen cargo test -p giochi-engine-3d --features physics-3d --test transform_sync`
 - **Threshold:** position read back in the same frame matches within 1e-6, in both
   directions; a raycast immediately after `sync_from_transforms` hits the edited body.
-- **Status:** ✅ measured 2026-11-20 (5/5).
+- **Status:** ✅ measured 2026-11-20, active since S2 (5/5 in debug and release).
 
 ### 9. The chase camera does not oscillate at 30 or 60 fps
 
@@ -160,7 +164,7 @@ so frame-time criteria are recorded here and re-measured on the handheld in phas
 - **Command:** `SDL_VIDEODRIVER=offscreen cargo test --release -p giochi-engine-3d --features physics-3d --test physics_determinism`
 - **Why release:** debug builds carry overflow checks and different float code paths;
   a solver that only agrees in debug is not deterministic.
-- **Status:** ✅ measured 2026-11-20 (3/3 in release; the residue test is S2's).
+- **Status:** ✅ measured 2026-11-20, re-measured after S2's fix (4/4 in release).
 
 ### 16. `mini_fps`, `physics_3d_demo` and `ball_balance` run 300 frames without panicking
 

@@ -14,6 +14,15 @@ Nothing here is implemented without the user's approval **and** evidence that it
       contract in a **new** module instead, so the existing type keeps its ABI layout.
 - [ ] `render3d/renderer.rs` (~62 KB) split into more submodules. S5c does this **only** if
       S5b says the renderer is a hotspot.
+- [ ] Extract the accumulator into `physics/fixed_timestep.rs` as `FixedTimestep` +
+      `StepStats` (the S2 phase list asked for it). Not done in S2 because the world already
+      owns that state and extraction changes no observable behaviour —
+      `docs/STABILITY_DECISIONS.md` §S2.3.
+- [ ] Interpolated rigid-body rendering (`previous_position`/`current_position` per body and
+      `draw_scene(alpha)`). Not a DOD criterion; revisit when there is a measurement showing
+      judder with the render rate below the physics rate (handheld at 30 fps) —
+      `docs/STABILITY_DECISIONS.md` §S2.4. Note this touches `BodySlot` and therefore the
+      C ABI question R6 reserves for S5.
 - [ ] Hierarchical `Transform` with a cached `Mat4`. Today the scene multiplies parent
       matrices per node per frame; nobody has profiled it.
 - [ ] `AssetHandle` with internal refcounting (`Rc`). Would change the teardown story S4
