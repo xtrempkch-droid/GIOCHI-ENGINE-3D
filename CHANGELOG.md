@@ -71,6 +71,43 @@ a ABI C avança só de 6 para 7.
   arranca num console mais antigo; a construção passou a ser feita num contentor com a glibc
   do alvo.
 
+### Adicionado — leitura da rotação do painel (`giochi_engine::platform::rotation`)
+
+- `panel_rotation()` lê `/sys/class/graphics/fbcon/rotate` (o mesmo ficheiro que o launcher
+  do GIOCHI-OS lê) e devolve `PanelRotation`, a rotação que a aplicação tem de aplicar para a
+  imagem ficar direita. O mapeamento é o medido no x55 (`3` → quarto de volta
+  anti-horário), não um nome de aparelho; `apply_to_size` troca largura e altura nos quartos
+  de volta, que é o que torna um painel 720×1280 utilizável como ecrã de 1280×720.
+- `Platform::new` regista-a uma vez quando o driver é KMSDRM, para que um jogo de lado tenha
+  diagnóstico. O passo de apresentação (rodar o alvo e fazer o blit, ou a propriedade
+  `rotation` do plano primário) continua aberto para a Fase 45/46, como `docs/KMSDRM.md` §9
+  descreve.
+
+### Corrigido — o editor não conseguia ser compilado para o console
+
+- `giochi-editor` não tinha secção `[features]`, por isso `--features sdl2-system` era um
+  erro em vez de um encaminhamento, e o pacote ARM64 da Fase 46 não podia existir. Passa a
+  ter `default = ["sdl2-bundled"]` e `sdl2-system`, com `default-features = false` nas
+  dependências de `giochi-engine`/`giochi-engine-3d`, que é o que impede o `bundled` de
+  voltar pela união de features. `scripts/check-features.sh` cobre agora os sete crates em
+  vez de seis, e portanto teria falhado antes desta correção.
+
+### Corrigido — `build-aarch64.sh` podia produzir um binário que não arranca no aparelho
+
+- O linker regista as versões de símbolos da libc **do host**: medido a 2026-11-18, um
+  binário construído no Ubuntu com glibc 2.43 exige `GLIBC_2.43` e morre no R35S com 2.41.
+  `scripts/build-aarch64.sh` ganhou `--container`, que corre o mesmo script em
+  `debian:13-slim` (glibc 2.41) com o repositório montado só de leitura e o `target/`
+  gravável. O contentor é **autónomo**: instala o `gcc`/`g++` de cross e as bibliotecas
+  SDL2 `image`/`mixer`/`ttf` de ARM64 por multiarch do dpkg, por isso corre numa máquina que
+  nunca viu a consola. Medido: o mesmo código que no host exige `GLIBC_2.43` passa a exigir
+  **`GLIBC_2.35`**, e o R35S tem 2.41.
+- Todos os builds passam a imprimir o **piso de glibc** de cada binário produzido
+  (`readelf -sW --dyn-syms`) e a falhar quando `GIOCHI_TARGET_GLIBC` diz que o aparelho é mais
+  antigo. O `device-run.sh` já recusava a implantação pelo `ldd --version` do aparelho.
+- O mesmo script deixou de exigir um binário `giochi-demo`: com `-p giochi-racer` não existe
+  um, e o gate acusava uma falha que não era.
+
 ### Adicionado — ABI C v7
 
 - `giochi_audio_set_bus_volume(int32_t bus, int32_t v)` e

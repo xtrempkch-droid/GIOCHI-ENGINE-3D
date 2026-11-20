@@ -4,9 +4,11 @@
 //! and audio modules talk to the platform through these wrappers so that the
 //! dependency can be swapped or mocked without touching gameplay code.
 
+pub mod rotation;
 pub mod sdl;
 pub mod window;
 
+pub use rotation::{fbcon_rotate_value, panel_rotation, PanelRotation, FBCON_ROTATE_PATH};
 pub use sdl::{
     has_drm_device, quit_signal, sdl_version, Platform, QuitSignal, VideoDriverChoice,
     DRM_DIRECTORY, HINT_KMSDRM_DEVICE_INDEX, HINT_KMSDRM_REQUIRE_DRM_MASTER, HINT_VIDEO_EGL_DRIVER,

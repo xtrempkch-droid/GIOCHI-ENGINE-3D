@@ -224,6 +224,18 @@ impl Platform {
 
         log::info!("video driver: {}", video.current_video_driver());
 
+        // A portrait panel the user reads landscape (the x55) reports its angle in sysfs.
+        // Saying so once at startup is the difference between "the game is sideways" and a
+        // diagnosis: the renderer does not apply the rotation yet (docs/KMSDRM.md §9).
+        let rotation = crate::platform::rotation::panel_rotation();
+        if !rotation.is_identity() && video.current_video_driver().eq_ignore_ascii_case("KMSDRM") {
+            log::warn!(
+                "the panel reports rotation {rotation} (fbcon={:?}); the engine draws upright, \
+                 so the picture will be turned. See docs/KMSDRM.md §9.",
+                crate::platform::rotation::fbcon_rotate_value()
+            );
+        }
+
         Ok(Platform {
             context: Rc::new(SdlContext {
                 audio,

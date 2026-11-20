@@ -407,8 +407,43 @@ The first number must be **≤** the second. It is a floor, not an equality: a b
 ### What worked: build inside a container at the device's glibc
 
 The fix that needed no toolchain archaeology was to run the same build in a distribution
-whose glibc matches the device's. Debian 13 (trixie) ships glibc **2.41**, the same as this
-image, and its `gcc-aarch64-linux-gnu` is 14.2:
+whose glibc matches the device's. `scripts/build-aarch64.sh` now does this itself, and the
+container is **self-contained** — it installs the ARM64 cross compiler and the ARM64 SDL2
+satellites through Debian multiarch, so a machine that has never seen the console can still
+produce a runnable binary:
+
+```bash
+# Requires docker. Mounts the repo read-only and the target writable, then runs the same
+# script inside debian:13-slim (glibc 2.41).
+GIOCHI_TARGET_GLIBC=2.41 scripts/build-aarch64.sh --container --release -p giochi-racer
+
+# Measured output of that command:
+#   giochi-racer: needs 2.35          (the host build of the same source needs 2.43)
+
+# The device's own libraries, when their version matters (it does for a compatibility
+# check), still override the multiarch ones:
+CROSS_SYSROOT=/path/to/arm64-sysroot \
+  scripts/build-aarch64.sh --container --release --no-default-features --features sdl2-system
+
+# The image is a variable, so a newer device needs one flag, not a code change:
+GIOCHI_BUILD_IMAGE=debian:12-slim scripts/build-aarch64.sh --container --release
+```
+
+Every build — container or not — now prints the **glibc floor** of each produced binary
+(`readelf -sW --dyn-syms` → highest `GLIBC_*`), and fails when `GIOCHI_TARGET_GLIBC` says
+the device is older. `giochi-racer/scripts/device-run.sh` repeats the comparison against the
+device's real `ldd --version` before copying, so the two together catch both ends.
+
+Three things the container needs that are easy to miss, all found by running it:
+`make` (the bundled SDL2 is a CMake project with a make generator), `g++-aarch64-linux-gnu`
+(the toolchain file sets `CMAKE_CXX_COMPILER`, and CMake fails without it), and an
+**aarch64 architecture added to dpkg** (`libsdl2-{image,mixer,ttf}-dev:arm64`). The registry
+is copied rather than mounted, because cargo writes its package-cache lock into
+`CARGO_HOME`.
+
+The manual equivalent, kept because it is what the script was derived from — Debian 13
+(trixie) ships glibc **2.41**, the same as this image, and its `gcc-aarch64-linux-gnu` is
+14.2:
 
 ```bash
 # One command, no image to maintain. The repository, a copy of the cargo registry and

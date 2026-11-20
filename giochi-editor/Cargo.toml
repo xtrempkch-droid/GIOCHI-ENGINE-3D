@@ -15,7 +15,11 @@ repository.workspace = true
 # The editor consumes the engine; it never forks it. `devtools` brings the egui
 # backend and the in-game console, `hot_reload` is what makes editing shaders and
 # textures bearable (phase 19 / R8 of the plan).
-giochi-engine = { path = "../giochi-engine", version = "0.5.1", features = ["devtools", "hot_reload"] }
+# `default-features = false` is what makes `--features sdl2-system` reachable from here,
+# exactly as in every other consumer crate (`scripts/check-features.sh`): without it the
+# default `sdl2-bundled` travels through the graph and wins the feature union, so the
+# editor could not be built against the console's own SDL2.
+giochi-engine = { path = "../giochi-engine", version = "0.5.1", default-features = false, features = ["devtools", "hot_reload"] }
 # Phase 31. The viewport needs the scene format and the 3D math (`Camera3D`); it does
 # not need the GL renderer, which is why the crate is a dependency and not a second
 # window (ADR-064).
@@ -49,3 +53,12 @@ path = "examples/editor_default_scene.rs"
 [[example]]
 name = "editor_project_demo"
 path = "examples/editor_project_demo.rs"
+
+[features]
+# Phase 46: the editor ships as an ARM64 package, so it must forward the SDL2 choice
+# like every other consumer crate. The default keeps the old behaviour — a build with
+# no flags still compiles SDL2 from source — and `sdl2-system` links against the one in
+# the device image instead.
+default = ["sdl2-bundled"]
+sdl2-bundled = ["giochi-engine/sdl2-bundled", "giochi-engine-3d/sdl2-bundled"]
+sdl2-system = ["giochi-engine/sdl2-system", "giochi-engine-3d/sdl2-system"]

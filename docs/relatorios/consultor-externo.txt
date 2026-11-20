@@ -1,3 +1,19 @@
+GIOCHI-ENGINE-3D — relatórios de consultoria externa (arquivo)
+
+Este ficheiro reúne três documentos recebidos de fora do projeto:
+
+  1. Relatório 2 — Rede P2P (giochi-net, AOI, ABI C)  -> entregue; ver docs/REDE.md
+  2. Relatório de Melhorias — Texturas 3D             -> entregue; ver docs/3D.md §3.3 "Textures on meshes"
+     e `cargo run -p giochi-engine-3d --example cube_demo -- --texture assets/checker.png`
+  3. Observações adicionais (arquitetura, docs, CI)   -> triadas; ver PROGRESS.md e ROADMAP.md
+
+Não é estado atual. É o pedido original, preservado como registo: os "ausente"/"falta"
+referem-se ao repositório no momento em que cada relatório foi escrito. O estado de hoje
+está em PROGRESS.md (fases e gates), docs/3D.md (texturas 3D) e docs/C_ABI_CONTRACT.md
+(ABI C).
+
+────────────────────────────────────────────────────────────────────────────────────────
+
 📄 Relatório 2 — Rede P2P (para a Equipe da Engine / GIOCHI-ENGINE-3D)
 
 Assunto: Requisitos para adicionar suporte a rede P2P à GIOCHI-ENGINE-3D

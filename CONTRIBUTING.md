@@ -60,6 +60,7 @@ scripts/gates.sh
 | Tests | `cargo test --workspace --target x86_64-unknown-linux-gnu` |
 | Docs | `cargo doc --workspace --no-deps --document-private-items` |
 | ARM64 | `scripts/check-aarch64.sh` |
+| ARM64 that runs on a console | `GIOCHI_TARGET_GLIBC=<device glibc> scripts/build-aarch64.sh --container --release` |
 | C header | `scripts/gen-header.sh --check` |
 | Version consistency | `scripts/check-version.sh` |
 | Asset twins | `python3 scripts/png-to-bmp.py --check assets/*.png` |

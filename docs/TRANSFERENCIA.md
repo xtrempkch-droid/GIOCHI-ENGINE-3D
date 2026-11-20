@@ -479,17 +479,22 @@ passo separado para cross-verificar features opcionais em aarch64
 
 ---
 
-## 6. O que NÃO está verificado (honestidade acima de otimismo)
+## 6. O que NÃO estava verificado em 2026-11-11 (fotografia histórica)
 
-| Item | Situação |
-| --- | --- |
-| `giochi-engine-3d` compilar | **não verificado localmente** (sem C/cmake). Provado pelo CI verde e por um probe de API. |
-| Dois processos trocando pacotes | **não feito** — só mesmo processo |
-| mDNS | não implementado |
-| ABI C | não implementada |
-| Comportamento em rede real (Wi-Fi, perda, MTU) | **nunca testado**. Todos os testes usam loopback. |
-| Desempenho em ARM64 | **nunca medido**. Os números de AOI em `docs/REDE.md` são aritmética, não medição. |
-| Hibernação/pausa do aparelho durante partida | não considerado |
+> **Atualizado depois.** A tabela abaixo é do dia em que este documento foi escrito e
+> deixou de ser verdade em três linhas; o estado atual está em `docs/REDE.md` e em
+> `PROGRESS.md`. Fica registada porque a honestidade da altura é parte do registo, não
+> porque descreva o presente.
+
+| Item | Situação em 2026-11-11 | Hoje |
+| --- | --- | --- |
+| `giochi-engine-3d` compilar | **não verificado localmente** (sem C/cmake). Provado pelo CI verde e por um probe de API. | compila e corre no hardware (fase 41) |
+| Dois processos trocando pacotes | **não feito** — só mesmo processo | `examples/loopback_smoke`, dois processos |
+| mDNS | não implementado | atrás da feature `mdns` (`mdns-sd` 0.21) |
+| ABI C | não implementada | partes IV e a versão 7 do header |
+| Comportamento em rede real (Wi-Fi, perda, MTU) | **nunca testado**. Todos os testes usam loopback. | continua por testar num jogo a sério |
+| Desempenho em ARM64 | **nunca medido**. Os números de AOI em `docs/REDE.md` são aritmética, não medição. | a rede ainda não foi medida em ARM64; o motor foi |
+| Hibernação/pausa do aparelho durante partida | não considerado | continua não considerado |
 
 **Nada disto rodou em hardware.** O primeiro teste em aparelho de verdade é o
 que vai dizer se as escolhas (15 Hz de snapshot, 1200 B de datagrama, 8
@@ -514,5 +519,5 @@ clientes) se sustentam.
   `postcard`, por que o raio da AOI é do jogo, tabela dos dois transportes).
 - `docs/C_ABI_CONTRACT.md` — o contrato da ABI. **A linha 41 precisa mudar**
   quando a ABI de rede existir.
-- `Relatório consultor externo.txt` — o pedido original (relatório 2, rede P2P).
+- `docs/relatorios/consultor-externo.txt` — o pedido original (relatório 2, rede P2P).
 - `docs/DECISIONS.md` — ADRs; a ADR-038 explica a convenção de profundidade.

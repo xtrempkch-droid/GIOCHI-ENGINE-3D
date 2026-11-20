@@ -465,14 +465,18 @@ rather than from a device name (`GIOCHI-APP/app/launcher-star-dust/crates/ui-sdl
 "a app que carrega *o X55 precisa de anti-horário* fica errado na primeira revisão de
 hardware"). Any GIOCHI app on this unit has to do the same.
 
-**What this engine does today: nothing.** `giochi-engine`/`giochi-engine-3d` render into
-the drawable in its own orientation, so a game on the x55 is 90° off. The engine's 3D path
-does handle the *aspect* correctly — `720×1280` produces a tall, narrow view and the 3D HUD
-lays itself out in the portrait corners — so the picture is internally consistent; it is
-the whole picture that is turned.
+**What this engine does today: it reads the angle and logs it; it does not turn the
+picture yet.** `giochi_engine::platform::panel_rotation()` (and its pure helper
+`PanelRotation::from_fbcon`) reads `/sys/class/graphics/fbcon/rotate` and returns the rotation
+an application must apply, with the x55 mapping fixed by test (`3` →
+`QuarterTurnCcw`, measured against the launcher's "precisa de anti-horário" note). `Platform::new`
+logs it once when the driver is KMSDRM, so a sideways game has a diagnosis instead of a
+mystery. The renderer still draws into the drawable in its own orientation, so a game on the
+x55 is 90° off. The engine's 3D path does handle the *aspect* correctly — `720×1280` produces
+a tall, narrow view and the 3D HUD lays itself out in the portrait corners — so the picture is
+internally consistent; it is the whole picture that is turned.
 
-The fix belongs in `giochi_engine::platform`, next to the driver selection, and not in a
-game: read `/sys/class/graphics/fbcon/rotate` (0–3), expose it, and either
+The remaining half belongs in the presentation pass, and is phase 45/46 work: either
 
 1. let `RenderContext3D` render into a rotated target and blit it turned (one extra pass,
    the infrastructure already exists in `render3d::upscale`), or

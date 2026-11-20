@@ -10,22 +10,26 @@ language through a C ABI. **2D** through `sdl2::render`, and **3D** through Open
 over EGL in a separate crate. Primary target: `aarch64-unknown-linux-gnu` (Linux consoles
 with KMSDRM); development on `x86_64-unknown-linux-gnu`.
 
-> **Status: 0.5.1.** Phases 0–24: the Growth Pack (hot reload, devtools, UI, particles,
-> animation, physics) plus the networking layer, and **C ABI v6**. The workspace,
+> **Status: 0.5.1, phase 41 (GIOCHI RACER) delivered.** Phases 0–24: the Growth Pack (hot
+> reload, devtools, UI, particles, animation, physics) plus the networking layer; phases
+> 30–40 the **visual editor**; phase 41 the **racer**; and **C ABI v7**. The workspace,
 > the SDL2 platform layer, the fixed-timestep loop, the 2D renderer with opaque texture
 > handles, keyboard/mouse/gamepad input, the asset cache, the audio mixer, the scene
 > stack, the `Engine` facade, the **C ABI** (`libgiochi.so` / `libgiochi.a` + generated
-> `giochi.h`, parts I–IV, version 4), the **Lua binding** (`giochi` module + a complete
+> `giochi.h`, parts I–IX, version 7), the **Lua binding** (`giochi` module + a complete
 > reference game), the **3D crate** — GLES/EGL context, arbitrary OBJ/glTF or generated
 > geometry, textures, Blinn-Phong lighting, `Camera3D` with a controller, instancing,
 > static batching and upscaling — the **networking crate** (`giochi-net`:
 > host-authoritative UDP, interest management, optional `laminar` transport and mDNS
-> discovery) and the **profiler** (frame statistics, `F1` overlay), with CI, release
-> packaging and the guides. Validated on a Rockchip PX30 (Mali-G31) through 0.3.1, and
-> 0.4.0 — networking, textures and arbitrary OBJ models — on an **R35S (RK3326 /
-> Cortex-A35, Mali-G31 Panfrost, KMSDRM)**. 0.5.0 adds the Growth Pack: hot reload,
-> devtools, the widget UI and the 3D HUD, particles, animation, Rapier physics and
-> **C ABI v6**. See [PROGRESS.md](PROGRESS.md).
+> discovery), the **editor** (`giochi-editor`: hierarchy, inspector, viewport, gizmos,
+> undo/redo, autosave, play preview, standalone package) and the **profiler** (frame
+> statistics, `F1` overlay), with CI, release packaging and the guides. Validated on a
+> Rockchip PX30 (Mali-G31) through 0.3.1, and 0.4.0 — networking, textures and arbitrary
+> OBJ models — on an **R35S (RK3326 / Cortex-A35, Mali-G31 Panfrost, KMSDRM)**. 0.5.0
+> adds the Growth Pack: hot reload, devtools, the widget UI and the 3D HUD, particles,
+> animation, Rapier physics and **C ABI v6**; 0.5.1 moved it to v7 (audio buses). The
+> racer was measured on two consoles — R35S and Powkiddy x55 — at ~59 fps by KMSDRM with
+> the same binary. See [PROGRESS.md](PROGRESS.md).
 
 
 ## Why "C-shaped" Rust?
@@ -822,8 +826,10 @@ other the way they do: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | [docs/CROSS_COMPILE.md](docs/CROSS_COMPILE.md) | ARM64 cross toolchain |
 | [docs/PERF_LOG.md](docs/PERF_LOG.md) | The measurements behind every optimization, with baselines |
 | [PROGRESS.md](PROGRESS.md) | Phase status and validated gates |
+| [ROADMAP.md](ROADMAP.md) | What comes next (phases 42–46), the known engineering debt, and what is not planned |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Workflow, gates, coding rules |
+| [SECURITY.md](SECURITY.md) | How to report a vulnerability, and what is in scope |
 
 ## License
 

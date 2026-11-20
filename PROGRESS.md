@@ -131,10 +131,12 @@ improvisar dentro do editor. As opções que foram consideradas:
 | B — Production Pack completa | A + glTF/GLB + material PBR-lite + save/load com slots + câmaras + A* + buses + i18n | 4–6 sessões; é a Fase 25–29 do plano |
 | C — formato dentro do editor | rejeitada: o jogo passaria a depender do editor para ler cenas | 1 sessão + dívida permanente |
 
-A pack completa (**B**) continua por fazer: glTF/GLB, materiais PBR-lite, save/load com
-slots, câmaras de jogo (follow/shake/cutscene), A*, buses de áudio e i18n. Nada na Fase 31
-depende delas; a Fase 41 (carro e pista) depende de glTF, e a 44 de buses. Ficam registadas
-como pendências reais, não como ideias.
+A pack completa (**B**) continuava por fazer **quando esta secção foi escrita**: glTF/GLB,
+materiais PBR-lite, save/load com slots, câmaras de jogo (follow/shake/cutscene), A*, buses
+de áudio e i18n. Nada na Fase 31 dependia delas; a Fase 41 (carro e pista) depende de glTF, e
+a 44 de buses. Foram entregues depois — a tabela de fecho está em
+[Production Pack — fechada](#production-pack--fechada-pré-requisito-das-fases-41) mais abaixo,
+e a lista item a item em `CHANGELOG.md`.
 
 ### Gates da Fase 31
 
@@ -730,6 +732,13 @@ o procedimento completo — ficou em `docs/CROSS_COMPILE.md` §"The host's glibc
 ceiling": construir dentro de `debian:13-slim` (glibc 2.41), que produz um binário que pede
 no máximo `GLIBC_2.35`.
 
+**Fechado a 2026-11-20**, sem hardware: `scripts/build-aarch64.sh --container` corre o mesmo
+script no `debian:13-slim` (contentor autónomo, com as SDL2 `image`/`mixer`/`ttf` de ARM64
+por multiarch) e qualquer build — contentor ou não — imprime o piso de glibc de cada binário
+e falha quando `GIOCHI_TARGET_GLIBC` diz que o aparelho é mais antigo. Medição da mesma
+fonte nos dois caminhos: host `GLIBC_2.43`, contentor **`GLIBC_2.35`** (o R35S tem 2.41).
+Resta só confirmar a instalação no aparelho quando a bancada voltar.
+
 ### Segunda validação em hardware **diferente**: Powkiddy x55 (Mali-G52, 2026-11-18)
 
 O aparelho ligado em `10.55.0.2` passou a ser um **x55** (host key nova, imagem nova), não
@@ -760,7 +769,9 @@ aplicação. O launcher do GIOCHI-OS roda o próprio desenho lendo
 por KMSDRM no x55 corre depressa e **aparece a 90°**. O `giochi-racer` não pode resolver
 isto sem tocar no motor (R2) e não deve aprender nomes de aparelho; a correção é em
 `giochi_engine::platform` e está descrita, com as duas opções, em
-`docs/KMSDRM.md` §9. Fica como pendência para a Fase 45/46.
+`docs/KMSDRM.md` §9. A leitura do ângulo já existe
+(`giochi_engine::platform::panel_rotation`, com o mapeamento do x55 fixado por teste e o
+registo do aviso no `Platform::new`); o passo de apresentação fica para a Fase 45/46.
 
 Nota operacional que o R35S já tinha ensinado: a imagem não sobrevive a um corte de
 energia — a `authorized_keys` desaparece. Reinstalada por password (`giochi-dev`, o mesmo
@@ -829,13 +840,28 @@ desenharam fora dela; o teste `hud_pixels` media isto a cada passo e fica como g
 - ~~Teste em hardware ARM64~~ — **feito em 2026-11-18** no `r35sv` (R35S, RK3326,
   Cortex-A35, Mali-G31/Panfrost, Buildroot 2025.02, glibc 2.41, ecrã DSI 640×480). Ver a
   tabela abaixo.
-- **Rotação de painel (`x55`)**: o motor não tem passo de rotação e o painel desse aparelho
-  é retrato com a consola rodada. Corre a ~59,6 fps mas aparece a 90°. Correção em
-  `giochi_engine::platform`, descrita em `docs/KMSDRM.md` §9; entra na Fase 45/46 porque
-  toca no motor, e a Fase 41 proíbe-o (R2).
-- **`giochi-editor` não encaminha `sdl2-system`** (não tem secção `[features]`). Passa no
-  `check-aarch64.sh` porque este compila com `bundled`; para o pacote ARM64 da Fase 46 vai
-  precisar da feature, e essa é uma alteração ao editor que fica para então.
+- **Rotação de painel (`x55`)**: **metade feita**. `giochi_engine::platform::panel_rotation()`
+  lê `/sys/class/graphics/fbcon/rotate` e devolve a rotação que a aplicação tem de aplicar
+  (`PanelRotation`, com o mapeamento do x55 fixado por teste: `3` → anti-horário); o
+  `Platform::new` regista-a uma vez quando o driver é KMSDRM. Falta o passo de apresentação —
+  rodar o alvo e fazer o blit (a infraestrutura do `render3d::upscale` já existe) ou usar a
+  propriedade `rotation` do plano primário —, descrito em `docs/KMSDRM.md` §9. Entra na
+  Fase 45/46 porque toca no motor, e a Fase 41 proíbe-o (R2).
+- ~~`giochi-editor` não encaminha `sdl2-system`~~ — **resolvido**: o manifesto do editor tem
+  `[features]` com `default = ["sdl2-bundled"]` e `sdl2-system` a encaminhar para
+  `giochi-engine`/`giochi-engine-3d` (ambos com `default-features = false`), e o
+  `scripts/check-features.sh` passou a cobrir os sete crates, não seis. É o pré-requisito do
+  pacote ARM64 da Fase 46.
+- **Binário ARM64 com a glibc do host** — **resolvido no build**: `scripts/build-aarch64.sh`
+  ganhou `--container` (corre o mesmo script em `debian:13-slim`, glibc 2.41, com o repo
+  montado só de leitura e o `target/` gravável) e todos os builds passam a imprimir o piso
+  de glibc de cada binário, falhando quando `GIOCHI_TARGET_GLIBC` diz que o aparelho é mais
+  antigo. O `device-run.sh` continua a recusar a implantação contra o `ldd --version` real,
+  pelo que as duas pontas ficam cobertas. **Medido a 2026-11-20**: o mesmo `giochi-racer`
+  que o build do host produz com piso `GLIBC_2.43` sai do contentor com **piso 2.35**; o
+  contentor é autónomo (instala `gcc`/`g++` de cross e as SDL2 `image`/`mixer`/`ttf` de
+  ARM64 por multiarch), não precisa de `CROSS_SYSROOT` nem de hardware. Falta correr no
+  aparelho quando houver bancada.
 - **Três pistas, IA, menus, DRS e pacote** são as Fases 42–46, por definição.
 
 ## Growth Pack (Fases 19–24)

@@ -115,6 +115,7 @@ pub use crate::particles::{
     PointEmitter,
 };
 pub use crate::perf::{DebugOverlay, FrameCounters, FrameStats, FrameTimeSummary, Profiler};
+pub use crate::platform::rotation::{fbcon_rotate_value, panel_rotation, PanelRotation};
 pub use crate::platform::sdl::{quit_signal, sdl_version, Platform, QuitSignal, VideoDriverChoice};
 pub use crate::platform::window::{Window, WindowConfig};
 pub use crate::render::{
