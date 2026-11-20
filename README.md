@@ -826,6 +826,9 @@ other the way they do: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | [docs/CROSS_COMPILE.md](docs/CROSS_COMPILE.md) | ARM64 cross toolchain |
 | [docs/PERF_LOG.md](docs/PERF_LOG.md) | The measurements behind every optimization, with baselines |
 | [PROGRESS.md](PROGRESS.md) | Phase status and validated gates |
+| [docs/STABILITY_DOD.md](docs/STABILITY_DOD.md) | The Stability Pack ruler: 20 objective criteria with a command and a threshold each |
+| [docs/STABILITY_METRICS.md](docs/STABILITY_METRICS.md) | Frame time, draw calls and determinism measurements, with the delta per phase |
+| [docs/STABILITY_DECISIONS.md](docs/STABILITY_DECISIONS.md) | Why each stability threshold is that number, and what was rejected |
 | [ROADMAP.md](ROADMAP.md) | What comes next (phases 42–46), the known engineering debt, and what is not planned |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Workflow, gates, coding rules |

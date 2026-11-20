@@ -71,6 +71,31 @@ a ABI C avança só de 6 para 7.
   arranca num console mais antigo; a construção passou a ser feita num contentor com a glibc
   do alvo.
 
+### Adicionado — Stability Pack, fase S1 (régua + infraestrutura de teste)
+
+- `docs/STABILITY_DOD.md`: **20 critérios objetivos** de "estável", cada um com o comando
+  que o mede, o limiar e o estado no dia. Três critérios subjetivos foram reformulados até
+  serem mensuráveis (jitter de câmara → deslocamento por frame; "sem panic em lib" → sem
+  panic nos caminhos de reload e teardown; VRAM → bytes estimados pelos registos).
+- `docs/STABILITY_METRICS.md` com o **baseline medido**: `mini_fps` 4 draw calls a 1.00 e a
+  0.75, `ball_balance` p99 0,09 ms e 0/300 frames acima de 20 ms, `physics_3d_demo` 24
+  corpos com o jogador bloqueado pela parede e apoiado no chão.
+- `docs/STABILITY_DECISIONS.md` com o porquê de cada limiar e o que foi recusado, e
+  `IDEAS_STABILITY.md` com o que fica fora do escopo.
+- **Sete ficheiros de teste novos** (26 testes) em `giochi-engine-3d/tests/`, todos
+  `#[ignore]` com a fase que os ativa: `physics_determinism`, `transform_sync`,
+  `material_contract`, `mesh_collider`, `scene_load_unload_loop`, `hot_reload_safety`,
+  `renderer_state`. Onde a propriedade já era verdadeira, o teste tem a asserção real e não
+  um `todo!()` — por isso a S1 provou quatro critérios em vez de os adiar todos.
+- `.github/workflows/stability.yml`: corre as propriedades em **release** (onde o código de
+  float e o solver do Rapier diferem do debug) e reporta a DOD por passo nomeado, além dos
+  comandos de regressão do R7 (Play do editor, Racer na pista, três demos).
+- **Bug encontrado pela régua**: o acumulador da física perde um passo de integração
+  conforme o framerate divide o tempo — `144 × 1/144 = 0.99999994` em f32, 599 passos em
+  vez de 600. Em repouso a diferença é zero; a meio da queda é **0,164 m** depois de 1 s.
+  Fica como teste de aceitação da S2, a falhar de propósito.
+- Nenhuma alteração de código de produção nesta fase.
+
 ### Adicionado — leitura da rotação do painel (`giochi_engine::platform::rotation`)
 
 - `panel_rotation()` lê `/sys/class/graphics/fbcon/rotate` (o mesmo ficheiro que o launcher

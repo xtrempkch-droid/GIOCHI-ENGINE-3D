@@ -1,8 +1,10 @@
 # Estado — GIOCHI-ENGINE
 
-**Estado corrente: Salto C, Fase 41 concluída** — ver a secção
-[Salto C — GIOCHI RACER](#salto-c--giochi-racer-fases-4146) mais abaixo. O Salto B está
-fechado e fica registado na íntegra.
+**Estado corrente: Stability Pack, S1 concluída** — a régua está em
+[docs/STABILITY_DOD.md](docs/STABILITY_DOD.md) e o estado em
+[Status Stability Pack](#status-stability-pack-s1s5). Depois disso, Salto C: Fase 41
+concluída — ver a secção [Salto C — GIOCHI RACER](#salto-c--giochi-racer-fases-4146). O
+Salto B está fechado e fica registado na íntegra.
 
 ## Salto B — Editor Visual (Fases 30–40)
 
@@ -541,6 +543,61 @@ de expansão para manter — e a Fase 40 pode trocá-la sem tocar no `Project`.
 - Fechadas as pendências de UI do plano: `Help` com atalhos e sobre, `Edit > Preferences` com o
   intervalo de autosave (0 desliga) e botão de gravar. `Play > Pause/Stop` ficam para o jogo
   (Fase 45), onde há algo para pausar.
+
+## Status Stability Pack (S1–S5)
+
+Pacote de endurecimento que fica **entre** o editor e o Racer: nenhuma feature nova, só
+propriedades que o jogo precisa de não estar a depurar ao mesmo tempo que os seus próprios
+bugs. A régua está em [docs/STABILITY_DOD.md](docs/STABILITY_DOD.md) (20 critérios, cada um
+com comando e número), o porquê em
+[docs/STABILITY_DECISIONS.md](docs/STABILITY_DECISIONS.md), e as medições em
+[docs/STABILITY_METRICS.md](docs/STABILITY_METRICS.md).
+
+| Fase | Estado | Verificado |
+|---|---|---|
+| S1 — DOD + infraestrutura de teste | **concluída** (2026-11-20) | 20 critérios com comando; 7 ficheiros de teste novos (26 testes, todos `#[ignore]` com a fase que os ativa); `stability.yml` com 15 passos; baseline medido em `mini_fps`, `physics_3d_demo`, `ball_balance` e no Play do editor; **zero alterações de produção** |
+| S2 — física determinística + transform sync | pendente | S1 mediu: **30/60/120 fps bit-idênticos, 100/100 corridas iguais**; falta o resíduo de f32 a **144 fps** (599 passos em vez de 600, 0,164 m de diferença a meio da queda) |
+| S3 — contrato de material + mesh collider | pendente | — |
+| S4 — hot reload seguro + ciclo de vida | pendente | S1 mediu: 100 ciclos load/unload com **0 %** de delta e registos exatos; reload de shader inválido já é recusado |
+| S5 — sync da C ABI + renderer (data-driven) | pendente | — |
+
+### Gates da S1
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — exit 0
+- [x] `SDL_VIDEODRIVER=offscreen cargo test --workspace` — **1486 testes executados**, 30
+      ignorados, 0 falhas (os 29 novos estão `#[ignore]`; o outro é o mDNS, que precisa de
+      multicast real)
+- [x] `SDL_VIDEODRIVER=offscreen cargo test --workspace --release` — 0 falhas
+- [x] Os 7 ficheiros novos compilam e passam com `--ignored` **exceto** os que enunciam
+      lacunas reais e de propósito: `the_accumulator_does_not_lose_a_step_to_float_residue`
+      (S2), `a_corrupted_texture_keeps_the_previous_texture` e
+      `ten_consecutive_failed_reloads_leave_the_renderer_usable` (S4),
+      `material_contract`/`mesh_collider`/`renderer_state` (`todo!("S3")`/`todo!("S5")`)
+- [x] `.github/workflows/stability.yml` — parse YAML válido; os passos verdes foram
+      corridos à mão neste host (ver abaixo)
+- [x] `scripts/gates.sh` completo — "All gates passed"
+
+### O que a S1 mediu, e não só definiu
+
+Escrever o esqueleto antes da fase seguinte pagou-se logo: quatro critérios já são
+verdadeiros e ficaram provados, e um bug real apareceu.
+
+| Critério | Resultado a 2026-11-20 |
+|---|---|
+| 1 — 100 ciclos load/unload | **0 %** de delta (21 152 bytes por ciclo), registos exatamente no baseline |
+| 2 — determinismo | 30/60/120 fps **bit-idênticos**; 100 corridas iguais; **144 fps perde um passo** por resíduo de f32 (`144 × 1/144 = 0.99999994`) |
+| 3, 4 — reload inválido | shader inválido recusado sem GL error; JSON inválido e versão futura recusados |
+| 8, 9 — sync + câmara | ambas as direções no mesmo frame; câmara converge a 30 e 60 fps e chega ao mesmo ponto em 2 s |
+| 5, 18 — C ABI | 10 testes de layout; `giochi.h` atualizado |
+| 6 — Play do editor | `Played 3 frame(s)` com 1 mesh e 1 instância |
+| 16 — três demos | 300/600 frames, exit 0, sem erro de GL |
+| 7, 19 — frame time | `mini_fps` **4 draw calls** a 1.00 e a 0.75; `ball_balance` p99 **0,09 ms**, 0/300 frames acima de 20 ms |
+
+O bug encontrado pela régua: o acumulador da física pode perder um passo de integração
+conforme o framerate divide o tempo. Não aparece em repouso (10 s depois a diferença é
+zero) e aparece a meio da queda (0,164 m depois de 1 s). Ficou como teste de aceitação da
+S2, a falhar de propósito, em vez de uma nota de rodapé.
 
 ## Production Pack — fechada (pré-requisito das Fases 41+)
 

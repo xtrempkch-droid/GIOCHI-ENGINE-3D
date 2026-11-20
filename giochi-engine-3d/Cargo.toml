@@ -104,6 +104,22 @@ hud = ["dep:egui"]
 name = "hud_render"
 required-features = ["hud"]
 
+# The Stability Pack tests that need the physics world. Without this, `cargo test
+# -p giochi-engine-3d` (no features) tries to compile a file that imports a module the
+# feature gate removes. The workspace run happens to unify `physics-3d` from the Racer,
+# which would hide the breakage from CI and show it to a developer.
+[[test]]
+name = "physics_determinism"
+required-features = ["physics-3d"]
+
+[[test]]
+name = "transform_sync"
+required-features = ["physics-3d"]
+
+[[test]]
+name = "mesh_collider"
+required-features = ["physics-3d"]
+
 [[example]]
 name = "physics_3d_demo"
 path = "examples/physics_3d_demo.rs"

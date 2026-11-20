@@ -1,0 +1,130 @@
+name: Stability
+
+# The Stability Pack (docs/STABILITY_DOD.md). `ci.yml` already runs the workspace in
+# debug; this workflow exists for the two things it cannot do there:
+#
+#   1. run the stability properties in **release**, where float code and the Rapier
+#      solver behave differently from debug — a determinism test that only agrees in
+#      debug is not deterministic on the console, which ships release;
+#   2. report the DOD criteria as named steps, so "stability is red" names the property
+#      instead of pointing at a 400-line log.
+#
+# It is not a required check by itself. A required-but-flaky job gets disabled, and the
+# repository's gates stay in `gates.sh` / `ci.yml`.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: stability-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Every GL test in this repository honours an explicit driver and falls back to
+  # `offscreen`; SDL2's `dummy` driver has no GL, which would make the lifecycle and
+  # reload tests skip instead of running.
+  SDL_VIDEODRIVER: offscreen
+
+jobs:
+  stability:
+    name: Stability properties (release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Free disk space
+        # Same reason as `ci.yml`: a cold `sdl2-sys` build compiles SDL2 from source and
+        # the runner runs out of space before the link. See that file for the measurement.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo apt-get clean
+
+      - name: Create cargo deps directories
+        run: ./scripts/create-cargo-deps-dirs.sh
+
+      - name: Install Rust
+        run: |
+          rustup show
+          rustc --version
+
+      - name: Install build dependencies
+        run: sudo ./scripts/install-deps.sh
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: stability
+
+      - name: DOD 2 — physics is deterministic at 30, 60, 120 and 144 fps
+        # Release on purpose: debug carries overflow checks and different float code.
+        # `-- --ignored` runs the contract tests S1 committed; the 144 fps residue test is
+        # expected to fail until S2, and the step is marked `continue-on-error` until then
+        # so the rest of the pack can be measured meanwhile.
+        continue-on-error: true
+        run: |
+          cargo test --release -p giochi-engine-3d --features physics-3d \
+            --test physics_determinism -- --ignored
+
+      - name: DOD 8, 9 — transform ↔ physics sync and camera convergence
+        run: |
+          cargo test --release -p giochi-engine-3d --features physics-3d \
+            --test transform_sync -- --ignored
+
+      - name: DOD 1, 4 — asset lifecycle and scene rejection
+        run: |
+          cargo test --release -p giochi-engine-3d --test scene_load_unload_loop -- --ignored
+          cargo test --release -p giochi-engine-3d --test hot_reload_safety \
+            -- --ignored --skip a_corrupted_texture --skip ten_consecutive
+
+      - name: DOD 3, 10, 11, 5 — contracts that are not implemented yet
+        # These fail with `todo!("S3")` / `todo!("S5")` until their phase lands. They are
+        # listed so the status is visible, and allowed to fail until then.
+        continue-on-error: true
+        run: |
+          cargo test --release -p giochi-engine-3d --test material_contract -- --ignored
+          # `mesh_collider` is declared with `required-features = ["physics-3d"]`, so the
+          # feature is named here; without it cargo refuses the target instead of
+          # silently running nothing.
+          cargo test --release -p giochi-engine-3d --features physics-3d \
+            --test mesh_collider -- --ignored
+          cargo test --release -p giochi-engine-3d --test renderer_state -- --ignored
+
+      - name: DOD 5, 18 — C ABI layout and generated header
+        run: |
+          cargo test --release -p giochi-engine-3d --test abi_layout_3d
+          cargo test --release -p giochi-engine-capi
+
+      - name: DOD 16 — the three demos run 300 frames without panicking
+        run: |
+          cargo run --release -p giochi-engine-3d --example mini_fps -- --frames 300 --auto
+          cargo run --release -p giochi-engine-3d --features physics-3d \
+            --example physics_3d_demo -- --frames 300 --auto
+          cargo run --release -p giochi-engine-3d --example ball_balance -- --frames 300 --auto
+
+      - name: R7 — editor Play mode is not broken
+        # `--play-frames` opens the preview window, renders N frames and returns; without
+        # `--scene` the editor has nothing to play, so the scene is named explicitly.
+        run: |
+          cargo run --release -p giochi-editor -- \
+            --scene giochi-editor/assets/scenes/default.scene --frames 8 --play-frames 3 \
+            --config /tmp/giochi-stability-cfg
+
+      - name: R7 — the Racer still drives the shipped track
+        run: |
+          cargo run --release -p giochi-racer -- --frames 180 --auto --quadro /tmp/race.bmp
+          python3 giochi-racer/scripts/check-frame.py /tmp/race.bmp
+
+      - name: DOD 7, 19 — baseline numbers for the metrics table
+        # Printed, not asserted: S5a turns these into the p50/p95/p99 columns of
+        # docs/STABILITY_METRICS.md. The job log is the artifact.
+        run: |
+          cargo run --release -p giochi-engine-3d --example mini_fps -- \
+            --frames 600 --auto --bench --instanced
+          cargo run --release -p giochi-engine-3d --example mini_fps -- \
+            --frames 600 --auto --bench --instanced --scale 0.75

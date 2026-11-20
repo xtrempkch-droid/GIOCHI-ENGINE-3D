@@ -19,6 +19,17 @@ Phases 0–41 are delivered. What follows is the Salto C (GIOCHI RACER) tail.
 
 ## Next
 
+### Stability Pack (S1–S5) — hardening before the game continues
+
+Between the editor and the Racer, a pack that adds **no features**: a ruler
+([docs/STABILITY_DOD.md](docs/STABILITY_DOD.md)), deterministic physics, a single material
+contract with mesh colliders, safe hot reload with a tested asset lifecycle, and a C ABI
+sync. **S1 is delivered** (2026-11-20); S2–S5 follow in that order.
+
+Why it exists: a Racer bug that is really an engine bug costs a debugging session in the
+wrong repository. The pack moves those out of the game's backlog — and its ruler already
+found one (the physics accumulator loses a step at 144 fps).
+
 ### Phase 42 — three tracks, checkpoints, laps
 
 Today there is **one** track (`giochi-racer/assets/tracks/track_easy.scene`, a 200 m oval)
@@ -76,6 +87,9 @@ These are tracked because they will be hit by the phases above, not because they
 | Item | Where | What unblocks it |
 |---|---|---|
 | Panel rotation not applied | `giochi_engine::platform::rotation` + presentation pass | phase 45 |
+| Physics accumulator loses one step at 144 fps | `PhysicsWorld3D::step` | Stability S2 |
+| Material contract, trimesh/convex colliders | — | Stability S3 |
+| Texture reload path, ten-failure resilience | — | Stability S4 |
 | `giochi_ui_*` missing from the C ABI | the facade is already C-shaped | a C consumer that needs it |
 | 3D HUD input (`translate_event` is `pub(crate)`, keyed on the 2D event type) | `giochi-engine/src/ui` | lifting the table into a shared crate |
 | Physics 3D, contacts and raycast not in the C ABI | — | deciding how a `Vec` crosses the boundary (same question the net snapshots answered with fixed arrays) |
