@@ -1,0 +1,2129 @@
+{
+ "format": "giochi-scene",
+ "version": 1,
+ "name": "SERPENTINE HARD",
+ "next_id": 45,
+ "nodes": [
+  {
+   "id": 1,
+   "name": "Terrain",
+   "parent": null,
+   "transform": {
+    "position": [
+     0.0,
+     -0.2,
+     0.0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     400.0,
+     0.4,
+     400.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.19,
+     0.33,
+     0.16,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.05,
+    "shininess": 8.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.95,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 2,
+   "name": "Straight A",
+   "parent": null,
+   "transform": {
+    "position": [
+     0,
+     -0.18,
+     -60.0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     120,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 3,
+   "name": "Straight A Wall L",
+   "parent": null,
+   "transform": {
+    "position": [
+     0.0,
+     0.6,
+     -54.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     110.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 4,
+   "name": "Straight A Wall R",
+   "parent": null,
+   "transform": {
+    "position": [
+     0.0,
+     0.6,
+     -65.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     110.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 5,
+   "name": "Straight B",
+   "parent": null,
+   "transform": {
+    "position": [
+     0,
+     -0.18,
+     -20.0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     120,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 6,
+   "name": "Straight B Wall L",
+   "parent": null,
+   "transform": {
+    "position": [
+     0.0,
+     0.6,
+     -14.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     110.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 7,
+   "name": "Straight B Wall R",
+   "parent": null,
+   "transform": {
+    "position": [
+     0.0,
+     0.6,
+     -25.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     110.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 8,
+   "name": "Straight C",
+   "parent": null,
+   "transform": {
+    "position": [
+     0,
+     -0.18,
+     20.0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     120,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 9,
+   "name": "Straight C Wall L",
+   "parent": null,
+   "transform": {
+    "position": [
+     0.0,
+     0.6,
+     25.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     110.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 10,
+   "name": "Straight C Wall R",
+   "parent": null,
+   "transform": {
+    "position": [
+     0.0,
+     0.6,
+     14.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     110.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 11,
+   "name": "Straight D",
+   "parent": null,
+   "transform": {
+    "position": [
+     0,
+     -0.18,
+     60.0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     120,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 12,
+   "name": "Straight D Wall L",
+   "parent": null,
+   "transform": {
+    "position": [
+     0.0,
+     0.6,
+     65.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     110.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 13,
+   "name": "Straight D Wall R",
+   "parent": null,
+   "transform": {
+    "position": [
+     0.0,
+     0.6,
+     54.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     110.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 14,
+   "name": "Turn One",
+   "parent": null,
+   "transform": {
+    "position": [
+     60.0,
+     -0.18,
+     -40
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     40,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 15,
+   "name": "Turn One Wall L",
+   "parent": null,
+   "transform": {
+    "position": [
+     65.5,
+     0.6,
+     -40.0
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     30.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 16,
+   "name": "Turn One Wall R",
+   "parent": null,
+   "transform": {
+    "position": [
+     54.5,
+     0.6,
+     -40.0
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     30.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 17,
+   "name": "Turn Two",
+   "parent": null,
+   "transform": {
+    "position": [
+     -60.0,
+     -0.18,
+     0
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     40,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 18,
+   "name": "Turn Two Wall L",
+   "parent": null,
+   "transform": {
+    "position": [
+     -54.5,
+     0.6,
+     0.0
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     30.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 19,
+   "name": "Turn Two Wall R",
+   "parent": null,
+   "transform": {
+    "position": [
+     -65.5,
+     0.6,
+     -0.0
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     30.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 20,
+   "name": "Turn Three",
+   "parent": null,
+   "transform": {
+    "position": [
+     60.0,
+     -0.18,
+     40
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     40,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 21,
+   "name": "Turn Three Wall L",
+   "parent": null,
+   "transform": {
+    "position": [
+     65.5,
+     0.6,
+     40.0
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     30.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 22,
+   "name": "Turn Three Wall R",
+   "parent": null,
+   "transform": {
+    "position": [
+     54.5,
+     0.6,
+     40.0
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     30.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 23,
+   "name": "Return Leg",
+   "parent": null,
+   "transform": {
+    "position": [
+     -75,
+     -0.18,
+     0
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     120,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 24,
+   "name": "Return Leg Wall L",
+   "parent": null,
+   "transform": {
+    "position": [
+     -69.5,
+     0.6,
+     0.0
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     110.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 25,
+   "name": "Return Leg Wall R",
+   "parent": null,
+   "transform": {
+    "position": [
+     -80.5,
+     0.6,
+     -0.0
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     110.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 26,
+   "name": "Return Stub North",
+   "parent": null,
+   "transform": {
+    "position": [
+     -67.5,
+     -0.18,
+     60
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     15,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 27,
+   "name": "Return Stub North Wall L",
+   "parent": null,
+   "transform": {
+    "position": [
+     -67.5,
+     0.6,
+     65.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     5.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 28,
+   "name": "Return Stub North Wall R",
+   "parent": null,
+   "transform": {
+    "position": [
+     -67.5,
+     0.6,
+     54.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     5.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 29,
+   "name": "Return Stub South",
+   "parent": null,
+   "transform": {
+    "position": [
+     -67.5,
+     -0.18,
+     -60
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     15,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 30,
+   "name": "Return Stub South Wall L",
+   "parent": null,
+   "transform": {
+    "position": [
+     -67.5,
+     0.6,
+     -54.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     5.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 31,
+   "name": "Return Stub South Wall R",
+   "parent": null,
+   "transform": {
+    "position": [
+     -67.5,
+     0.6,
+     -65.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     5.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 32,
+   "name": "Ramp Up",
+   "parent": null,
+   "transform": {
+    "position": [
+     -7.5,
+     0.32,
+     -20
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.033278,
+     0.999446
+    ],
+    "scale": [
+     15.0333,
+     0.4,
+     10
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 33,
+   "name": "Ramp Top",
+   "parent": null,
+   "transform": {
+    "position": [
+     5.0,
+     0.82,
+     -20
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     10.0,
+     0.4,
+     10
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 34,
+   "name": "Ramp Down",
+   "parent": null,
+   "transform": {
+    "position": [
+     17.5,
+     0.32,
+     -20
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     -0.033278,
+     0.999446
+    ],
+    "scale": [
+     15.0333,
+     0.4,
+     10
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 35,
+   "name": "Start",
+   "parent": null,
+   "transform": {
+    "position": [
+     -45,
+     0.5,
+     -60
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 36,
+   "name": "Checkpoint 1",
+   "parent": null,
+   "transform": {
+    "position": [
+     0,
+     0.5,
+     -60
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 37,
+   "name": "Checkpoint 2",
+   "parent": null,
+   "transform": {
+    "position": [
+     60,
+     0.5,
+     -40
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 38,
+   "name": "Checkpoint 3",
+   "parent": null,
+   "transform": {
+    "position": [
+     -25,
+     0.5,
+     -20
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 39,
+   "name": "Checkpoint 4",
+   "parent": null,
+   "transform": {
+    "position": [
+     0,
+     0.5,
+     20
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 40,
+   "name": "Checkpoint 5",
+   "parent": null,
+   "transform": {
+    "position": [
+     60,
+     0.5,
+     40
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 41,
+   "name": "Checkpoint 6",
+   "parent": null,
+   "transform": {
+    "position": [
+     0,
+     0.5,
+     60
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 42,
+   "name": "Checkpoint 7",
+   "parent": null,
+   "transform": {
+    "position": [
+     -75,
+     0.5,
+     -40
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 43,
+   "name": "Checkpoint 8",
+   "parent": null,
+   "transform": {
+    "position": [
+     -67.5,
+     0.5,
+     -60
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 44,
+   "name": "Sun",
+   "parent": null,
+   "transform": {
+    "position": [
+     0.0,
+     20.0,
+     0.0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": {
+    "direction": [
+     -0.45,
+     -1.0,
+     -0.35
+    ],
+    "color": [
+     1.0,
+     0.98,
+     0.94,
+     1.0
+    ],
+    "ambient": 0.32,
+    "specular": 0.35,
+    "shininess": 40.0
+   },
+   "camera": null
+  }
+ ]
+}

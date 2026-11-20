@@ -12,6 +12,7 @@
 //! a scripted driver for a few seconds, read the framebuffer and assert the picture is not
 //! the clear colour. Everything the flags touch is the code the player runs.
 
+use std::collections::HashMap;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
@@ -229,6 +230,13 @@ fn run() -> Result<(), Error> {
     let mut input = Input::new(&platform);
     let mut game = RaceGame::new(&mut render, options.config)?;
 
+    // The best lap per track, for this session. Phase 44 persists it; phase 42's results
+    // overlay only needs to know whether this race beat the record it started with.
+    let mut scores: HashMap<String, f32> = HashMap::new();
+    let track_name = game.track().name.clone();
+    game.set_previous_best(scores.get(&track_name).copied());
+    let mut recorded = false;
+
     let mut frames: u64 = 0;
     let mut elapsed = 0.0f32;
     let started = Instant::now();
@@ -260,11 +268,36 @@ fn run() -> Result<(), Error> {
             break;
         }
         if input.key_pressed(KEY_R) {
-            game.respawn_car();
+            if game.phase() == giochi_racer::game::RacePhase::Finished {
+                // The results overlay is up: R starts the race again on this track.
+                game.restart();
+                recorded = false;
+            } else {
+                game.respawn_car();
+            }
         }
 
         game.step(car_input, STEP);
         elapsed += STEP;
+
+        // Record the result the frame the race ends, once: the overlay reads the record it
+        // was compared against, not the one this race just wrote.
+        if !recorded {
+            if let Some(best) = game.lap().best_lap() {
+                if game.phase() == giochi_racer::game::RacePhase::Finished {
+                    recorded = true;
+                    match scores.get(&track_name) {
+                        Some(old) if *old <= best => {
+                            log::info!("{track_name}: best lap {best:.3}s (record {old:.3}s)")
+                        }
+                        _ => {
+                            log::info!("{track_name}: new best lap {best:.3}s");
+                            scores.insert(track_name.clone(), best);
+                        }
+                    }
+                }
+            }
+        }
 
         let (width, height) = render.drawable_size();
         render.begin_frame(&window);

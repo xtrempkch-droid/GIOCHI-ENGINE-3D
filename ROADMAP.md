@@ -16,6 +16,7 @@ Phases 0–41 are delivered. What follows is the Salto C (GIOCHI RACER) tail.
 | 30–40 | **Salto B — `giochi-editor`**: viewport, hierarchy, inspector, asset browser, gizmos, undo/redo, autosave, play preview, standalone package |
 | — | **Production Pack**: glTF/GLB, PBR-lite materials, scene format, save slots, game cameras, A\*, audio buses, i18n |
 | 41 | **Salto C — `giochi-racer`**: car, track, chase camera, HUD, measured on R35S and x55 |
+| 42 | **Racer**: three circuits (oval, figure of eight, serpentine with a hump), lap rules, results overlay |
 
 ## Next
 
@@ -30,16 +31,12 @@ Why it exists: a Racer bug that is really an engine bug costs a debugging sessio
 wrong repository. The pack moves those out of the game's backlog — and its ruler already
 found one (the physics accumulator loses a step at 144 fps).
 
-### Phase 42 — three tracks, checkpoints, laps
+### Phase 42 — three tracks, checkpoints, laps — **delivered** (2026-11-20)
 
-Today there is **one** track (`giochi-racer/assets/tracks/track_easy.scene`, a 200 m oval)
-and one `LapTracker`. The phase adds two more circuits and the content around them.
-
-- Tracks are data, in the editor's `.scene` format; the convention (`Start`,
-  `Checkpoint N`, …) is in [giochi-racer/docs/TRACK_SPECS.md](giochi-racer/docs/TRACK_SPECS.md)
-  and is asserted by `tests/track_specs.rs`.
-- Acceptance: each track drivable by the physics car in a test, ordered gates, an invalidated
-  lap for a cut course.
+Three circuits in the editor's `.scene` format, a pure-pursuit driver that completes a lap
+of each with the physics car (`tests/lap_logic.rs`), lap invalidation on a cut, and a
+results overlay with the session's best lap. Specifications and the geometry decisions are
+in [giochi-racer/docs/TRACK_SPECS.md](giochi-racer/docs/TRACK_SPECS.md).
 
 ### Phase 43 — opponent AI
 

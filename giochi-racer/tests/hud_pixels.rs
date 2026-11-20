@@ -83,6 +83,7 @@ fn text_reaches_the_framebuffer_through_the_painter() {
         best_lap: Some(11.0),
         event: None,
         finished: false,
+        new_best: false,
     };
     for _ in 0..4 {
         render.begin_frame(&window);
@@ -131,6 +132,7 @@ fn the_hud_layout_lands_in_the_four_corners() {
         best_lap: Some(38.5),
         event: None,
         finished: false,
+        new_best: false,
     };
     for _ in 0..4 {
         render.begin_frame(&window);

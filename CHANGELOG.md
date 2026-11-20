@@ -51,6 +51,24 @@ a ABI C avança só de 6 para 7.
 - Crate novo, binário + biblioteca: uma pista lida de um `.scene` do editor, um carro
   arcade com corpo Rapier de rotações travadas, câmara de perseguição, contagem de voltas
   por portões em ordem e HUD por `GlesHud`.
+### Adicionado — `giochi-racer`, fase 42: três pistas, voltas e resultados
+
+- **`assets/tracks/track_medium.scene`** (figura-8, ≈414 m, 6 checkpoints) e
+  **`track_hard.scene`** (serpentina de 4 retas com uma lomba de 1 m, ≈640 m, 8
+  checkpoints), ambos no formato de cena do editor. Gerados por
+  `giochi-racer/scripts/generate-tracks.py`, que fica no repositório para a geometria ser
+  revisível como aritmética; o editor abre-os e grava-os como qualquer outra cena.
+- **`tests/lap_logic.rs`**: um piloto *pure-pursuit* conduz o **carro físico** por uma volta
+  completa nas três pistas (19 s / 33 s / 76 s), e um teste corta a pista de propósito para
+  provar que a volta é invalidada. É o protótipo do seguidor de waypoints da Fase 43.
+- **Ecrã de resultados**: total, melhor volta, `NEW BEST` contra o record da sessão e as
+  teclas que funcionam ali (`R` recomeça, Start/Esc sai). Medido por pixels em
+  `tests/results_overlay.rs`, porque um painel que não desenha é indistinguível de um que
+  funciona.
+- Recorde por pista em memória (`HashMap` no `main`), como o plano pede para a 42.
+- `docs/TRACK_SPECS.md` com as três pistas, as tabelas de medidas e a razão de cada escolha
+  de geometria (paredes que param antes do cruzamento, diagonais sem paredes).
+
 - **A pista é dados** (`assets/tracks/track_easy.scene`, oval de 200 m): a convenção de
   nomes (`Start`, `Checkpoint 1`…) está em `giochi-racer/docs/TRACK_SPECS.md` e é medida
   por `tests/track_specs.rs` a cada `cargo test`.

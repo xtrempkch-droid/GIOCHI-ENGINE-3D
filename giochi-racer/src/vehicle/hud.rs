@@ -36,6 +36,11 @@ pub struct HudState {
     pub event: Option<LapEvent>,
     /// Whether the race is over.
     pub finished: bool,
+    /// Whether this race beat the best lap already on record for the track.
+    ///
+    /// Only meaningful when [`HudState::finished`]; a "NEW BEST" banner halfway through a
+    /// lap would be a lie until the lap is counted.
+    pub new_best: bool,
 }
 
 impl HudState {
@@ -205,6 +210,33 @@ pub fn draw(
                         mono(24.0),
                         grey,
                     );
+                    if let Some(best) = &best {
+                        painter.text(
+                            egui::pos2(width * 0.5, height * 0.58),
+                            egui::Align2::CENTER_CENTER,
+                            format!("best lap {best}"),
+                            mono(22.0),
+                            egui::Color32::from_rgb(120, 230, 140),
+                        );
+                    }
+                    if state.new_best {
+                        painter.text(
+                            egui::pos2(width * 0.5, height * 0.64),
+                            egui::Align2::CENTER_CENTER,
+                            "NEW BEST",
+                            proportional(26.0),
+                            egui::Color32::from_rgb(255, 225, 120),
+                        );
+                    }
+                    // Phase 44 turns this into buttons; until then the keys that exist
+                    // are named, so a player is not stuck on a screen with no way out.
+                    painter.text(
+                        egui::pos2(width * 0.5, height * 0.72),
+                        egui::Align2::CENTER_CENTER,
+                        "R  race again        START / ESC  quit",
+                        mono(16.0),
+                        dim,
+                    );
                 }
             });
     })
@@ -260,6 +292,7 @@ mod tests {
             best_lap: None,
             event: None,
             finished: false,
+            new_best: false,
         }
     }
 

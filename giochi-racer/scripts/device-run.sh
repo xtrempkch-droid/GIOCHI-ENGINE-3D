@@ -54,6 +54,7 @@ dest="/opt/racer"
 frames=600
 size=""
 laps=""
+track=""
 log_level=""
 binary="target/aarch64-unknown-linux-gnu/release/giochi-racer"
 skip_deploy=0
@@ -72,6 +73,7 @@ screen back exactly as it was found.
   --frames N           frames to run (default 600)
   --size WxH           window size passed to the game (KMSDRM uses the panel's mode)
   --laps N             laps in the race
+  --track PATH         track to race, relative to the game's assets/ (default easy)
   --log LEVEL          RUST_LOG level (default info)
   --binary PATH        ARM64 binary to deploy
   --launcher PATH      the console's launcher, the process holding DRM master
@@ -94,6 +96,7 @@ while [[ $# -gt 0 ]]; do
         --frames) frames="$2"; shift 2;;
         --size) size="$2"; shift 2;;
         --laps) laps="$2"; shift 2;;
+        --track) track="$2"; shift 2;;
         --log) log_level="$2"; shift 2;;
         --binary) binary="$2"; shift 2;;
         --launcher) launcher="$2"; shift 2;;
@@ -111,6 +114,14 @@ ssh_opts=(-o BatchMode=yes -o ConnectTimeout=10)
 if [[ "$refresh_host_key" == "1" ]]; then
     echo "==> forgetting the host key for $hostname_only (a different unit answers there)"
     ssh-keygen -R "$hostname_only" >/dev/null 2>&1 || true
+    # ...and trusting the one that is there now. `ssh-keygen -R` only removes: without
+    # the scan below, `BatchMode=yes` refuses the connection with "Host key verification
+    # failed", which the error path below then misreports as a lost `authorized_keys`.
+    # Measured on 2026-11-20 on the R35S.
+    if ! ssh-keyscan -T 10 "$hostname_only" 2>/dev/null >>"$HOME/.ssh/known_hosts"; then
+        echo "error: could not read the new host key from $hostname_only" >&2
+        exit 1
+    fi
 fi
 
 # A reflashed console is a new host key at the same address. Turning that into one
@@ -177,7 +188,7 @@ fi
 # ---------------------------------------------------------------------------
 # The device side. One script, one trap, both the release and the restore.
 # ---------------------------------------------------------------------------
-args="$frames $auto $dest $launcher ${size:--} ${laps:--} ${log_level:-info}"
+args="$frames $auto $dest $launcher ${size:--} ${laps:--} ${log_level:-info} ${track:--}"
 # shellcheck disable=SC2086
 ssh -o BatchMode=yes "$host" bash -s $args <<'REMOTE'
 set -e
@@ -188,9 +199,13 @@ launcher="$4"
 size="$5"
 laps="$6"
 log_level="$7"
+track="$8"
 extra=""
 [ "$size" != "-" ] && extra="$extra --size $size"
 [ "$laps" != "-" ] && extra="$extra --laps $laps"
+# Absolute on the device: the game resolves a relative `--track` against the executable
+# and the working directory, and the deployment directory is neither `assets/`.
+[ "$track" != "-" ] && extra="$extra --track $dest/$track"
 
 DEV_FREE=/run/giochi/dev-free-console
 # While this file exists the supervisor parks the launcher on purpose: the console is

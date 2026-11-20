@@ -4,9 +4,10 @@ An arcade racer for the GIOCHI-OS handheld, built with [GIOCHI-ENGINE](../README
 the [visual editor](../docs/EDITOR_USER_GUIDE.md). Low-poly, 60 fps, one hand on the
 triggers.
 
-This is **phase 41** of the master plan: the foundation. A drivable car on a real circuit,
-with a chase camera, a clock and a HUD. Opponents (43), menus and persistence (44), dynamic
-resolution (45) and the ARM64 package (46) come next.
+This is **phase 42** of the master plan. The foundation (41) was one car on one circuit
+with a chase camera and a HUD; phase 42 adds **three circuits**, the checkpoint/lap rules
+and a results screen. Opponents (43), menus and persistence (44), dynamic resolution (45)
+and the ARM64 package (46) come next.
 
 ```text
 cargo run -p giochi-racer --release
@@ -16,14 +17,19 @@ cargo run -p giochi-racer --release
 
 ## What works today
 
-- One circuit, `assets/tracks/track_easy.scene`: a 200 m oval, 10 m wide, four checkpoints,
-  built in the editor's scene format.
+- **Three circuits** in the editor's scene format, each with a centreline and a
+  checkpoint list documented in [docs/TRACK_SPECS.md](docs/TRACK_SPECS.md):
+  `track_easy.scene` (200 m oval, 4 checkpoints), `track_medium.scene` (figure of eight,
+  ≈414 m, 6) and `track_hard.scene` (serpentine with a hump, ≈640 m, 8).
 - An arcade car with a Rapier body: 120 km/h top speed, brakes, reverse, a handbrake that
   slides, and a steering authority that shrinks with speed.
 - A camera that trails the car along its heading and pulls back with speed.
 - Lap counting: the four checkpoints in order, then the finish line. A cut course
   invalidates the lap, and the next crossing of the line starts a clean one.
 - A HUD: lap, lap time, race time, best lap, speed and gear.
+- A **results screen** when the last lap ends: total time, best lap, `NEW BEST` against the
+  session's record, and the two keys that do something there (`R` races again on the same
+  track, Start/`Esc` quits).
 - Gamepad first, keyboard as the fallback.
 
 ## Controls
@@ -42,7 +48,7 @@ There is nothing to configure: a controller that is plugged in but idle (a pad o
 next to a dev machine) does not lock the keyboard out.
 
 There is no pause menu yet — `Esc` and Start quit. Phase 44 replaces that with the pause
-overlay the plan asks for.
+overlay the plan asks for. After the results screen, `R` starts the race again.
 
 ## Command line
 

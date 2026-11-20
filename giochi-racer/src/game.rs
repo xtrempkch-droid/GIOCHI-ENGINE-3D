@@ -71,6 +71,9 @@ pub struct RaceGame {
     last_event: Option<LapEvent>,
     /// Seconds the current message has been on screen.
     message_age: f32,
+    /// The best lap already on record for this track, if any, so the results overlay can
+    /// say "NEW BEST" without the game owning a settings file (phase 44 does).
+    previous_best: Option<f32>,
 }
 
 impl RaceGame {
@@ -125,6 +128,7 @@ impl RaceGame {
             wheel_spin: 0.0,
             last_event: None,
             message_age: MESSAGE_SECONDS,
+            previous_best: None,
         })
     }
 
@@ -255,7 +259,56 @@ impl RaceGame {
                 None
             },
             finished: self.lap.is_finished(),
+            new_best: self.lap.is_finished()
+                && self
+                    .lap
+                    .best_lap()
+                    .is_some_and(|best| self.previous_best.is_none_or(|old| best < old)),
         }
+    }
+
+    /// The best lap already on record for this track.
+    ///
+    /// Phase 42 keeps the record in memory; phase 44 writes it to
+    /// `~/.config/giochi-racer/scores.toml`.
+    pub fn previous_best(&self) -> Option<f32> {
+        self.previous_best
+    }
+
+    /// Records the time to beat before the race starts.
+    pub fn set_previous_best(&mut self, best: Option<f32>) {
+        self.previous_best = best;
+    }
+
+    /// Starts the race again on the same track: clock, laps and car back to the line.
+    ///
+    /// What `R` does after the results overlay. Before the race is over, `R` only puts the
+    /// car back on the road ([`RaceGame::respawn_car`]) — a key that erased a bad lap mid
+    /// race would be a cheat, not a feature.
+    pub fn restart(&mut self) {
+        self.lap = LapTracker::new(
+            self.track.checkpoints.clone(),
+            self.config.laps,
+            self.track.start.position,
+        );
+        if let Err(error) = self.car.respawn(
+            &mut self.world,
+            self.track.start.position,
+            self.track.start.yaw,
+        ) {
+            log::error!("restart: {error}");
+            return;
+        }
+        if let Ok(state) = self.car.state(&self.world) {
+            self.car_state = state;
+            self.camera.snap(
+                state.position,
+                Vec3::new(self.track.start.yaw.sin(), 0.0, self.track.start.yaw.cos()),
+                0.0,
+            );
+        }
+        self.last_event = None;
+        self.message_age = 0.0;
     }
 
     /// The chase camera, for a test that wants to look at the frame.

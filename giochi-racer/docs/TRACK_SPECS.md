@@ -5,8 +5,10 @@ A track is a **`.scene` file the editor reads and writes** — the same format a
 describes the data the game expects to find in the file, so a track can be built and
 changed in the visual editor without touching Rust (master plan, R3).
 
-The shipped track, `assets/tracks/track_easy.scene`, follows every rule below and is
-checked against them by `tests/track_specs.rs` on every `cargo test`.
+Three circuits ship: `track_easy.scene` (the phase-41 oval), `track_medium.scene` (a
+figure of eight) and `track_hard.scene` (a serpentine with a hump). All three follow every
+rule below and are checked against them by `tests/track_specs.rs`, which also *drives* a
+full lap of each (`tests/lap_logic.rs`).
 
 ---
 
@@ -50,6 +52,10 @@ otherwise. So:
 - drop a `Checkpoint 3` empty and leave its scale alone → a 12 m disc;
 - set its scale X to `8` → an 8 m disc, for a gate that has to be hit precisely;
 - set it to `20` → a generous gate on a wide straight.
+
+(The **start line** always uses the 12 m default: it is what the car spawns inside, and a
+smaller disc there would let a car start outside its own finish line. `Start`'s `scale` is
+ignored, not read as a radius.)
 
 The scale is read from the node's *world* transform, so a gate inside a scaled group is
 scaled with it.
@@ -125,61 +131,124 @@ because the road is one shape and each grass area is another.
 
 ---
 
-## 3. Building or changing a track in the editor
+## 3. `FIGURE EIGHT` — `track_medium.scene`
+
+Two 45 × 40 m loops whose inner sides are two diagonals crossing at the origin. Six
+checkpoints, all on straights, so a gate disc never overlaps a different part of the
+route.
+
+```
+        z = +20    ┌──────────────┐   ╱   ┌──────────────┐
+                   │  left loop    ╲ ╱      right loop  │
+        z =   0    │      west      ╳        east       │
+                   │  (x = -50)    ╱ ╲    (x = +50)     │
+        z = -20    └──────────────┘   ╲   └──────────────┘
+                  x=-50        x=-5   0   x=+5        x=+50
+```
+
+| Property | Value |
+|---|---|
+| Loop rectangles | `x ∈ [-50, -5]` and `x ∈ [5, 50]`, both `z ∈ [-20, 20]` |
+| Crossing | two diagonals: `(-5,-20)→(5,20)` and `(5,-20)→(-5,20)` |
+| Lap length round the centreline | ≈ `414 m` (measured by the driven lap: 33 s at ~12 m/s) |
+| Road width | `10 m` |
+| Start | `(-40, 0.5, -20)`, facing `+X` |
+| Checkpoints | `(-17.5,-20)`, `(27.5,20)`, `(50,0)`, `(27.5,-20)`, `(-27.5,20)`, `(-50,0)` |
+| Gate radius | 12 m |
+
+**The crossing has no walls and no road of its own beyond the two diagonals.** A barrier
+along a diagonal cuts across every road it meets, which in a figure of eight is the inside
+of the other loop — the car was fenced out of the crossing until those walls were removed.
+Off the crossing the surface is grass, so a car that misses the diagonal can drive back;
+the checkpoints, not the barriers, are what make the lap honest.
+
+## 4. `SERPENTINE HARD` — `track_hard.scene`
+
+Four 120 m straights joined by three U-turns, plus a return leg offset 15 m west so it does
+not overlap them, and a hump on the second straight.
+
+| Property | Value |
+|---|---|
+| Straights | `z = -60, -20, 20, 60`, `x ∈ [-60, 60]` |
+| U-turns | `x = 60` (from `z=-60`), `x = -60` (from `z=-20`), `x = 60` (from `z=20`) |
+| Return | `x = -75`, `z ∈ [-60, 60]`, joined by two 15 m stubs at `z = ±60` |
+| Lap length | ≈ `640 m` (measured: 76 s of driven lap) |
+| Road width | `10 m` |
+| Start | `(-45, 0.5, -60)`, facing `+X` |
+| Checkpoints | `(0,-60)`, `(60,-40)`, `(-25,-20)`, `(0,20)`, `(60,40)`, `(0,60)`, `(-75,-40)`, `(-67.5,-60)` |
+| Gate radius | 12 m |
+
+### The hump
+
+Three slabs on the second straight, all 10 m wide:
+
+| Piece | Span in `x` | Top surface |
+|---|---|---|
+| up-slope | `-15 … 0` | `0 → 1.0 m`, rotated `+3.81°` about `Z` |
+| flat top | `0 … 10` | `1.0 m` |
+| down-slope | `10 … 25` | `1.0 m → 0`, rotated `−3.81°` about `Z` |
+
+`rise / run = 1 / 15`, so the angle is `atan(1/15)`. A steeper ramp is a wall the car hits;
+this one is driven over at full speed and never launches the car, which is what "ramp" has
+to mean on an arcade model with no suspension.
+
+### Why the walls stop short of a junction
+
+Every wall box is `road width` shorter than its road and centred on it, so the last 5 m
+before each junction is open. Without that, one segment's barrier fences the car out of
+the next turn: the first version of this circuit was undrivable at three of its four
+corners, and the driven-lap test is what found it.
+
+---
+
+## 5. Building or changing a track in the editor
 
 1. `cargo run -p giochi-editor --release`.
-2. `File > Open…` → `giochi-racer/assets/tracks/track_easy.scene`, or start from a new
-   scene for a new track.
+2. `File > Open…` → one of the three files, or start from a new scene for a new track.
 3. Build the surface from cube primitives scaled flat (`scale.y` ≈ `0.4`), keeping every
    top face at the same height.
-4. Add the barriers the same way, taller than the road.
+4. Add the barriers the same way, taller than the road, and leave a gap at every junction.
 5. Add an empty named `Start` and set its position and heading with the rotate gizmo.
 6. Add empties named `Checkpoint 1`, `Checkpoint 2`, … in lap order. Leave their scale at
    1 for a 12 m gate; change `scale.x` for a different radius.
 7. `File > Save`. Do **not** rename the file unless you also change the path passed to the
    game (`--track` or `GameConfig::track`).
-8. `cargo test -p giochi-racer --test track_specs` — it measures the file and compares
-   against the numbers in this document. If you changed the circuit on purpose, update the
-   table above and the test's `TRACKS` array in the same commit.
+8. `cargo test -p giochi-racer --test track_specs --test lap_logic` — the first measures
+   the file against the tables above, the second drives a lap of it. If the circuit changed
+   on purpose, update the table, the test's `TRACKS`, and `ROUTES` in the same commit.
 
-`scripts/verify-editor-package.sh` is not involved: the editor is the tool, the scene is
-the artefact.
-
----
-
-## 4. What phases 42 and 43 will add
-
-The plan asks for three tracks and, from phase 43, waypoints for the AI. The format
-already carries all of it, and only the reader grows:
-
-| Phase | Track | Spec |
-|---|---|---|
-| 42 | `track_medium.scene` | figure-of-eight, 400 m, 6 checkpoints |
-| 42 | `track_hard.scene` | S-curve with one ramp, 600 m, 8 checkpoints |
-| 43 | all three | 10–20 nodes named `Waypoint N`, each with a `speed_target` |
-
-Waypoints will be read by name with the same rule as checkpoints, and the target speed
-will come from a second convention to be decided then (most likely `scale.x` in km/h,
-which is the same trick as the gate radius and needs no new field). The AI driver itself
-is `giochi-racer/src/ai/`, phase 43.
+`scripts/generate-tracks.py` wrote the two phase-42 circuits as data. It is not the way to
+edit them: once a track has been opened and saved in the editor, the generator is stale and
+should be updated or deleted. Keeping it is what makes the geometry reviewable as
+arithmetic, and it is why a wall in the wrong place can be fixed in one line.
 
 ---
 
-## 5. Checklist the tests enforce
+## 6. What phase 43 adds
+
+Waypoints for the AI, read by name with the same rule as checkpoints: 10–20 nodes named
+`Waypoint N` per circuit, with the target speed in `scale.x` (km/h), the same trick as the
+gate radius. The AI driver is `giochi-racer/src/ai/`; the pure-pursuit controller in
+`tests/lap_logic.rs` is its prototype and already drives all three circuits.
+
+---
+
+## 7. Checklist the tests enforce
 
 `tests/track_specs.rs`, on every shipped track:
 
 - the scene loads, and the name matches the table above;
 - `Start` and the right number of checkpoints exist, each with a finite, unit, horizontal
-  arrival direction;
-- the centreline perimeter is the specified length (200 m for the oval);
+  arrival direction, and a radius of at least 12 m unless authored smaller;
+- the oval's centreline perimeter is 200 m (its gates are its corners);
 - the road is 10 m wide between the barrier faces;
 - every drivable slab's top face is at `y = 0` and every barrier sits on it;
 - the car starts facing along the first straight;
 - a lap can be counted, gate by gate, in order, three times;
-- the track has a sun, and its scenery bounds fit inside the barriers plus runoff.
+- the track has a sun, every primitive is solid, and the play area is at least 100 m across.
 
-`tests/physics_track.rs` then drives the **real car with the real colliders** on the same
-file: it starts on the road, accelerates along its heading, cannot fall through the floor,
-cannot drive through a barrier, stays upright, brakes from 120 km/h, respawns, and
-completes a full lap under a scripted driver.
+`tests/lap_logic.rs` then drives the **real car with the real colliders** around every
+circuit under a pure-pursuit controller, and cuts a lap on purpose to prove the lap is
+invalidated. `tests/physics_track.rs` covers the phase-41 behaviours (starts on the road,
+cannot fall through the floor or drive through a barrier, stays upright, brakes from
+120 km/h, respawns).

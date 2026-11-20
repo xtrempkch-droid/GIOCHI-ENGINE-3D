@@ -13,8 +13,20 @@ use giochi_racer::track::lap::{LapEvent, LapTracker};
 use giochi_racer::track::loading::{load_track, DEFAULT_GATE_RADIUS};
 use giochi_racer::track::Track;
 
-const TRACKS: [(&str, &str, usize, f32); 1] =
-    [("assets/tracks/track_easy.scene", "OVAL EASY", 4, 200.0)];
+/// The circuits the game ships: file, scene name, checkpoints, and the lap length the
+/// specification names. Only the oval's length is measured gate-to-gate here, because its
+/// gates sit exactly on the four corners; the two new circuits place gates on the
+/// straights, so their length is the one the driven lap reports (`tests/lap_logic.rs`).
+const TRACKS: [(&str, &str, usize, f32); 3] = [
+    ("assets/tracks/track_easy.scene", "OVAL EASY", 4, 200.0),
+    ("assets/tracks/track_medium.scene", "FIGURE EIGHT", 6, 414.0),
+    (
+        "assets/tracks/track_hard.scene",
+        "SERPENTINE HARD",
+        8,
+        640.0,
+    ),
+];
 
 fn path(relative: &str) -> String {
     format!("{}/{relative}", env!("CARGO_MANIFEST_DIR"))
@@ -133,6 +145,45 @@ fn the_barriers_are_taller_than_the_road_and_sit_on_it() {
             barrier.name
         );
         assert!(top > 0.5, "{} is too low to be a wall: {top}", barrier.name);
+    }
+}
+
+#[test]
+fn every_track_starts_facing_along_its_first_straight() {
+    // All three circuits open on an eastbound straight, so the car has to face +X
+    // (yaw = π/2) or the first thing the player sees is a wall.
+    for (file, _, _, _) in TRACKS {
+        let track = load(file);
+        let forward = Vec3::new(track.start.yaw.sin(), 0.0, track.start.yaw.cos());
+        assert!(
+            (forward.to_glam().x - 1.0).abs() < 1e-3 && forward.to_glam().z.abs() < 1e-3,
+            "{file}: the start faces {forward:?}"
+        );
+    }
+}
+
+#[test]
+fn every_track_has_a_sun_and_a_playable_extent() {
+    for (file, _, _, _) in TRACKS {
+        let track = load(file);
+        let light = track.light.unwrap_or_else(|| panic!("{file}: no light"));
+        assert!(
+            light.direction.to_glam().y < 0.0,
+            "{file}: the sun points up"
+        );
+        let (min, max) = track
+            .bounds()
+            .unwrap_or_else(|| panic!("{file}: no bounds"));
+        let span = max.to_glam() - min.to_glam();
+        assert!(
+            span.x > 100.0 && span.z > 100.0,
+            "{file}: the play area is only {span:?}"
+        );
+        assert_eq!(
+            track.colliders.len(),
+            track.instances.len(),
+            "{file}: every primitive in these tracks is solid"
+        );
     }
 }
 

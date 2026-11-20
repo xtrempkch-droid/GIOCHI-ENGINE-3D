@@ -1,0 +1,1404 @@
+{
+ "format": "giochi-scene",
+ "version": 1,
+ "name": "FIGURE EIGHT",
+ "next_id": 30,
+ "nodes": [
+  {
+   "id": 1,
+   "name": "Terrain",
+   "parent": null,
+   "transform": {
+    "position": [
+     0.0,
+     -0.2,
+     0.0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     300.0,
+     0.4,
+     300.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.19,
+     0.33,
+     0.16,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.05,
+    "shininess": 8.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.95,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 2,
+   "name": "Left South",
+   "parent": null,
+   "transform": {
+    "position": [
+     -27.5,
+     -0.18,
+     -20
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     45,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 3,
+   "name": "Left South Wall L",
+   "parent": null,
+   "transform": {
+    "position": [
+     -27.5,
+     0.6,
+     -14.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     35.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 4,
+   "name": "Left South Wall R",
+   "parent": null,
+   "transform": {
+    "position": [
+     -27.5,
+     0.6,
+     -25.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     35.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 5,
+   "name": "Left North",
+   "parent": null,
+   "transform": {
+    "position": [
+     -27.5,
+     -0.18,
+     20
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     45,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 6,
+   "name": "Left North Wall L",
+   "parent": null,
+   "transform": {
+    "position": [
+     -27.5,
+     0.6,
+     25.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     35.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 7,
+   "name": "Left North Wall R",
+   "parent": null,
+   "transform": {
+    "position": [
+     -27.5,
+     0.6,
+     14.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     35.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 8,
+   "name": "Left West",
+   "parent": null,
+   "transform": {
+    "position": [
+     -50,
+     -0.18,
+     0
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     40,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 9,
+   "name": "Left West Wall L",
+   "parent": null,
+   "transform": {
+    "position": [
+     -44.5,
+     0.6,
+     0.0
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     30.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 10,
+   "name": "Left West Wall R",
+   "parent": null,
+   "transform": {
+    "position": [
+     -55.5,
+     0.6,
+     -0.0
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     30.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 11,
+   "name": "Right South",
+   "parent": null,
+   "transform": {
+    "position": [
+     27.5,
+     -0.18,
+     -20
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     45,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 12,
+   "name": "Right South Wall L",
+   "parent": null,
+   "transform": {
+    "position": [
+     27.5,
+     0.6,
+     -14.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     35.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 13,
+   "name": "Right South Wall R",
+   "parent": null,
+   "transform": {
+    "position": [
+     27.5,
+     0.6,
+     -25.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     35.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 14,
+   "name": "Right North",
+   "parent": null,
+   "transform": {
+    "position": [
+     27.5,
+     -0.18,
+     20
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     45,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 15,
+   "name": "Right North Wall L",
+   "parent": null,
+   "transform": {
+    "position": [
+     27.5,
+     0.6,
+     25.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     35.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 16,
+   "name": "Right North Wall R",
+   "parent": null,
+   "transform": {
+    "position": [
+     27.5,
+     0.6,
+     14.5
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     35.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 17,
+   "name": "Right East",
+   "parent": null,
+   "transform": {
+    "position": [
+     50,
+     -0.18,
+     0
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     40,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 18,
+   "name": "Right East Wall L",
+   "parent": null,
+   "transform": {
+    "position": [
+     55.5,
+     0.6,
+     0.0
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     30.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 19,
+   "name": "Right East Wall R",
+   "parent": null,
+   "transform": {
+    "position": [
+     44.5,
+     0.6,
+     -0.0
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     30.0,
+     1.2,
+     0.5
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.82,
+     0.82,
+     0.86,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.25,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.7,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 20,
+   "name": "Cross Up",
+   "parent": null,
+   "transform": {
+    "position": [
+     0.0,
+     -0.18,
+     0.0
+    ],
+    "rotation": [
+     0.0,
+     -0.615412,
+     0.0,
+     0.788205
+    ],
+    "scale": [
+     41.2311,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 21,
+   "name": "Cross Down",
+   "parent": null,
+   "transform": {
+    "position": [
+     0.0,
+     -0.18,
+     0.0
+    ],
+    "rotation": [
+     0.0,
+     -0.788205,
+     0.0,
+     0.615412
+    ],
+    "scale": [
+     41.2311,
+     0.4,
+     10.0
+    ]
+   },
+   "mesh": {
+    "primitive": {
+     "kind": "cube",
+     "size": 1.0
+    }
+   },
+   "material": {
+    "base_color": [
+     0.17,
+     0.18,
+     0.2,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.18,
+    "shininess": 24.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 0.86,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 22,
+   "name": "Start",
+   "parent": null,
+   "transform": {
+    "position": [
+     -40,
+     0.5,
+     -20
+    ],
+    "rotation": [
+     0.0,
+     0.707107,
+     0.0,
+     0.707107
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 23,
+   "name": "Checkpoint 1",
+   "parent": null,
+   "transform": {
+    "position": [
+     -17.5,
+     0.5,
+     -20
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 24,
+   "name": "Checkpoint 2",
+   "parent": null,
+   "transform": {
+    "position": [
+     27.5,
+     0.5,
+     20
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 25,
+   "name": "Checkpoint 3",
+   "parent": null,
+   "transform": {
+    "position": [
+     50,
+     0.5,
+     0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 26,
+   "name": "Checkpoint 4",
+   "parent": null,
+   "transform": {
+    "position": [
+     27.5,
+     0.5,
+     -20
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 27,
+   "name": "Checkpoint 5",
+   "parent": null,
+   "transform": {
+    "position": [
+     -27.5,
+     0.5,
+     20
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 28,
+   "name": "Checkpoint 6",
+   "parent": null,
+   "transform": {
+    "position": [
+     -50,
+     0.5,
+     0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 29,
+   "name": "Sun",
+   "parent": null,
+   "transform": {
+    "position": [
+     0.0,
+     20.0,
+     0.0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": {
+    "direction": [
+     -0.45,
+     -1.0,
+     -0.35
+    ],
+    "color": [
+     1.0,
+     0.98,
+     0.94,
+     1.0
+    ],
+    "ambient": 0.32,
+    "specular": 0.35,
+    "shininess": 40.0
+   },
+   "camera": null
+  }
+ ]
+}

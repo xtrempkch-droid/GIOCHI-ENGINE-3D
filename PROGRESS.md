@@ -1,10 +1,10 @@
 # Estado — GIOCHI-ENGINE
 
-**Estado corrente: Stability Pack, S2 concluída** — a régua está em
-[docs/STABILITY_DOD.md](docs/STABILITY_DOD.md) e o estado em
-[Status Stability Pack](#status-stability-pack-s1s5). Depois disso, Salto C: Fase 41
-concluída — ver a secção [Salto C — GIOCHI RACER](#salto-c--giochi-racer-fases-4146). O
-Salto B está fechado e fica registado na íntegra.
+**Estado corrente: Salto C, Fase 42 concluída** — ver
+[Salto C — GIOCHI RACER](#salto-c--giochi-racer-fases-4146). Antes dela, o Stability Pack
+(S1 e S2 concluídas): a régua está em [docs/STABILITY_DOD.md](docs/STABILITY_DOD.md) e o
+estado em [Status Stability Pack](#status-stability-pack-s1s5). O Salto B está fechado e
+fica registado na íntegra.
 
 ## Salto B — Editor Visual (Fases 30–40)
 
@@ -730,7 +730,7 @@ contra a versão 0.5.1 do workspace.
 | Fase | Estado | Verificado |
 |---|---|---|
 | 41 — Fundação: carro, pista, câmara, HUD | **concluída** (2026-11-18) | 143 testes no crate (114 de unidade + 8 do `main`, 10 de física na pista real, 9 de especificação das pistas, 2 de pixels do HUD); corrida headless de 600 frames com captura verificada; a volta completa é feita **pelo carro físico** num teste; gates completos verdes |
-| 42 — 3 pistas + checkpoints + voltas | pendente | — |
+| 42 — 3 pistas + checkpoints + voltas | **concluída** (2026-11-20) | `track_medium.scene` (figura-8, ≈414 m, 6 checkpoints) e `track_hard.scene` (serpentina com lomba, ≈640 m, 8) geradas em `giochi-racer/scripts/generate-tracks.py`; um piloto *pure-pursuit* conduz o carro físico por uma volta completa nas **três** pistas (`tests/lap_logic.rs`: 19 s / 33 s / 76 s); corte de pista invalida a volta; overlay de resultados medido por pixels; **corrido no R35S** — ver a tabela abaixo |
 | 43 — IA oponente | pendente | — |
 | 44 — Menus + persistência + polimento | pendente | — |
 | 45 — DRS + modos Quality/Performance | pendente | — |
@@ -868,6 +868,81 @@ equipamento disponível, só depois de correções do sistema"), com o R35S a re
 última corrida. O que ficou feito e verificado está medido acima; o que depende de
 hardware — a correção da rotação do x55, e o teste de instalação da Fase 46 — fica à
 espera do equipamento.
+
+### Gates da Fase 42
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — exit 0
+- [x] `SDL_VIDEODRIVER=offscreen cargo test --workspace` — **1504 testes**, 0 falhas
+- [x] `SDL_VIDEODRIVER=offscreen cargo test --workspace --release` — 0 falhas
+- [x] `cargo test -p giochi-racer --test lap_logic` — 3/3: uma volta completa em cada pista
+      (19 s / 33 s / 76 s) e o corte de pista invalidado
+- [x] `cargo test -p giochi-racer --test track_specs` — 11/11, com as três pistas
+- [x] `SDL_VIDEODRIVER=offscreen cargo test -p giochi-racer --test results_overlay` — o
+      painel de resultados medido por pixels (2/2)
+- [x] `scripts/gates.sh` completo — "All gates passed"; `actionlint` limpo nos quatro workflows
+- [x] **ARM64 no hardware real**: as três pistas a 59,3 fps no R35S, 5,9–6,6 ms de CPU por
+      frame, capturas verificadas, ecrã devolvido
+
+### O que a fase 42 decidiu (e porquê)
+
+**As pistas são dados, mas foram escritas por script.** A R3 pede pistas construídas no
+editor; um agente não conduz um GUI. Os três ficheiros estão no formato do editor
+(`format`/`version`/`nodes`) e abrem no `giochi-editor` como qualquer outro, mas os dois
+novos foram gerados por `giochi-racer/scripts/generate-tracks.py` — geometria revisível
+como aritmética em vez de 40 nós de JSON à mão. O script está no repositório, com o aviso
+de que fica obsoleto assim que uma pista for gravada no editor.
+
+**A linha de corrida é dado de teste, e é o protótipo da IA.** Mirar nos gates não chega:
+a reta entre dois gates atravessa o interior da curva e o carro bate na barreira todas as
+vezes (medido). `tests/lap_logic.rs` segue uma polilinha com os vértices do traçado — a
+mesma informação que a Fase 43 vai ler de nós `Waypoint`. O controlador é *pure-pursuit*
+com recuperação: um carro encostado a uma parede não é um problema de esterço, por isso
+recua e volta a tentar.
+
+**Duas pistas foram redesenhadas pela medição, não pelo gosto.** (1) As paredes das
+diagonais do figura-8 cortavam a cruzamento ao meio e fechavam a outra pista; as diagonais
+ficaram sem paredes. (2) As paredes de cada segmento terminam meia largura de estrada antes
+do fim, senão a barreira de uma reta cercava a entrada da curva seguinte. Nenhuma das duas
+coisas se vê a olhar para o JSON; as duas apareceram a conduzir.
+
+**O ecrã de resultados é um stub honesto.** Mostra total, melhor volta, `NEW BEST` contra o
+record da sessão e as duas teclas que fazem algo (`R` recomeça na mesma pista, Start/Esc
+sai). Não tem botões porque os menus são a Fase 44, e um botão que não faz nada é pior do
+que uma tecla que faz.
+
+**A melhor volta vive em memória** (`HashMap` no `main`), como o plano manda para a 42;
+a 44 escreve `scores.toml`.
+
+### Fase 42 no hardware real (`r35sv`, 2026-11-20)
+
+O R35S voltou à bancada. Antes de qualquer trabalho novo, o binário da fase 41 + S2 foi
+implantado e corrido para confirmar que a bancada e o build de contentor continuam a valer:
+
+| Medição | Resultado |
+|---|---|
+| Login | a imagem perdeu a `authorized_keys` (como já documentado); chave reinstalada pela password do dev, e o `device-run.sh --refresh-host-key` **corrigido** — o `ssh-keygen -R` apagava a chave antiga e não trazia a nova, e o erro aparecia como "não consigo entrar" |
+| Aparelho | `giochi-system-r35s`, 4 cores, 964 MB, painel 640×480, `fbcon rotate 0`, glibc **2.41** |
+| Binário | construído no contentor (`--container`, `sdl2-system` contra o sysroot), **piso de glibc 2.35** — arranca no aparelho |
+| 600 frames | 10,13 s → **59,2 fps**, GLES 2 em Mali-G31 (Panfrost), gamepad `r36s_Gamepad` detetado, 0 erros de GL |
+| Captura | 640×480, `check-frame.py` verde (159 cores amostradas) |
+| Consola | devolvida ao launcher no fim (trap remoto), como nas fases anteriores |
+
+As **três** pistas da fase 42 no mesmo aparelho, 600 frames cada, `--laps 1`:
+
+| Pista | Drawables | Portões | fps | CPU/frame (user+sys) | Captura |
+|---|---:|---:|---:|---:|---|
+| `OVAL EASY` | 17 | 5 | **59,3** | 5,9 ms | 156 cores |
+| `FIGURE EIGHT` | 21 | 7 | **59,3** | 6,1 ms | 160 cores |
+| `SERPENTINE HARD` | 34 | 9 | **59,3** | 6,6 ms | 159 cores |
+
+A pista mais pesada custa **0,7 ms por frame** mais que a oval e continua a deixar ~60 % do
+orçamento de 16,7 ms livre para a Fase 45 — o mesmo resultado do x86_64, onde a diferença é
+ruído. O `device-run.sh` ganhou `--track`, sem o qual não havia como escolher pista no
+aparelho.
+
+A rotação do painel: `panel_rotation()` leu `0` neste aparelho, ou seja `PanelRotation::None`
+— a correção do x55 não muda nada aqui, que é exatamente o comportamento pretendido.
 
 ### O que a fase decidiu (e porquê)
 
