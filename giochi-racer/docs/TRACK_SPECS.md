@@ -22,6 +22,7 @@ lets you edit.
 |---|---|---|
 | `Start` (also `StartPosition`, `StartFinish`, `Spawn`, `SpawnPoint`) | places the car, and **is** the start/finish line | yes |
 | `Checkpoint 1` … `Checkpoint 9` | the gates of a lap, taken in numeric order | no |
+| `Waypoint 1` … | the racing line the opponents follow, in lap order | phase 43 |
 | any node with a mesh | drawn; a primitive is also solid | at least one |
 | any node with a light | the track's sun (the first one wins) | no |
 
@@ -213,9 +214,11 @@ corners, and the driven-lap test is what found it.
    1 for a 12 m gate; change `scale.x` for a different radius.
 7. `File > Save`. Do **not** rename the file unless you also change the path passed to the
    game (`--track` or `GameConfig::track`).
-8. `cargo test -p giochi-racer --test track_specs --test lap_logic` — the first measures
-   the file against the tables above, the second drives a lap of it. If the circuit changed
-   on purpose, update the table, the test's `TRACKS`, and `ROUTES` in the same commit.
+8. `cargo test -p giochi-racer --test track_specs --test lap_logic --test waypoints` — the
+   first measures the file against the tables above, the second drives a lap of it, and the
+   third checks the racing line and races three laps against it. If the circuit changed on
+   purpose, update the table, the test's `TRACKS` and `CIRCUITS` in
+   `scripts/generate-waypoints.py`, and re-run the generator, in the same commit.
 
 `scripts/generate-tracks.py` wrote the two phase-42 circuits as data. It is not the way to
 edit them: once a track has been opened and saved in the editor, the generator is stale and
@@ -224,12 +227,103 @@ arithmetic, and it is why a wall in the wrong place can be fixed in one line.
 
 ---
 
-## 6. What phase 43 adds
+## 6. The racing line: `Waypoint N`
 
-Waypoints for the AI, read by name with the same rule as checkpoints: 10–20 nodes named
-`Waypoint N` per circuit, with the target speed in `scale.x` (km/h), the same trick as the
-gate radius. The AI driver is `giochi-racer/src/ai/`; the pure-pursuit controller in
-`tests/lap_logic.rs` is its prototype and already drives all three circuits.
+Phase 43's opponents need to know where the road goes, and the gates are not enough: the
+straight from one gate to the next crosses the inside of every corner, and a driver aiming
+at gates drives into the barrier. So each circuit also carries a **racing line**.
+
+| Node name | Meaning |
+|---|---|
+| `Waypoint 1`, `Waypoint 2`, … | a point on the line, taken in numeric order |
+| `position` | where the line passes |
+| `scale.x` | the speed asked for here, in **km/h** (same trick as the gate radius; `scale.x <= 1` means "not authored" and gets 80 km/h) |
+
+Three rules about the line, all of them enforced by `tests/waypoints.rs`:
+
+1. **It is a closed loop.** The segment after the last waypoint is the one from the last back
+   to the first, so the author does **not** repeat waypoint 1 at the end. Repeating it
+   creates a zero-length segment that a car sitting on it can never finish.
+2. **It starts at the start line** — within 15 m of `Start` — so the grid is on it.
+3. **Every gate is on it.** A gate further from the line than its own radius is a gate the
+   opponents drive past, and their laps never count.
+
+### The shipped lines
+
+| Circuit | Waypoints | Lap length | Slowest corner | Straight |
+|---|---:|---:|---:|---:|
+| `OVAL EASY` | 6 | 200 m | 31 km/h | 100 km/h |
+| `FIGURE EIGHT` | 9 | 320 m | 31 km/h | 100 km/h |
+| `SERPENTINE HARD` | 16 | 725 m | 31 km/h | 100 km/h |
+
+One waypoint per corner, plus one in the middle of every run longer than 45 m. Corners are
+*not* emitted as dense arcs: pure pursuit aims 10 m ahead along the line and sweeps a vertex
+into a turn, so three hundred nodes buy nothing that the look-ahead does not already give,
+and twelve markers a person can see and drag beat two hundred.
+
+### Where the speeds come from
+
+`scripts/generate-waypoints.py` computes them, from the car's own handling constants, not
+from taste:
+
+* on a straight, the car's top speed;
+* at a corner, the fastest the arcade model can hold the sweep pure pursuit will actually
+  drive there. That sweep has radius `look_ahead / (2 sin(turn / 2))` — two chords of the
+  look-ahead length meeting at the corner — and the model's yaw rate at speed `v` is
+  `steer_rate * (1 - steer_falloff * v / max_speed)`. Solving `v / w = r` for `v` gives the
+  speed, times a safety factor for grip loss.
+
+The consequence is that changing `CarConfig` retunes all three circuits with one command:
+
+```text
+python3 giochi-racer/scripts/generate-tracks.py      # rewrites medium + hard, dropping the line
+python3 giochi-racer/scripts/generate-waypoints.py   # writes the line into all three
+python3 giochi-racer/scripts/generate-waypoints.py --check   # what `scripts/gates.sh` runs
+```
+
+`--check` exits non-zero if a scene is not what the script would write, so a hand-edited
+speed or a forgotten regeneration fails the gate instead of quietly making the opponents
+slower.
+
+### The opponents
+
+`src/ai/` is in two pieces, and the split is deliberate:
+
+* `waypoint.rs` — `Route`: pure geometry. Where the aim point is, `look_ahead` metres along
+  the line; how far round the lap a position is; what speed is safe **now** given the corners
+  within 80 m (`v = sqrt(v_corner² + 2 a s)`, with `a` = 10 m/s²). No car, no physics, no GL,
+  so it is all testable with a ruler.
+* `pilot.rs` — `Pilot`: the controller. `steer = -error * 1.8`, and the target speed falls by
+  up to 55 % of the line's speed as the heading error grows. A car below 2 km/h for 0.8 s
+  reverses out for 2 s, turning the nose the other way; after three failed reversals it asks
+  for a rescue instead of grinding against the barrier for the rest of the race.
+* `driver.rs` — `AiDriver`: a `Car` and a `Pilot`. The opponents drive the **same** `Car` as
+  the player, with the same colliders and the same arcade model. Only the input source
+  differs, which is why "can it get round" is the same question for both.
+
+Two things stop the field from being one car drawn three times:
+
+* **skill** (1.0, 0.93, 0.86) multiplies the target speed. It does not touch the steering or
+  the grip: a quicker opponent is a car willing to carry more speed into the same corner, not
+  a car that cheats.
+* **lane** (−1.6 m, 0 m, +1.6 m) offsets the aim point perpendicular to the *line*, so each
+  car tracks its own groove. Without it the quicker car runs into the back of the slower one
+  and the race becomes a queue.
+
+The player takes pole and the opponents line up behind in pairs, 6.5 m apart and 1.8 m either
+side of the centre line (`race::starting_grid`). Pole is a decision, not a courtesy: the
+chase camera sits behind the player, and putting three opponents between it and the first
+corner is where a race is most likely to be lost through no fault of the driver.
+
+### Why not "on rails", and why not the existing A\*
+
+The plan allowed opponents that follow the waypoints without physics. That was rejected: an
+opponent that ignores the walls looks wrong the first time it overlaps one, and the whole
+point of phase 41's car is that the physics is trustworthy. The engine's grid A\*
+(`giochi_engine::nav`) was rejected for the complementary reason — these circuits are
+corridors, so a path is a line, and a line is 16 numbers instead of a baked navigation grid.
+See [IDEAS.md](../../IDEAS.md) for the nav-mesh question, which is still open for a game with
+open arenas.
 
 ---
 
@@ -249,6 +343,8 @@ gate radius. The AI driver is `giochi-racer/src/ai/`; the pure-pursuit controlle
 
 `tests/lap_logic.rs` then drives the **real car with the real colliders** around every
 circuit under a pure-pursuit controller, and cuts a lap on purpose to prove the lap is
-invalidated. `tests/physics_track.rs` covers the phase-41 behaviours (starts on the road,
+invalidated. `tests/waypoints.rs` checks the racing line (loop, gates on it, speeds the car
+can hold) and drives three laps of every circuit at the shipped speeds; `tests/race_field.rs`
+puts all four cars on the grid of every circuit and races them. `tests/physics_track.rs` covers the phase-41 behaviours (starts on the road,
 cannot fall through the floor or drive through a barrier, stays upright, brakes from
 120 km/h, respawns).

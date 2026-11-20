@@ -51,6 +51,40 @@ a ABI C avança só de 6 para 7.
 - Crate novo, binário + biblioteca: uma pista lida de um `.scene` do editor, um carro
   arcade com corpo Rapier de rotações travadas, câmara de perseguição, contagem de voltas
   por portões em ordem e HUD por `GlesHud`.
+### Adicionado — `giochi-racer`, fase 43: adversários, grelha e classificação
+
+- **Linha de corrida em cada pista**: nós `Waypoint N` no `.scene`, com a velocidade pedida
+  em `scale.x` (km/h) — a mesma convenção do raio dos portões. 6 / 9 / 16 nós: um por curva e
+  um no meio de cada reta longa. `giochi-racer/scripts/generate-waypoints.py` calcula as
+  velocidades a partir do `CarConfig` (31 km/h nas curvas, 100 km/h nas retas) e o seu
+  `--check` corre em `scripts/gates.sh`, para uma cena editada à mão não divergir do gerador.
+- **`giochi-racer/src/ai/`**: `Route` (geometria pura — ponto de mira, volta fechada,
+  travagem planeada para as curvas em 80 m), `Pilot` (o controlador sem carro) e `AiDriver`
+  (um `Car` com um `Pilot` dentro). Os adversários conduzem o mesmo corpo, os mesmos
+  colisores e o mesmo modelo que o jogador; só a fonte de input difere.
+- **`giochi-racer/src/race/`**: `Field`, a corrida inteira **sem GL** — mundo, jogador,
+  adversários, voltas, resgates e classificação — e `starting_grid`/`classify`. O `RaceGame`
+  ficou a camada de desenho, o que torna a simulação testável sem contexto gráfico.
+- **Grelha de quatro lugares**: o jogador na *pole* e três adversários atrás, dois a dois.
+  Ritmo de 100 %, 93 % e 86 % e faixa própria (−1,6 m / 0 m / +1,6 m): sem a faixa o mais
+  rápido bate na traseira do mais lento e a corrida passa a ser uma fila.
+- **HUD**: lugar (`P2/4`) e distância ao carro da frente, e o ecrã de resultados passa a
+  dizer em que lugar se acabou. A distância é em metros e não em tempo, porque o jogo não
+  guarda um histórico de tempos por portão que lhe permita saber um tempo.
+- **Testes**: `tests/waypoints.rs` (a linha é um ciclo, todos os portões estão nela, e três
+  voltas em cada pista às velocidades do ficheiro) e `tests/race_field.rs` (quatro carros na
+  grelha de cada pista, todos acabam, a ordem por ritmo verifica-se, um circuito sem linha
+  continua a ser um contra-relógio, e o *restart* devolve o campo à grelha).
+
+### Corrigido — um passo de física por frame, não um por carro
+
+`Car::step` avança o mundo Rapier. Com quatro carros, uma corrida chamava-o quatro vezes por
+frame e o mundo corria à quádrupla velocidade: os carros saíam da grelha, atravessavam as
+barreiras e ficavam na relva em cinco segundos, com a velocidade reportada a ser um quarto da
+distância percorrida. `Car::apply` passou a **propor** (modelo + corpo) e o `Field` faz
+`world.step` uma só vez, depois de todos proporem; `Car::step` mantém-se para um carro. O bug
+foi encontrado por um teste de quatro carros, não por inspeção.
+
 ### Adicionado — `giochi-racer`, fase 42: três pistas, voltas e resultados
 
 - **`assets/tracks/track_medium.scene`** (figura-8, ≈414 m, 6 checkpoints) e

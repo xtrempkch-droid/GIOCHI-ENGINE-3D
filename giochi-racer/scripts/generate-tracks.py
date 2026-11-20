@@ -8,6 +8,10 @@ The output is `track_medium.scene` and `track_hard.scene` next to this script's
 `.scene` files, so they can be re-authored in the visual editor and this script must then
 be updated or deleted — `tests/lap_logic.rs` is what notices if they disagree.
 
+**Run `generate-waypoints.py` afterwards.** It writes the phase-43 racing line into all
+three circuits, and this script rewrites these two from scratch — so running it alone
+silently removes the opponents' line.
+
 Why a generator at all: R3 asks for tracks built in the editor, and an agent cannot drive
 a GUI. The files below *are* editor-format scenes (same `format`/`version`/`nodes`), so
 opening one in `giochi-editor` and saving it is a normal edit. The generator exists so the

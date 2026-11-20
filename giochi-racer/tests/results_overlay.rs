@@ -36,6 +36,11 @@ fn state(finished: bool, new_best: bool) -> HudState {
         event: None,
         finished,
         new_best,
+        // The results screen is about the race just finished, not about the place on the
+        // road: phase 43's classification has its own pixel test.
+        position: 1,
+        field_size: 4,
+        gap_ahead: None,
     }
 }
 

@@ -58,6 +58,15 @@ pub const WHEEL_SEGMENTS: u32 = 12;
 /// `wheel_spin` is radians about `+X`; callers advance it from the distance travelled, so
 /// the wheels turn at the right rate for the speed without any animation state.
 pub fn parts(config: &CarConfig, wheel_spin: f32) -> Vec<CarPart> {
+    parts_with_paint(config, wheel_spin, BODY_COLOR)
+}
+
+/// The same parts, with the body painted `paint`.
+///
+/// The opponents are the same car as the player — same mesh, same wheels, same cab — and
+/// only the paint tells them apart. Giving them a model of their own would be a second
+/// thing to keep in step for no gain.
+pub fn parts_with_paint(config: &CarConfig, wheel_spin: f32, paint: Color3D) -> Vec<CarPart> {
     let half = config.half_extents.to_glam();
     let door = half.x.abs() * 2.0;
     let length = half.z.abs() * 2.0;
@@ -68,7 +77,7 @@ pub fn parts(config: &CarConfig, wheel_spin: f32) -> Vec<CarPart> {
     parts.push(CarPart {
         shape: CarPartShape::Body,
         transform: Transform3D::new(Vec3::ZERO, Quat::IDENTITY, Vec3::new(door, height, length)),
-        color: BODY_COLOR,
+        color: paint,
     });
     parts.push(CarPart {
         shape: CarPartShape::Cabin,

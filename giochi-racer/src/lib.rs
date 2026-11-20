@@ -21,9 +21,11 @@
 //! `docs/TRACK_SPECS.md`, and `tests/track_specs.rs` checks the shipped track against the
 //! plan's dimensions (200 m, 10 m wide, four checkpoints) on every `cargo test`.
 
+pub mod ai;
 pub mod assets;
 pub mod config;
 pub mod game;
+pub mod race;
 pub mod screenshot;
 pub mod track;
 pub mod utils;

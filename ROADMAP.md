@@ -38,13 +38,26 @@ of each with the physics car (`tests/lap_logic.rs`), lap invalidation on a cut, 
 results overlay with the session's best lap. Specifications and the geometry decisions are
 in [giochi-racer/docs/TRACK_SPECS.md](giochi-racer/docs/TRACK_SPECS.md).
 
-### Phase 43 — opponent AI
+### Phase 43 — opponent AI — **delivered** (2026-11-20)
 
-- The engine already has grid A\* (`giochi_engine::nav`); whether the opponents use it or
-  steering depends on whether the tracks stay corridors — see the navmesh note in
-  [IDEAS.md](IDEAS.md).
-- Acceptance: at least one opponent that completes laps and can be overtaken, deterministic
-  enough to test headless.
+Three opponents that drive the same `Car` as the player, over a racing line stored in the
+scene as `Waypoint` nodes, with per-car skill and lane, a four-slot grid, and a
+classification that the HUD shows as a place and a gap. Delivered by steering rather than
+by grid A\*: the circuits are corridors, and the opponents share the player's physics, so
+"can it get round" is the same question as "can the player".
+
+Acceptance as written: opponents complete laps on all three circuits against a full field
+(`tests/race_field.rs`), headless and deterministic. The nav-mesh question is recorded in
+[IDEAS.md](IDEAS.md); the reasons for pure pursuit over rails or A\* are in
+[giochi-racer/docs/TRACK_SPECS.md](giochi-racer/docs/TRACK_SPECS.md) §6.
+
+### Phase 43a — measured, and what it changed
+
+- The field exposed an engine-shaped bug: `Car::step` stepped the physics world, so four
+  cars ran the world four times per frame. `Car::apply` now proposes and the field steps the
+  world once.
+- The first four-car field also showed that three cars on one line shunt each other into the
+  barrier; each opponent now holds a lane as well as a skill.
 
 ### Phase 44 — menus, persistence, polish
 

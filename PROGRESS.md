@@ -1,10 +1,12 @@
 # Estado — GIOCHI-ENGINE
 
-**Estado corrente: Salto C, Fase 42 concluída** — ver
-[Salto C — GIOCHI RACER](#salto-c--giochi-racer-fases-4146). Antes dela, o Stability Pack
-(S1 e S2 concluídas): a régua está em [docs/STABILITY_DOD.md](docs/STABILITY_DOD.md) e o
-estado em [Status Stability Pack](#status-stability-pack-s1s5). O Salto B está fechado e
-fica registado na íntegra.
+**Estado corrente: Salto C, Fase 43 concluída** — ver
+[Salto C — GIOCHI RACER](#salto-c--giochi-racer-fases-4146) e
+[Fase 43 — adversários, grelha e classificação](#fase-43--adversários-grelha-e-classificação).
+Antes dela, o Stability Pack (S1 e S2 concluídas): a régua está em
+[docs/STABILITY_DOD.md](docs/STABILITY_DOD.md) e o estado em
+[Status Stability Pack](#status-stability-pack-s1s5). O Salto B está fechado e fica
+registado na íntegra.
 
 ## Salto B — Editor Visual (Fases 30–40)
 
@@ -1009,6 +1011,113 @@ desenharam fora dela; o teste `hud_pixels` media isto a cada passo e fica como g
   ARM64 por multiarch), não precisa de `CROSS_SYSROOT` nem de hardware. Falta correr no
   aparelho quando houver bancada.
 - **Três pistas, IA, menus, DRS e pacote** são as Fases 42–46, por definição.
+
+## Fase 43 — adversários, grelha e classificação
+
+Três adversários que conduzem **o mesmo `Car`** que o jogador, sobre uma **linha de corrida**
+guardada na cena em nós `Waypoint N`, com ritmo e faixa próprios; uma grelha de quatro
+lugares; e uma classificação que o HUD mostra como lugar (`P2/4`) e distância ao da frente.
+
+### O que a fase 43 acrescenta
+
+| Peça | Onde | O que faz |
+|---|---|---|
+| `Route` | `giochi-racer/src/ai/waypoint.rs` | pura geometria: ponto de mira 10 m à frente na linha, volta fechada, e a velocidade segura **agora** dada a travagem para as curvas nos 80 m seguintes |
+| `Pilot` | `giochi-racer/src/ai/pilot.rs` | o controlador sem carro: `steer = −erro × 1,8`, velocidade-alvo a cair 55 % com o erro, marcha-atrás de 2 s quando fica abaixo de 2 km/h durante 0,8 s, resgate pedido ao terceiro recuo falhado |
+| `AiDriver` | `giochi-racer/src/ai/driver.rs` | um `Car` e um `Pilot`. Os adversários conduzem o mesmo corpo, os mesmos colisores e o mesmo modelo |
+| `Field` | `giochi-racer/src/race/field.rs` | **a corrida sem GL**: mundo, jogador, adversários, voltas, resgates e classificação. O `RaceGame` passa a ser a camada de desenho |
+| `starting_grid` / `classify` | `giochi-racer/src/race/mod.rs` | a grelha derivada da linha de partida, e a ordenação (acabados por tempo, os outros por metros percorridos) |
+| linha de corrida | `scripts/generate-waypoints.py` | 6 / 9 / 16 nós, com as velocidades calculadas a partir de `CarConfig` |
+
+### Gates da Fase 43
+
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings` — exit 0
+- [x] `cargo test --workspace` — **1543 testes**, 0 falhas
+- [x] `cargo test --workspace --release` — 0 falhas
+- [x] `cargo test -p giochi-racer --test waypoints` — 2/2: a linha é um ciclo, todos os
+      gates estão nela, e três voltas em cada pista às velocidades do ficheiro
+      (17,8 s / 38,5 s / 65,1 s por volta, desvio máximo 2,9 m da linha)
+- [x] `cargo test -p giochi-racer --test race_field` — 3/3: quatro carros na grelha de cada
+      pista, todos acabam, a ordem por `skill` verifica-se e a classificação é uma
+      classificação; um circuito sem linha continua a ser um contra-relógio; o `restart`
+      devolve o campo à grelha
+- [x] `cargo test -p giochi-racer --test lap_logic` — 3/3, agora a ler a linha **do ficheiro**
+      em vez de uma cópia no teste
+- [x] `scripts/gates.sh` completo — "All gates passed", já com
+      `generate-waypoints.py --check` a impedir que a cena divirja do gerador
+
+### Fase 43 no hardware real (`r35sv`, 2026-11-20)
+
+O R35S estava na bancada. Binário construído no contentor (`--container --release -p
+giochi-racer`, `sdl2-system` contra o sysroot), **piso de glibc 2.35**; o aparelho tem 2.41.
+
+| Pista | Drawables | Portões | fps | CPU/frame (user+sys) | Captura |
+|---|---:|---:|---:|---:|---|
+| `OVAL EASY` | 17 | 5 | **59,3** | 6,95 ms | 147 cores |
+| `FIGURE EIGHT` | 21 | 7 | **59,4** | 7,32 ms | 152 cores |
+| `SERPENTINE HARD` | 34 | 9 | **59,3** | 8,02 ms | 157 cores |
+
+O mesmo aparelho, fase 42, com **um** carro: 5,9 / 6,1 / 6,6 ms. O campo de quatro custa
+**1,1–1,5 ms por frame** — um adversário a mais são ~0,3 ms de física e três carros a mais
+para desenhar — e continua a deixar mais de metade do orçamento de 16,7 ms para a fase 45.
+Corrida completa de 3 voltas (4300 frames, 71,9 s): **59,8 fps**, exit 0, ecrã devolvido.
+
+Duas coisas que a bancada ensinou, e que ficam registadas:
+
+- **`build-aarch64.sh` só constrói `release` com `--release`.** Sem a flag constrói `debug`
+  e a lista de "produced binaries" mostra na mesma o `release` antigo que estiver no
+  `target/` — o primeiro teste desta fase correu, e passou, com o binário da fase 42. O
+  `strings` do ELF a procura de uma mensagem de log nova é o que denuncia isto; a lista de
+  artefactos não denuncia.
+- **A captura BMP vem de cabeça para baixo** (`glReadPixels` devolve as linhas ao contrário
+  e o ficheiro é escrito com altura positiva), por isso "canto superior direito" na imagem
+  é o canto inferior direito do ecrã. Foi assim que uma leitura de pixels quase deu um
+  falso negativo na classificação do HUD; o que resolve a dúvida é
+  `tests/hud_pixels.rs`, que mede o canto com e sem campo.
+
+O HUD com lugar e distância foi medido por pixels (`tests/hud_pixels.rs`): **0** pixels no
+canto superior direito num contra-relógio, **420** com um campo de quatro.
+
+### O que a fase 43 decidiu (e porquê)
+
+**Um passo de física por frame, não um por carro.** `Car::step` avança o mundo Rapier. Com
+quatro carros isso corria o mundo **quatro vezes por frame**: os carros saíam da grelha,
+atravessavam as barreiras e ficavam na relva em cinco segundos, com a velocidade reportada a
+ser um quarto da distância percorrida. Foi medido, não suposto — e não se vê no código, que
+parece perfeitamente razoável. `Car::apply` passou a *propor* (modelo + corpo) e o `Field`
+faz `world.step` **uma** vez depois de todos proporem. `Car::step` mantém-se para um carro.
+
+**O controlador não tem carro.** `Pilot` recebe um `CarState` e devolve um `CarInput`. Isso
+torna "o controlador vira numa curva?" uma pergunta de aritmética (`src/ai/pilot.rs`,
+9 testes) e permite ao `tests/race_field.rs` conduzir o carro do jogador com o mesmo código
+que conduz os adversários — um jogador que não sabe virar faria desse teste três carros numa
+pista vazia, que o `tests/waypoints.rs` já cobre.
+
+**As faixas existem por causa de uma medição.** Três adversários a mirar a mesma linha
+convergem para ela e abalroam-se; o mais rápido bate na traseira do mais lento e a corrida
+passa a ser uma fila. Cada carro desloca o ponto de mira **perpendicularmente à linha**
+(−1,6 m / 0 m / +1,6 m), mantendo o mesmo pure-pursuit e a mesma curva que consegue ver.
+
+**As velocidades das curvas vêm do modelo, não do gosto.** O raio que o pure-pursuit
+realmente descreve numa esquina é `look_ahead / (2 sin(θ/2))`; a velocidade que o modelo
+aguenta nesse raio sai de `v/ω = r` com `ω = steer_rate(1 − falloff·v/v_max)`. Dá 31 km/h
+nas curvas e 100 km/h nas retas. Quando o `CarConfig` mudar, o gerador retreina as três
+pistas de uma vez, e o `--check` do `scripts/gates.sh` recusa uma cena que já não seja o que
+o gerador escreveria.
+
+**A linha são 6 / 9 / 16 nós, não 250.** Uma linha amostrada em arco fica bonita e é
+inutilizável: o pure-pursuit transforma um vértice numa curva de qualquer maneira (é o que
+o *look-ahead* faz), e um marcador que uma pessoa vê e arrasta vale mais do que duzentos.
+O plano pedia 10–20 por pista; a oval tem 6 porque tem 4 curvas.
+
+**A classificação é aproximada e di-lo.** Um intervalo exato exigiria um tempo de passagem
+por gate para cada carro; o `LapTracker` guarda um relógio, não um histórico. O progresso é
+medido em metros ao longo da linha (gates passados × espaçamento médio − distância ao
+próximo), o que ordena o campo corretamente e se imprime como "12 m à frente" em vez de
+fingir um tempo. Empatados ficam pela ordem da grelha, para o HUD não piscar.
+
+---
 
 ## Growth Pack (Fases 19–24)
 

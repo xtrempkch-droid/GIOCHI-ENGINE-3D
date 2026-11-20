@@ -141,6 +141,29 @@ pub struct Track {
     pub colliders: Vec<StaticCollider>,
     /// The sun, if the scene has one.
     pub light: Option<DirectionalLight>,
+    /// The racing line, in lap order, as the author placed it.
+    ///
+    /// Empty when the scene has no `Waypoint` nodes. The opponents need it
+    /// ([`crate::ai`]); the player's lap does not, because his line is his own.
+    pub waypoints: Vec<Waypoint>,
+}
+
+/// One point on the racing line.
+///
+/// A waypoint is a **node name**, like a checkpoint, so the format stays the editor's
+/// (R2/R3). Its target speed is `scale.x` in km/h — the same trick as the gate radius, and
+/// the reason no new field was needed.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Waypoint {
+    /// Position in the lap, `0` first.
+    pub index: usize,
+    /// Where the AI aims.
+    pub position: Vec3,
+    /// Speed at which the AI should arrive here, in metres per second.
+    ///
+    /// Converted from the node's `scale.x`, which the author types in km/h.
+    pub speed: f32,
 }
 
 impl Track {
@@ -404,6 +427,7 @@ mod tests {
             name: "test".to_owned(),
             start: StartPosition::default(),
             checkpoints: Vec::new(),
+            waypoints: Vec::new(),
             instances: vec![
                 TrackInstance {
                     shape: DrawShape::Primitive(Primitive::Cube { size: 2.0 }),
@@ -430,6 +454,7 @@ mod tests {
             name: "empty".to_owned(),
             start: StartPosition::default(),
             checkpoints: Vec::new(),
+            waypoints: Vec::new(),
             instances: Vec::new(),
             colliders: Vec::new(),
             light: None,
@@ -444,6 +469,7 @@ mod tests {
             name: "rotated".to_owned(),
             start: StartPosition::default(),
             checkpoints: Vec::new(),
+            waypoints: Vec::new(),
             instances: vec![TrackInstance {
                 shape: DrawShape::Primitive(Primitive::Cube { size: 1.0 }),
                 transform: Transform3D::new(

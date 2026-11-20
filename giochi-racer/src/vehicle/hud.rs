@@ -41,6 +41,18 @@ pub struct HudState {
     /// Only meaningful when [`HudState::finished`]; a "NEW BEST" banner halfway through a
     /// lap would be a lie until the lap is counted.
     pub new_best: bool,
+    /// The player's place on the road, `1`-based, and how many cars are in the race.
+    ///
+    /// Both are `0` in a solo time trial, which is what a circuit with no waypoints gets:
+    /// there is nobody to be ahead of, and "P1/1" would be noise.
+    pub position: usize,
+    /// How many cars are racing, the player included. `0` when the player is alone.
+    pub field_size: usize,
+    /// Metres between the player and the car in front, if the player is not leading.
+    ///
+    /// A distance, not a time: the two are not the same thing on a circuit with corners,
+    /// and inventing a clock the game does not keep would be a lie on the HUD.
+    pub gap_ahead: Option<f32>,
 }
 
 impl HudState {
@@ -56,6 +68,21 @@ impl HudState {
         } else {
             self.gear.to_string()
         }
+    }
+
+    /// The place as `P2/4`, or `None` in a solo run.
+    pub fn position_label(&self) -> Option<String> {
+        if self.field_size < 2 || self.position == 0 {
+            None
+        } else {
+            Some(format!("P{}/{}", self.position, self.field_size))
+        }
+    }
+
+    /// The gap ahead as `12 m`, or `None` when the player is leading.
+    pub fn gap_label(&self) -> Option<String> {
+        self.gap_ahead
+            .map(|metres| format!("{:.0} m ahead", metres.max(0.0)))
     }
 }
 
@@ -100,6 +127,8 @@ pub fn draw(
     let best = state.best_lap.map(format_time);
     let finished = state.finished;
     let banner = event_message(state.event);
+    let position = state.position_label();
+    let gap = state.gap_label();
     let (width, height) = (screen.0 as f32, screen.1 as f32);
 
     hud.draw(render.glow(), screen, delta_seconds, &mut |ctx| {
@@ -160,6 +189,26 @@ pub fn draw(
                     dim,
                 );
 
+                // ---- top-right: the place on the road ---------------------
+                if let Some(position) = &position {
+                    painter.text(
+                        egui::pos2(width - 18.0, 14.0),
+                        egui::Align2::RIGHT_TOP,
+                        position,
+                        proportional(28.0),
+                        white,
+                    );
+                    if let Some(gap) = &gap {
+                        painter.text(
+                            egui::pos2(width - 18.0, 50.0),
+                            egui::Align2::RIGHT_TOP,
+                            gap,
+                            mono(14.0),
+                            grey,
+                        );
+                    }
+                }
+
                 // ---- bottom-right: speed and gear -------------------------
                 painter.text(
                     egui::pos2(width - 18.0, height - 118.0),
@@ -210,9 +259,19 @@ pub fn draw(
                         mono(24.0),
                         grey,
                     );
-                    if let Some(best) = &best {
+                    // Where the race was finished, when there was a field to finish it in.
+                    if let Some(position) = &position {
                         painter.text(
                             egui::pos2(width * 0.5, height * 0.58),
+                            egui::Align2::CENTER_CENTER,
+                            position,
+                            proportional(28.0),
+                            white,
+                        );
+                    }
+                    if let Some(best) = &best {
+                        painter.text(
+                            egui::pos2(width * 0.5, height * 0.60),
                             egui::Align2::CENTER_CENTER,
                             format!("best lap {best}"),
                             mono(22.0),
@@ -293,7 +352,35 @@ mod tests {
             event: None,
             finished: false,
             new_best: false,
+            position: 0,
+            field_size: 0,
+            gap_ahead: None,
         }
+    }
+
+    #[test]
+    fn a_solo_run_shows_no_place() {
+        assert_eq!(state().position_label(), None);
+        assert_eq!(state().gap_label(), None);
+    }
+
+    #[test]
+    fn a_race_shows_the_place_and_the_gap() {
+        let mut state = state();
+        state.position = 2;
+        state.field_size = 4;
+        state.gap_ahead = Some(12.4);
+        assert_eq!(state.position_label().as_deref(), Some("P2/4"));
+        assert_eq!(state.gap_label().as_deref(), Some("12 m ahead"));
+    }
+
+    #[test]
+    fn the_leader_shows_a_place_but_no_gap() {
+        let mut state = state();
+        state.position = 1;
+        state.field_size = 4;
+        assert_eq!(state.position_label().as_deref(), Some("P1/4"));
+        assert_eq!(state.gap_label(), None);
     }
 
     #[test]

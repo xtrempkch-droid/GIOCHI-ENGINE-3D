@@ -4,10 +4,11 @@ An arcade racer for the GIOCHI-OS handheld, built with [GIOCHI-ENGINE](../README
 the [visual editor](../docs/EDITOR_USER_GUIDE.md). Low-poly, 60 fps, one hand on the
 triggers.
 
-This is **phase 42** of the master plan. The foundation (41) was one car on one circuit
-with a chase camera and a HUD; phase 42 adds **three circuits**, the checkpoint/lap rules
-and a results screen. Opponents (43), menus and persistence (44), dynamic resolution (45)
-and the ARM64 package (46) come next.
+This is **phase 43** of the master plan. The foundation (41) was one car on one circuit
+with a chase camera and a HUD; phase 42 added **three circuits**, the checkpoint/lap rules
+and a results screen; phase 43 adds **three opponents**, a starting grid, and a
+classification you can see while you race. Menus and persistence (44), dynamic resolution
+(45) and the ARM64 package (46) come next.
 
 ```text
 cargo run -p giochi-racer --release
@@ -26,10 +27,16 @@ cargo run -p giochi-racer --release
 - A camera that trails the car along its heading and pulls back with speed.
 - Lap counting: the four checkpoints in order, then the finish line. A cut course
   invalidates the lap, and the next crossing of the line starts a clean one.
-- A HUD: lap, lap time, race time, best lap, speed and gear.
-- A **results screen** when the last lap ends: total time, best lap, `NEW BEST` against the
-  session's record, and the two keys that do something there (`R` races again on the same
-  track, Start/`Esc` quits).
+- **Three opponents** on a four-car grid ahead of you. They drive the same car you do — same
+  body, same colliders, same handling — over a racing line stored in the scene, each at its
+  own pace (100 %, 93 %, 86 % of the circuit's authored speed) and in its own lane. They
+  brake for corners, reverse out of barriers, and are put back on the line if they cannot.
+- A HUD: lap, lap time, race time, best lap, speed and gear, plus **your place** (`P2/4`)
+  and the **gap** to the car in front in metres.
+- A **results screen** that also says where you finished.
+- A **results screen** when the last lap ends: finishing place, total time, best lap,
+  `NEW BEST` against the session's record, and the two keys that do something there (`R`
+  races again on the same track, Start/`Esc` quits).
 - Gamepad first, keyboard as the fallback.
 
 ## Controls
@@ -157,6 +164,8 @@ SDL_VIDEODRIVER=offscreen cargo test -p giochi-racer --test hud_pixels
 | `tests/track_specs.rs` | the shipped track matches the written specification |
 | `tests/physics_track.rs` | the real car on the real track: drives, cannot tunnel, stays upright, brakes, respawns, completes a lap |
 | `tests/hud_pixels.rs` | text actually reaches the framebuffer, and the four corners lay out where they should |
+| `tests/waypoints.rs` | the racing line is a loop, every gate is on it, and the shipped corner speeds can be driven — three laps of each circuit |
+| `tests/race_field.rs` | four cars on the grid of every circuit: everybody finishes, the quicker car finishes ahead, and the classification is one |
 
 The last one exists because a HUD that draws nothing looks exactly like a HUD that works
 from the outside.
@@ -164,6 +173,7 @@ from the outside.
 ## What is deliberately missing
 
 Physics and gameplay are the game's; the editor's `PlayPlan` shows the scene as it is.
-Waypoints and opponents (phase 43), menus and high scores (44), dynamic resolution (45),
-and the ARM64 package with its install script (46) are the phases that follow. Anything
+Menus, high-score persistence and the pause overlay (44), dynamic resolution and the panel
+rotation presentation pass (45), and the ARM64 package with its install script (46) are the
+phases that follow. Anything
 that is *not* on that list goes to [`../IDEAS.md`](../IDEAS.md), not into the code.

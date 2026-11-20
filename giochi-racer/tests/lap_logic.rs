@@ -14,10 +14,10 @@
 //!
 //! Aiming at the gates themselves is not enough as soon as a circuit turns: the straight
 //! line from one gate to the next crosses the inside of the corner, and the car drives
-//! into the barrier every time. The `ROUTES` below are the centreline, corner included —
-//! the same data phase 43 will read from `Waypoint` nodes in the scene, which is why the
-//! generator ([`scripts/generate-tracks.py`](../scripts/generate-tracks.py)) and these
-//! routes are cross-checked: a corner moved in one and not the other fails the lap test.
+//! into the barrier every time. What the car follows is the circuit's **racing line**, which
+//! is the `Waypoint` nodes in the scene — the same line phase 43's opponents follow. It is
+//! read from the file rather than written out here, so a corner moved in the scene and not
+//! in a test constant cannot leave this test passing on a circuit nobody can drive.
 //!
 //! # Determinism
 //!
@@ -25,10 +25,11 @@
 //! passes every time, on any machine.
 
 use giochi_engine_3d::math3d::Vec3;
+use giochi_racer::ai::Route;
 use giochi_racer::game::physics_world;
 use giochi_racer::track::lap::{LapEvent, LapTracker};
 use giochi_racer::track::loading::load_track;
-use giochi_racer::track::Track;
+use giochi_racer::track::{Track, Waypoint};
 use giochi_racer::vehicle::car::{Car, CarConfig};
 use giochi_racer::vehicle::input::CarInput;
 
@@ -37,51 +38,6 @@ const TRACKS: [(&str, &str, usize); 3] = [
     ("assets/tracks/track_easy.scene", "OVAL EASY", 4),
     ("assets/tracks/track_medium.scene", "FIGURE EIGHT", 6),
     ("assets/tracks/track_hard.scene", "SERPENTINE HARD", 8),
-];
-
-/// The centreline of each circuit, in metres on the ground plane, starting and finishing at
-/// the start line.
-///
-/// Corner points, not gates: the gates are scoring volumes placed on the straights and the
-/// corners they do not sit on still have to be steered through.
-const ROUTES: [&[(f32, f32)]; 3] = [
-    // The oval of phase 41.
-    &[
-        (0.0, -15.0),
-        (35.0, -15.0),
-        (35.0, 15.0),
-        (-35.0, 15.0),
-        (-35.0, -15.0),
-        (0.0, -15.0),
-    ],
-    // Figure eight: left loop, diagonal up, right loop, diagonal down, left loop.
-    &[
-        (-40.0, -20.0),
-        (-5.0, -20.0),
-        (5.0, 20.0),
-        (50.0, 20.0),
-        (50.0, -20.0),
-        (5.0, -20.0),
-        (-5.0, 20.0),
-        (-50.0, 20.0),
-        (-50.0, -20.0),
-        (-40.0, -20.0),
-    ],
-    // Serpentine: four straights, three U-turns, the return leg and the two stubs.
-    &[
-        (-45.0, -60.0),
-        (60.0, -60.0),
-        (60.0, -20.0),
-        (-60.0, -20.0),
-        (-60.0, 20.0),
-        (60.0, 20.0),
-        (60.0, 60.0),
-        (-60.0, 60.0),
-        (-75.0, 60.0),
-        (-75.0, -60.0),
-        (-60.0, -60.0),
-        (-45.0, -60.0),
-    ],
 ];
 
 const STEP: f32 = 1.0 / 60.0;
@@ -109,13 +65,16 @@ fn wrap(angle: f32) -> f32 {
     value
 }
 
-/// Follows a centreline, like a driver who knows the circuit.
+/// Follows the racing line, like a driver who knows the circuit.
+///
+/// The aim point comes from [`Route`], the same geometry the opponents use, so there is one
+/// definition of "where the line goes". The *speed* policy is deliberately not the
+/// opponents': this controller asks for a flat 4–10 m/s and slows with the heading error,
+/// which is a different question from "can the shipped corner speeds be driven". If this
+/// test passes and `tests/waypoints.rs` passes, the circuit is drivable both cautiously and
+/// at the pace the file asks for.
 struct Pilot {
-    points: Vec<Vec3>,
-    /// Index of the segment being driven.
-    cursor: usize,
-    /// How far ahead the aim point sits, in metres.
-    look_ahead: f32,
+    route: Route,
     /// Seconds spent below walking pace while aiming at this point.
     stuck: f32,
     /// Seconds of reverse left to unwind a stuck car.
@@ -123,59 +82,30 @@ struct Pilot {
 }
 
 impl Pilot {
-    fn new(route: &[(f32, f32)]) -> Self {
+    fn new(line: &[(f32, f32)]) -> Self {
+        let waypoints = line
+            .iter()
+            .enumerate()
+            .map(|(index, (x, z))| Waypoint {
+                index,
+                position: Vec3::new(*x, 0.5, *z),
+                speed: 10.0,
+            })
+            .collect();
         Self {
-            // `y = 0.5` keeps the aim point at the car's own height; the controller only
-            // uses x and z, but a point on the ground plane reads as one in a trace.
-            points: route.iter().map(|(x, z)| Vec3::new(*x, 0.5, *z)).collect(),
-            cursor: 0,
-            look_ahead: 10.0,
+            route: Route::new(waypoints),
             stuck: 0.0,
             recover: 0.0,
         }
     }
 
-    /// The point to drive at: `look_ahead` metres further along the route.
-    fn aim(&mut self, position: Vec3) -> Vec3 {
-        let car = position.to_glam();
-        // Advance past segments the car has already finished, so a car that overshoots a
-        // corner does not try to drive back to it.
-        while self.cursor + 1 < self.points.len() - 1 {
-            let from = self.points[self.cursor].to_glam();
-            let to = self.points[self.cursor + 1].to_glam();
-            let along = to - from;
-            let t = ((car - from).dot(along) / along.length_squared().max(1e-6)).clamp(0.0, 1.0);
-            if t >= 0.999 || (car - to).length() < self.look_ahead * 0.5 {
-                self.cursor += 1;
-            } else {
-                break;
-            }
-        }
-
-        let from = self.points[self.cursor].to_glam();
-        let to_index = (self.cursor + 1).min(self.points.len() - 1);
-        let to = self.points[to_index].to_glam();
-        let along = to - from;
-        let t = ((car - from).dot(along) / along.length_squared().max(1e-6)).clamp(0.0, 1.0);
-        let position_on_segment = from + along * t;
-        let remaining = (to - position_on_segment).length();
-
-        if remaining > self.look_ahead {
-            Vec3::from_glam(position_on_segment + along.normalize() * self.look_ahead)
-        } else if self.cursor + 2 < self.points.len() {
-            // Look into the next segment so the car starts turning before the corner.
-            let next = self.points[self.cursor + 2].to_glam();
-            let after = next - to;
-            let left = (self.look_ahead - remaining).min(after.length());
-            Vec3::from_glam(to + after.normalize() * left)
-        } else {
-            self.points[to_index]
-        }
-    }
-
     /// The input for this frame.
     fn drive(&mut self, state: &giochi_racer::vehicle::car::CarState, dt: f32) -> CarInput {
-        let aim = self.aim(state.position);
+        let aim = self
+            .route
+            .look_ahead(state.position)
+            .map(|aim| aim.point)
+            .unwrap_or(state.position);
         let car = state.position.to_glam();
         // Bearing in the same convention as `CarState::yaw`: forward is `(sin, 0, cos)`.
         let bearing = (aim.x - car.x).atan2(aim.z - car.z);
@@ -234,13 +164,22 @@ fn every_shipped_track_loads_with_the_gates_the_plan_asks_for() {
 
 #[test]
 fn the_physics_car_completes_a_full_lap_on_every_shipped_track() {
-    for ((file, name, checkpoints), route) in TRACKS.iter().zip(ROUTES.iter()) {
+    for (file, name, checkpoints) in TRACKS {
         let track = load(file);
         let mut world = physics_world(&track).expect("a physics world");
         let mut car = Car::spawn(&mut world, track.start, CarConfig::default()).expect("a car");
-        let mut lap = LapTracker::new(track.checkpoints.clone(), 1, track.start.position);
+        let start = car.state(&world).expect("a live car");
+        let mut lap = LapTracker::new(track.checkpoints.clone(), 1, start.position);
 
-        let mut pilot = Pilot::new(route);
+        // The line the opponents follow, from the scene: positions only, because this
+        // controller predates the waypoint speeds and deliberately has none.
+        let line: Vec<(f32, f32)> = track
+            .waypoints
+            .iter()
+            .map(|waypoint| (waypoint.position.x, waypoint.position.z))
+            .collect();
+        assert!(line.len() >= 5, "{name}: the circuit has no racing line");
+        let mut pilot = Pilot::new(&line);
         let mut state = car.state(&world).expect("a live car");
         let mut events = Vec::new();
         let frames = (LAP_BUDGET_SECONDS / STEP) as u32;

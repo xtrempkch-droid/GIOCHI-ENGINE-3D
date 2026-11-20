@@ -414,18 +414,42 @@ impl Car {
     }
 
     /// Advances one frame: model, then body, then physics.
+    ///
+    /// One car, one call. A race with a field cannot use this for every car — that would
+    /// step the world once per car, and four cars would run the physics at four times the
+    /// frame rate. A field calls [`Car::apply`] for each car and `world.step` once; see
+    /// [`crate::race::Field`].
     pub fn step(
         &mut self,
         world: &mut PhysicsWorld3D,
         input: CarInput,
         dt: f32,
     ) -> Result<CarState, PhysicsError> {
+        self.apply(world, input, dt)?;
+        world.step(dt)?;
+        self.state(world)
+    }
+
+    /// Proposes this frame's motion to the world, without stepping it.
+    ///
+    /// The model integrates and the body is given the new pose and velocity; the solver has
+    /// not run yet, so [`Car::state`] still reports where the car was. That split is what
+    /// lets several cars share one world step: everybody proposes, the world decides once,
+    /// everybody reads back.
+    pub fn apply(
+        &mut self,
+        world: &mut PhysicsWorld3D,
+        input: CarInput,
+        dt: f32,
+    ) -> Result<CarCommand, PhysicsError> {
         let velocity = world.velocity(self.body)?;
         self.model.adopt_velocity(velocity);
 
         let command = self.model.step(input, dt);
 
         world.set_rotation(self.body, Quat::from_axis_angle(Vec3::UP, command.yaw))?;
+        // Gravity is the solver's to add; keeping the vertical speed the body already had
+        // stops a car on a ramp from being pinned to the ground by its own engine.
         let gravity_speed = velocity.to_glam().y;
         world.set_velocity(
             self.body,
@@ -435,19 +459,7 @@ impl Car {
                 command.planar_velocity.y,
             )),
         )?;
-        world.step(dt)?;
-
-        let position = world.position(self.body)?;
-        let velocity = world.velocity(self.body)?;
-        let over_ground = glam::Vec2::new(velocity.to_glam().x, velocity.to_glam().z).length();
-        Ok(CarState {
-            position,
-            yaw: command.yaw,
-            velocity,
-            speed_kmh: over_ground / KMH,
-            gear: self.model.gear(),
-            lateral_speed: self.model.lateral_speed(),
-        })
+        Ok(command)
     }
 
     /// Where the car is now, without simulating.

@@ -78,6 +78,8 @@ pub fn parse_track(scene: &Scene, path: impl AsRef<Path>) -> Result<Track, Track
     let mut colliders = Vec::new();
     let mut start = None;
     let mut numbered: Vec<(u32, Vec3, f32)> = Vec::new();
+    let mut waypoints: Vec<(u32, Vec3, f32)> = Vec::new();
+    let mut unnumbered_waypoints = 0;
     let mut unnumbered = 0u32;
     let mut light = None;
 
@@ -102,6 +104,13 @@ pub fn parse_track(scene: &Scene, path: impl AsRef<Path>) -> Result<Track, Track
                     unnumbered
                 });
                 numbered.push((number, world.position, gate_radius(world)));
+            }
+            MarkerKind::Waypoint { number } => {
+                let number = number.unwrap_or_else(|| {
+                    unnumbered_waypoints += 1;
+                    unnumbered_waypoints
+                });
+                waypoints.push((number, world.position, waypoint_speed(world)));
             }
             MarkerKind::None => {}
         }
@@ -156,6 +165,19 @@ pub fn parse_track(scene: &Scene, path: impl AsRef<Path>) -> Result<Track, Track
     );
     let start_forward = Vec3::new(start.yaw.sin(), 0.0, start.yaw.cos());
 
+    // Waypoints are ordered by their number, like checkpoints, and the number is the only
+    // thing the author has to get right: the racing line is the sequence, not a shape.
+    waypoints.sort_by_key(|(number, _, _)| *number);
+    let waypoints: Vec<super::Waypoint> = waypoints
+        .into_iter()
+        .enumerate()
+        .map(|(index, (_, position, speed))| super::Waypoint {
+            index,
+            position,
+            speed,
+        })
+        .collect();
+
     Ok(Track {
         name: scene.name.clone(),
         start,
@@ -163,6 +185,7 @@ pub fn parse_track(scene: &Scene, path: impl AsRef<Path>) -> Result<Track, Track
         instances,
         colliders,
         light,
+        waypoints,
     })
 }
 
@@ -220,6 +243,23 @@ fn world_transform(scene: &Scene, node: &SceneNode) -> Transform3D {
     world
 }
 
+/// The waypoint's target speed: `scale.x` in km/h, converted to m/s.
+///
+/// `scale.x <= 1` means "not authored" and gets [`DEFAULT_WAYPOINT_SPEED_KMH`], for the
+/// same reason the gate radius has a default: a node dropped in the editor has scale 1.
+fn waypoint_speed(world: Transform3D) -> f32 {
+    let scale = world.scale.to_glam().x.abs();
+    let kmh = if scale > 1.0 {
+        scale
+    } else {
+        DEFAULT_WAYPOINT_SPEED_KMH
+    };
+    kmh / 3.6
+}
+
+/// The speed a waypoint gets when its `scale.x` was left alone, in km/h.
+pub const DEFAULT_WAYPOINT_SPEED_KMH: f32 = 80.0;
+
 /// The gate's radius: `scale.x` when the author changed it, [`DEFAULT_GATE_RADIUS`] when not.
 fn gate_radius(world: Transform3D) -> f32 {
     let scale = world.scale.to_glam().x.abs();
@@ -275,7 +315,13 @@ fn collider_for(shape: &DrawShape, world: &Transform3D) -> Option<StaticCollider
 enum MarkerKind {
     None,
     Start,
-    Checkpoint { number: Option<u32> },
+    Checkpoint {
+        number: Option<u32>,
+    },
+    /// A point on the racing line. `scale.x` is the target speed in km/h.
+    Waypoint {
+        number: Option<u32>,
+    },
 }
 
 impl MarkerKind {
@@ -285,19 +331,20 @@ impl MarkerKind {
             .filter(|character| !matches!(character, ' ' | '_' | '-'))
             .flat_map(char::to_lowercase)
             .collect();
-        if !key.starts_with("checkpoint") {
-            return match key.as_str() {
-                "start" | "startposition" | "startfinish" | "spawn" | "spawnpoint" => Self::Start,
-                _ => Self::None,
-            };
+        for (prefix, waypoint) in [("checkpoint", false), ("waypoint", true)] {
+            if let Some(rest) = key.strip_prefix(prefix) {
+                let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+                let number = digits.parse().ok();
+                return if waypoint {
+                    Self::Waypoint { number }
+                } else {
+                    Self::Checkpoint { number }
+                };
+            }
         }
-        let digits: String = key
-            .trim_start_matches("checkpoint")
-            .chars()
-            .take_while(char::is_ascii_digit)
-            .collect();
-        Self::Checkpoint {
-            number: digits.parse().ok(),
+        match key.as_str() {
+            "start" | "startposition" | "startfinish" | "spawn" | "spawnpoint" => Self::Start,
+            _ => Self::None,
         }
     }
 }

@@ -286,6 +286,17 @@ fn run() -> Result<(), Error> {
             if let Some(best) = game.lap().best_lap() {
                 if game.phase() == giochi_racer::game::RacePhase::Finished {
                     recorded = true;
+                    log::info!(
+                        "{track_name}: {}",
+                        game.standings()
+                            .iter()
+                            .map(|standing| format!(
+                                "P{} {} (lap {})",
+                                standing.position, standing.name, standing.lap
+                            ))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
                     match scores.get(&track_name) {
                         Some(old) if *old <= best => {
                             log::info!("{track_name}: best lap {best:.3}s (record {old:.3}s)")

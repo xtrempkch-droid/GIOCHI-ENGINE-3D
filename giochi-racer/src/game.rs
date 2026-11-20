@@ -23,13 +23,14 @@ use giochi_engine_3d::{RenderContext3D, Result3D};
 
 use crate::assets;
 use crate::config::GameConfig;
+use crate::race::{Field, Opponent, Standing};
 use crate::track::lap::{LapEvent, LapTracker};
 use crate::track::loading::load_track;
 use crate::track::{DrawCall, Track};
 use crate::utils::procedural_car::{self, CarMeshes};
 use crate::utils::{compose, pose};
 use crate::vehicle::camera::ChaseCamera;
-use crate::vehicle::car::{Car, CarState};
+use crate::vehicle::car::CarState;
 use crate::vehicle::hud::{self, HudState};
 use crate::vehicle::input::CarInput;
 
@@ -51,22 +52,26 @@ pub enum RacePhase {
     Finished,
 }
 
-/// A race in progress.
+/// A race in progress, with everything the simulation needs and everything GL does.
+///
+/// The simulation itself is [`Field`], which has no GL in it and can therefore be driven by
+/// a test. This type owns the track's meshes, the camera, the HUD and the message banner;
+/// the state it reports is the field's.
 pub struct RaceGame {
     config: GameConfig,
     track: Track,
-    world: PhysicsWorld3D,
-    car: Car,
+    /// The race itself: world, cars, opponents, clocks, classification. No GL in it.
+    field: Field,
     camera: ChaseCamera,
-    lap: LapTracker,
     hud: GlesHud,
     shader: ShaderHandle,
     car_meshes: CarMeshes,
     /// Every mesh the track uploaded, freed by [`RaceGame::release`].
     track_meshes: Vec<MeshHandle>,
     track_draws: Vec<DrawCall>,
-    car_state: CarState,
     wheel_spin: f32,
+    /// Each opponent's wheel rotation, in the field's order.
+    opponent_wheel_spin: Vec<f32>,
     /// The last lap event, kept for one HUD message.
     last_event: Option<LapEvent>,
     /// Seconds the current message has been on screen.
@@ -103,29 +108,34 @@ impl RaceGame {
             render.set_light(light);
         }
 
-        let mut world = physics_world(&track)?;
-
-        let car = Car::spawn(&mut world, track.start, config.car)?;
-        let car_state = car.state(&world)?;
+        let field = Field::new(&track, config.laps, config.car, physics_world(&track)?)?;
+        log::info!(
+            "grid: player on pole, {} opponents ({})",
+            field.opponents().len(),
+            field
+                .opponents()
+                .iter()
+                .map(|opponent| format!("{} {:.0}%", opponent.name(), opponent.skill() * 100.0))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let opponent_wheel_spin = vec![0.0; field.opponents().len()];
         let camera = ChaseCamera::new(config.camera);
-        let lap = LapTracker::new(track.checkpoints.clone(), config.laps, car_state.position);
         let car_meshes = CarMeshes::create(render, &config.car)?;
         let hud = GlesHud::new(render.glow())?;
 
         Ok(Self {
             config,
             track,
-            world,
-            car,
+            field,
             camera,
-            lap,
             hud,
             shader,
             car_meshes,
             track_meshes: uploaded.handles,
             track_draws: uploaded.draws,
-            car_state,
             wheel_spin: 0.0,
+            opponent_wheel_spin,
             last_event: None,
             message_age: MESSAGE_SECONDS,
             previous_best: None,
@@ -139,22 +149,27 @@ impl RaceGame {
 
     /// The lap tracker, for the HUD and for a results screen.
     pub fn lap(&self) -> &LapTracker {
-        &self.lap
+        self.field.player_lap()
     }
 
     /// Where the car is and what it is doing.
     pub fn car_state(&self) -> CarState {
-        self.car_state
+        self.field.player_state()
     }
 
     /// The physics world, for a debug overlay.
     pub fn world(&self) -> &PhysicsWorld3D {
-        &self.world
+        self.field.world()
+    }
+
+    /// The race itself, without the GL around it.
+    pub fn field(&self) -> &Field {
+        &self.field
     }
 
     /// Whether the race is over.
     pub fn phase(&self) -> RacePhase {
-        if self.lap.is_finished() {
+        if self.field.player_lap().is_finished() {
             RacePhase::Finished
         } else {
             RacePhase::Racing
@@ -162,26 +177,27 @@ impl RaceGame {
     }
 
     /// Advances one frame of simulation.
+    ///
+    /// The race is stepped by [`Field`]; what is left here is the part that needs a frame
+    /// rather than a simulation: the message banner, the wheels' rotation and the camera.
     pub fn step(&mut self, input: CarInput, dt: f32) {
         let dt = dt.clamp(0.0, 0.1);
-        match self.car.step(&mut self.world, input, dt) {
-            Ok(state) => self.car_state = state,
-            Err(error) => {
-                // A physics error is a bug, not a gameplay event; keep the last good state
-                // so the race does not vanish.
-                log::error!("physics: {error}");
-            }
-        }
+        self.field.step(input, dt);
+        let car_state = self.field.player_state();
 
         // Wheel rotation comes from distance travelled, so the wheels turn at the rate the
         // speed implies rather than at a constant.
         let radius = self.config.car.wheel_radius.max(0.05);
-        self.wheel_spin -= self.car_state.speed_kmh / 3.6 / radius * dt;
+        self.wheel_spin -= car_state.speed_kmh / 3.6 / radius * dt;
+        for (spin, opponent) in self
+            .opponent_wheel_spin
+            .iter_mut()
+            .zip(self.field.opponents())
+        {
+            *spin -= opponent.state().speed_kmh / 3.6 / radius * dt;
+        }
 
-        let event = self
-            .lap
-            .update(self.car_state.position, self.car_state.velocity, dt);
-        if event != LapEvent::None {
+        if let Some(event) = self.field.take_event() {
             match event {
                 LapEvent::LapComplete { lap, time, best } => {
                     log::info!(
@@ -192,8 +208,8 @@ impl RaceGame {
                 LapEvent::LapInvalidated => log::info!("lap invalidated"),
                 LapEvent::RaceFinished => log::info!(
                     "race finished in {:.3}s, best lap {:?}",
-                    self.lap.total_time(),
-                    self.lap.best_lap()
+                    self.field.player_lap().total_time(),
+                    self.field.player_lap().best_lap()
                 ),
                 LapEvent::Checkpoint(index) => log::debug!("checkpoint {index}"),
                 LapEvent::None => {}
@@ -203,10 +219,29 @@ impl RaceGame {
         }
         self.message_age += dt;
 
-        let forward = Vec3::new(self.car_state.yaw.sin(), 0.0, self.car_state.yaw.cos());
+        let forward = Vec3::new(car_state.yaw.sin(), 0.0, car_state.yaw.cos());
         let ratio = self.speed_ratio();
-        self.camera
-            .update(self.car_state.position, forward, ratio, dt);
+        self.camera.update(car_state.position, forward, ratio, dt);
+    }
+
+    /// The classification, leader first.
+    pub fn standings(&self) -> &[Standing] {
+        self.field.standings()
+    }
+
+    /// The opponents, for a test that wants to look at them.
+    pub fn opponents(&self) -> &[Opponent] {
+        self.field.opponents()
+    }
+
+    /// Where the player finished, `1`-based, or `0` before the first step.
+    pub fn player_position(&self) -> usize {
+        self.field.player_position()
+    }
+
+    /// Metres between the player and the car in front, or `None` when the player leads.
+    pub fn gap_ahead(&self) -> Option<f32> {
+        self.field.gap_ahead()
     }
 
     /// Draws the frame. The caller has already called `RenderContext3D::begin_frame`.
@@ -230,7 +265,21 @@ impl RaceGame {
             )?;
         }
 
-        let car_pose = pose(self.car_state.position, self.car_state.yaw);
+        // The opponents are drawn before the player, so that on the frame where two cars
+        // overlap the player's is the one on top.
+        for (spin, opponent) in self.opponent_wheel_spin.iter().zip(self.field.opponents()) {
+            let state = opponent.state();
+            let car_pose = pose(state.position, state.yaw);
+            for part in procedural_car::parts_with_paint(&self.config.car, *spin, opponent.color())
+            {
+                let transform = compose(&car_pose, &part.transform);
+                let mesh = self.car_meshes.handle(part.shape);
+                render.draw_mesh_colored(mesh, self.shader, &transform, &camera, part.color)?;
+            }
+        }
+
+        let car_state = self.field.player_state();
+        let car_pose = pose(car_state.position, car_state.yaw);
         for part in procedural_car::parts(&self.config.car, self.wheel_spin) {
             let transform = compose(&car_pose, &part.transform);
             let mesh = self.car_meshes.handle(part.shape);
@@ -244,24 +293,28 @@ impl RaceGame {
 
     /// What the HUD should show right now.
     pub fn hud_state(&self) -> HudState {
+        let car_state = self.field.player_state();
+        let lap = self.field.player_lap();
         HudState {
+            position: self.field.player_position(),
+            field_size: self.field.field_size(),
+            gap_ahead: self.field.gap_ahead(),
             track: self.track.name.clone(),
-            speed_kmh: self.car_state.speed_kmh,
-            gear: self.car_state.gear,
-            lap: self.lap.current_lap(),
-            total_laps: self.lap.total_laps(),
-            lap_time: self.lap.lap_time(),
-            total_time: self.lap.total_time(),
-            best_lap: self.lap.best_lap(),
+            speed_kmh: car_state.speed_kmh,
+            gear: car_state.gear,
+            lap: lap.current_lap(),
+            total_laps: lap.total_laps(),
+            lap_time: lap.lap_time(),
+            total_time: lap.total_time(),
+            best_lap: lap.best_lap(),
             event: if self.message_age < MESSAGE_SECONDS {
                 self.last_event
             } else {
                 None
             },
-            finished: self.lap.is_finished(),
-            new_best: self.lap.is_finished()
-                && self
-                    .lap
+            finished: lap.is_finished(),
+            new_best: lap.is_finished()
+                && lap
                     .best_lap()
                     .is_some_and(|best| self.previous_best.is_none_or(|old| best < old)),
         }
@@ -286,29 +339,19 @@ impl RaceGame {
     /// car back on the road ([`RaceGame::respawn_car`]) — a key that erased a bad lap mid
     /// race would be a cheat, not a feature.
     pub fn restart(&mut self) {
-        self.lap = LapTracker::new(
-            self.track.checkpoints.clone(),
-            self.config.laps,
-            self.track.start.position,
-        );
-        if let Err(error) = self.car.respawn(
-            &mut self.world,
-            self.track.start.position,
-            self.track.start.yaw,
-        ) {
-            log::error!("restart: {error}");
-            return;
-        }
-        if let Ok(state) = self.car.state(&self.world) {
-            self.car_state = state;
-            self.camera.snap(
-                state.position,
-                Vec3::new(self.track.start.yaw.sin(), 0.0, self.track.start.yaw.cos()),
-                0.0,
-            );
-        }
+        self.field.restart();
         self.last_event = None;
         self.message_age = 0.0;
+        self.wheel_spin = 0.0;
+        self.opponent_wheel_spin
+            .iter_mut()
+            .for_each(|spin| *spin = 0.0);
+        let state = self.field.player_state();
+        self.camera.snap(
+            state.position,
+            Vec3::new(state.yaw.sin(), 0.0, state.yaw.cos()),
+            0.0,
+        );
     }
 
     /// The chase camera, for a test that wants to look at the frame.
@@ -326,28 +369,13 @@ impl RaceGame {
     /// What `R` will do in phase 44. The lap tracker is not reset: a respawn is not a
     /// restart, and resetting it here would make the key a way to erase a bad lap.
     pub fn respawn_car(&mut self) {
-        let start = self.track.start;
-        let position = Vec3::new(
-            start.position.to_glam().x,
-            start
-                .position
-                .to_glam()
-                .y
-                .max(self.config.car.resting_height()),
-            start.position.to_glam().z,
+        self.field.respawn_player();
+        let state = self.field.player_state();
+        self.camera.snap(
+            state.position,
+            Vec3::new(state.yaw.sin(), 0.0, state.yaw.cos()),
+            0.0,
         );
-        if let Err(error) = self.car.respawn(&mut self.world, position, start.yaw) {
-            log::error!("respawn: {error}");
-            return;
-        }
-        if let Ok(state) = self.car.state(&self.world) {
-            self.car_state = state;
-            self.camera.snap(
-                state.position,
-                Vec3::new(start.yaw.sin(), 0.0, start.yaw.cos()),
-                0.0,
-            );
-        }
     }
 
     /// Frees every GL object the race owns.
@@ -365,7 +393,7 @@ impl RaceGame {
     }
 
     fn speed_ratio(&self) -> f32 {
-        self.car_state.speed_kmh / self.config.car.max_speed_kmh()
+        self.field.player_state().speed_kmh / self.config.car.max_speed_kmh()
     }
 }
 

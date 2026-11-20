@@ -72,6 +72,18 @@ run scripts/check-version.sh
 # `sdl2/bundled` and silently disables `sdl2-system` for every consumer downstream.
 run scripts/check-features.sh
 
+# The racing line in each circuit is generated, and its per-waypoint speeds are computed
+# from the car's own handling constants (`CarConfig`). A scene edited by hand -- or not
+# regenerated after a tuning change -- quietly becomes undrivable. `tests/waypoints.rs`
+# catches "the opponents cannot drive it"; this catches "the file is not what the script
+# would write", which is the earlier and more precise failure.
+if command -v python3 >/dev/null 2>&1; then
+    run python3 giochi-racer/scripts/generate-waypoints.py --check
+else
+    echo
+    echo "==> racing line check SKIPPED (python3 not installed)"
+fi
+
 # The BMP twins exist so a target without a PNG decoder can still load the assets
 # (ADR-036). Byte comparison, because a same-size twin with different pixels would
 # pass every other gate.

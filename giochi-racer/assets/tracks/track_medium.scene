@@ -2,7 +2,7 @@
  "format": "giochi-scene",
  "version": 1,
  "name": "FIGURE EIGHT",
- "next_id": 30,
+ "next_id": 39,
  "nodes": [
   {
    "id": 1,
@@ -1398,6 +1398,402 @@
     "specular": 0.35,
     "shininess": 40.0
    },
+   "camera": null
+  },
+  {
+   "id": 30,
+   "name": "Waypoint 1",
+   "parent": null,
+   "transform": {
+    "position": [
+     -40.0,
+     0.5,
+     -20.0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     100.0,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 31,
+   "name": "Waypoint 2",
+   "parent": null,
+   "transform": {
+    "position": [
+     -5.0,
+     0.5,
+     -20.0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     34.42,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 32,
+   "name": "Waypoint 3",
+   "parent": null,
+   "transform": {
+    "position": [
+     5.0,
+     0.5,
+     20.0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     34.42,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 33,
+   "name": "Waypoint 4",
+   "parent": null,
+   "transform": {
+    "position": [
+     50.0,
+     0.5,
+     20.0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     30.7,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 34,
+   "name": "Waypoint 5",
+   "parent": null,
+   "transform": {
+    "position": [
+     50.0,
+     0.5,
+     -20.0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     30.7,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 35,
+   "name": "Waypoint 6",
+   "parent": null,
+   "transform": {
+    "position": [
+     5.0,
+     0.5,
+     -20.0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     34.42,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 36,
+   "name": "Waypoint 7",
+   "parent": null,
+   "transform": {
+    "position": [
+     -5.0,
+     0.5,
+     20.0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     34.42,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 37,
+   "name": "Waypoint 8",
+   "parent": null,
+   "transform": {
+    "position": [
+     -50.0,
+     0.5,
+     20.0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     30.7,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
+   "camera": null
+  },
+  {
+   "id": 38,
+   "name": "Waypoint 9",
+   "parent": null,
+   "transform": {
+    "position": [
+     -50.0,
+     0.5,
+     -20.0
+    ],
+    "rotation": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "scale": [
+     30.7,
+     1.0,
+     1.0
+    ]
+   },
+   "mesh": null,
+   "material": {
+    "base_color": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "texture": null,
+    "specular": 0.0,
+    "shininess": 16.0,
+    "emissive": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "roughness": 1.0,
+    "metallic": 0.0
+   },
+   "light": null,
    "camera": null
   }
  ]

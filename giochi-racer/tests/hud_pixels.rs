@@ -84,6 +84,9 @@ fn text_reaches_the_framebuffer_through_the_painter() {
         event: None,
         finished: false,
         new_best: false,
+        position: 0,
+        field_size: 0,
+        gap_ahead: None,
     };
     for _ in 0..4 {
         render.begin_frame(&window);
@@ -97,6 +100,57 @@ fn text_reaches_the_framebuffer_through_the_painter() {
         game_lit > 500,
         "the game's HUD drew {game_lit} pixels of text"
     );
+    // Nothing is drawn in the top-right corner of a solo run: that is what makes the
+    // measurement below a measurement and not a coincidence.
+    let solo_corner = corner_pixels(&render);
+    assert_eq!(
+        solo_corner, 0,
+        "a solo run drew {solo_corner} pixels top-right"
+    );
+
+    // ---- phase 43's place and gap -----------------------------------------
+    // These are the first HUD fields that are *absent* in a solo run, so "it draws"
+    // cannot be inferred from the fields above: `position_label()` returns `None` when
+    // there is no field, and the corner stays empty. Measured both ways, in the same
+    // process — `Platform` is a singleton, so a second test in this file would be handed
+    // a failure to open a window and would silently skip instead of measuring.
+    let mut racing = state.clone();
+    racing.position = 2;
+    racing.field_size = 4;
+    racing.gap_ahead = Some(12.0);
+    for _ in 0..4 {
+        render.begin_frame(&window);
+        render.clear(&window, BACKGROUND);
+        giochi_racer::vehicle::hud::draw(&mut hud, &render, (WIDTH, HEIGHT), 1.0 / 60.0, &racing)
+            .expect("HUD frame");
+    }
+    let with_field = corner_pixels(&render);
+    println!("top-right corner: {with_field} lit pixels with a field, {solo_corner} without");
+    assert!(
+        with_field > 40,
+        "the place and the gap drew {with_field} pixels in the top-right corner"
+    );
+}
+
+/// Lit pixels in the top-right corner, where phase 43 draws the place and the gap.
+fn corner_pixels(render: &RenderContext3D) -> usize {
+    let pixels = render
+        .read_pixels(WIDTH, HEIGHT)
+        .expect("a readable framebuffer");
+    let mut lit = 0;
+    // The readouts are anchored to the right edge and the top: 150 x 90 covers both lines
+    // with room for a four-car field and three digits of metres.
+    for y in 0..90u32 {
+        for x in (WIDTH - 150)..WIDTH {
+            // Rows come back bottom-up.
+            let row = HEIGHT - 1 - y;
+            let i = ((row * WIDTH + x) * 4) as usize;
+            if pixels[i..i + 3].iter().any(|channel| *channel > 60) {
+                lit += 1;
+            }
+        }
+    }
+    lit
 }
 
 /// Draws the game's HUD at 1280x720 over black and prints a coarse map.
@@ -114,7 +168,7 @@ fn the_hud_layout_lands_in_the_four_corners() {
         eprintln!("hud_pixels: no GLES configuration, skipping");
         return;
     }
-    let (width, height) = (1280u32, 720u32);
+    let (width, height) = (640u32, 480u32);
     let Ok(window) = Window::new_opengl(&platform, WindowConfig::new(width, height), "hud") else {
         eprintln!("hud_pixels: no GL window, skipping");
         return;
@@ -133,6 +187,9 @@ fn the_hud_layout_lands_in_the_four_corners() {
         event: None,
         finished: false,
         new_best: false,
+        position: 0,
+        field_size: 0,
+        gap_ahead: None,
     };
     for _ in 0..4 {
         render.begin_frame(&window);
