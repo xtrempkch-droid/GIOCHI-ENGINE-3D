@@ -61,7 +61,7 @@ serde_json = "1"
 # geometry, not textures, so the buffers are loaded here instead and the crate's MSRV stays
 # where it is (ADR-073). `utils` is the accessor reader; `base64` decodes `data:` URIs.
 gltf = { version = "1.4", default-features = false, features = ["utils"] }
-base64 = "0.22"
+base64 = "0.23"
 # Phase 34. `project.toml` is the one file a project owns. `toml` 0.8 declares MSRV
 # 1.65 (measured from the crates.io manifest), well below the workspace floor, and it
 # reuses the `serde` derive already in the tree.
