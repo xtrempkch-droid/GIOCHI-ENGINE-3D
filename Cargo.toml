@@ -65,7 +65,7 @@ base64 = "0.22"
 # Phase 34. `project.toml` is the one file a project owns. `toml` 0.8 declares MSRV
 # 1.65 (measured from the crates.io manifest), well below the workspace floor, and it
 # reuses the `serde` derive already in the tree.
-toml = "0.8"
+toml = "1.2"
 mlua = { version = "0.12", features = ["lua54", "vendored"] }
 # `cbindgen` is not a build dependency: `scripts/gen-header.sh` runs the CLI, and CI
 # installs it. Declaring it here made cargo warn about an unused workspace dependency.
